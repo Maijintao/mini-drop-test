@@ -34,14 +34,32 @@ target_link_libraries(drop_proto PUBLIC
   gRPC::grpc++
 )
 
-# Agent binary (placeholder)
+# Agent binary
 add_executable(drop_agent
   agent/main.cpp
+  agent/HealthCheckChannel.cpp
+  agent/HotmethodChannel.cpp
+  agent/Config.cpp
+  agent/ContainerInfo.cpp
+  common/Perf.cpp
+  common/Process.cpp
+  common/ProcessKiller.cpp
+  common/StorageClient.cpp
+  common/BpftraceProfiler.cpp
+  common/AsyncProfiler.cpp
+  common/PprofProfiler.cpp
+  common/Daemon.cpp
+  common/Log.cpp
+  common/ScriptRunner.cpp
 )
 target_link_libraries(drop_agent PRIVATE drop_proto)
 
-# Server binary (placeholder)
+# Server binary
 add_executable(drop_server
   server/main.cpp
+  server/HealthCheckService.cpp
+  server/HotmethodService.cpp
+  server/ControlService.cpp
+  server/InitAgentInfoService.cpp
 )
 target_link_libraries(drop_server PRIVATE drop_proto)

@@ -1,0 +1,13 @@
+{
+  "uid": "agent-001",
+  "ip_addr": "127.0.0.1",
+  "server_ips": ["localhost"],
+  "server_port": 50051,
+  "storage": {
+    "endpoint": "localhost:9000",
+    "access_key": "drop",
+    "secret_key": "dropdrop",
+    "bucket": "drop",
+    "use_ssl": false
+  }
+}
