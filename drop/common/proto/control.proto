@@ -1,0 +1,46 @@
+syntax = "proto3";
+
+package drop;
+
+option go_package = "mini-drop/proto";
+
+import "common.proto";
+import "healthcheck.proto";
+
+// apiserver → Server 控制平面
+service Control {
+  rpc CreateTask(CreateTaskRequest) returns (CreateTaskResponse);
+  rpc FetchData(FetchDataRequest) returns (FetchDataResponse);
+  rpc StatAgent(StatAgentRequest) returns (StatAgentResponse);
+}
+
+message CreateTaskRequest {
+  string target_ip = 1;
+  string service = 2;
+  TaskDesc task_desc = 3;
+}
+
+message CreateTaskResponse {
+  int32 code = 1;
+  string message = 2;
+}
+
+message FetchDataRequest {
+  string task_id = 1;
+}
+
+message FetchDataResponse {
+  int32 code = 1;
+  File file = 2;
+  string cos_key = 3;
+}
+
+message StatAgentRequest {
+  string ip_addr = 1;
+}
+
+message StatAgentResponse {
+  int32 code = 1;
+  PidStats self_pstats = 2;
+  PidStats children_pstats = 3;
+}

@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package drop;
+
+option go_package = "mini-drop/proto";
+
+import "common.proto";
+import "google/protobuf/empty.proto";
+
+// Server → Agent 任务下发服务
+service Hotmethod {
+  rpc NotifyResult(TaskResult) returns (google.protobuf.Empty);
+}
+
+message TaskResult {
+  string task_id = 1;
+  string error_message = 2;
+  File file = 3;
+  string cos_key = 4;
+  repeated PidStats self_pstats = 5;
+  repeated PidStats children_pstats = 6;
+}
