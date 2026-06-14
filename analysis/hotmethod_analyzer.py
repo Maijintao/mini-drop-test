@@ -16,6 +16,7 @@ import tempfile
 
 import shutil
 
+from apiserver_client import APIServerClient
 from config import Config
 from storage import MinIOStorage
 from data_parser.collapsed_parser import (
@@ -61,11 +62,21 @@ def main():
     tid = args.task_id
     task_type = args.task_type
 
-    # 3. 创建临时工作目录
+    # 3. 初始化 apiserver 客户端
+    api = APIServerClient(cfg.apiserver_url)
+
+    # 4. 标记分析开始
+    try:
+        api.update_analysis_status(tid, 1)  # AnalysisStatusRunning
+        print(f"[analyzer] analysis_status -> 1 (running)")
+    except Exception as e:
+        print(f"[analyzer] warn: failed to update status: {e}", file=sys.stderr)
+
+    # 5. 创建临时工作目录
     work_dir = tempfile.mkdtemp(prefix=f"analysis_{tid}_")
 
     try:
-        # 4. 下载原始数据
+        # 6. 下载原始数据
         raw_key = f"{tid}/perf.data"
         raw_path = os.path.join(work_dir, "perf.data")
 
@@ -75,24 +86,37 @@ def main():
         store.download(raw_key, raw_path)
         print(f"[analyzer] downloaded {raw_key} -> {raw_path}")
 
-        # 5. 按 task_type 分发到具体 analyzer
+        # 7. 按 task_type 分发到具体 analyzer
         if task_type == 0:
-            # CPU 火焰图: perf.data → perf script → collapsed → SVG
             result = run_cpu_flamegraph(raw_path, work_dir, tid)
         else:
-            # 其他类型暂不支持
             error_exit(f"unsupported task_type={task_type}, only CPU (0) is supported")
 
-        # 6. 上传产物
+        # 8. 上传产物
         for local_path, key_name in result.items():
             if os.path.exists(local_path):
                 upload_key = f"{tid}/{key_name}"
                 store.upload(local_path, upload_key)
                 print(f"[analyzer] uploaded {upload_key}")
 
+        # 9. 写入分析建议到 apiserver
+        suggestions_path = result.get(
+            os.path.join(work_dir, "suggestions.md"), None
+        )
+        if suggestions_path and os.path.exists(suggestions_path):
+            _write_suggestions_to_apiserver(api, tid, suggestions_path)
+
+        # 10. 标记分析完成
+        api.update_analysis_status(tid, 2)  # AnalysisStatusSuccess
+        print(f"[analyzer] analysis_status -> 2 (success)")
         print(f"[analyzer] task {tid} analysis completed")
 
     except Exception as e:
+        # 标记分析失败
+        try:
+            api.update_analysis_status(tid, 3, str(e))  # AnalysisStatusFailed
+        except Exception:
+            pass
         error_exit(f"analysis failed: {e}")
     finally:
         shutil.rmtree(work_dir, ignore_errors=True)
@@ -157,6 +181,37 @@ def run_cpu_flamegraph(perf_data_path: str, work_dir: str, tid: str) -> dict:
         topn_path: "top.json",
         suggestions_path: "suggestions.md",
     }
+
+
+def _write_suggestions_to_apiserver(api: APIServerClient, tid: str,
+                                     suggestions_path: str):
+    """解析 suggestions.md 并逐条写入 apiserver"""
+    from analyzers.advisor import load_rules, match_rules
+    from analyzers.topn import analyze_topn
+    from data_parser.collapsed_parser import parse_collapsed
+
+    # 读取折叠栈，重新计算 TopN + 建议
+    collapsed_path = os.path.join(os.path.dirname(suggestions_path), "collapsed.txt")
+    if not os.path.exists(collapsed_path):
+        return
+
+    stacks = parse_collapsed(open(collapsed_path).read())
+    topn = analyze_topn(stacks, top_k=50)
+    rules = load_rules()
+    suggestions = match_rules(topn, rules)
+
+    for s in suggestions:
+        try:
+            api.create_suggestion(
+                tid=tid,
+                func=s["func"],
+                suggestion=s["advice"],
+            )
+        except Exception as e:
+            print(f"[analyzer] warn: failed to write suggestion for {s['func']}: {e}",
+                  file=sys.stderr)
+
+    print(f"[analyzer] wrote {len(suggestions)} suggestions to apiserver")
 
 
 if __name__ == "__main__":
