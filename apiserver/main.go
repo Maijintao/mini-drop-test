@@ -94,7 +94,7 @@ func main() {
 	}
 
 	// 7. 创建 APIServer
-	srv := server.New(db, grpcClient, store)
+	srv := server.New(db, grpcClient, store, cfg.Analysis)
 
 	// 8. 启动定时任务调度器
 	srv.Schedule.Start()
@@ -171,6 +171,9 @@ func setupRouter(srv *server.APIServer, logger *zap.Logger, cfg config.Config) *
 			auth.GET("/tasks/:tid/suggestions", srv.GetSuggestions)
 			auth.POST("/tasks/:tid/suggestions", srv.CreateSuggestion)
 			auth.PUT("/tasks/:tid/analysis_status", srv.UpdateAnalysisStatus)
+
+			// Analysis
+			auth.POST("/tasks/:tid/analyze", srv.TriggerAnalysis)
 
 			// Flame
 			auth.GET("/tasks/:tid/flame", srv.GetFlameData)

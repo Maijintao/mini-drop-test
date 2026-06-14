@@ -24,3 +24,8 @@ minio:
 log:
   level: info
   path: ""
+
+analysis:
+  command: "python3"
+  script_path: "/app/analysis/hotmethod_analyzer.py"
+  config_path: "/etc/analysis/config.ini"

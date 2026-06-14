@@ -37,7 +37,7 @@ services:
     environment:
       - SERVER_ADDR=drop-server:50051
 
-  # MinIO - 对象存储（可选）
+  # MinIO - 对象存储
   minio:
     image: minio/minio:latest
     container_name: minio
@@ -52,5 +52,53 @@ services:
     command: server /data --console-address ":9001"
     restart: unless-stopped
 
+  # PostgreSQL - 数据库
+  postgres:
+    image: postgres:14
+    container_name: postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: dev
+      POSTGRES_DB: drop
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  # APIServer - Go 后端编排层
+  apiserver:
+    build:
+      context: ./apiserver
+      dockerfile: Dockerfile
+    container_name: apiserver
+    depends_on:
+      - postgres
+      - minio
+      - drop-server
+    ports:
+      - "8191:8191"
+    volumes:
+      - ./apiserver/config:/etc/apiserver
+    command: ["./apiserver", "-c", "/etc/apiserver/apiserver.yaml"]
+    restart: unless-stopped
+
+  # Analysis - Python 分析引擎（一次性 Job，apiserver 用 docker exec 触发）
+  analysis-runner:
+    build:
+      context: ./analysis
+      dockerfile: Dockerfile
+    container_name: analysis-runner
+    depends_on:
+      - minio
+      - postgres
+    volumes:
+      - ./analysis:/app/analysis
+    entrypoint: ["python3", "hotmethod_analyzer.py"]
+    # 不设 command，由 apiserver 通过 docker exec 传参触发
+    profiles:
+      - analysis
+
 volumes:
   minio-data:
+  pg-data:

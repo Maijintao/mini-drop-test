@@ -13,6 +13,7 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
+	"mini-drop/apiserver/config"
 	"mini-drop/apiserver/middleware"
 	"mini-drop/apiserver/model"
 	pb "mini-drop/apiserver/proto"
@@ -123,6 +124,7 @@ func SetupTestRouter(srv *server.APIServer) *gin.Engine {
 			auth.GET("/tasks/:tid/suggestions", srv.GetSuggestions)
 			auth.POST("/tasks/:tid/suggestions", srv.CreateSuggestion)
 			auth.PUT("/tasks/:tid/analysis_status", srv.UpdateAnalysisStatus)
+			auth.POST("/tasks/:tid/analyze", srv.TriggerAnalysis)
 			auth.GET("/tasks/:tid/flame", srv.GetFlameData)
 			auth.POST("/flame/diff", srv.FlameDiff)
 			auth.POST("/group", srv.CreateGroup)
@@ -158,7 +160,7 @@ func SetupTestRouterNoAuth(srv *server.APIServer) *gin.Engine {
 func CreateTestAPIServer(db *gorm.DB) (*server.APIServer, *MockGRPCClient, *MockStorage) {
 	mockGRPC := &MockGRPCClient{}
 	mockStore := NewMockStorage()
-	srv := server.New(db, mockGRPC, mockStore)
+	srv := server.New(db, mockGRPC, mockStore, config.AnalysisConfig{})
 	return srv, mockGRPC, mockStore
 }
 

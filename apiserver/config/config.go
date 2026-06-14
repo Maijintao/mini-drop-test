@@ -12,6 +12,7 @@ type Config struct {
 	GRPC     GRPCConfig     `mapstructure:"grpc"`
 	MinIO    MinIOConfig    `mapstructure:"minio"`
 	Log      LogConfig      `mapstructure:"log"`
+	Analysis AnalysisConfig `mapstructure:"analysis"`
 }
 
 type ServerConfig struct {
@@ -51,6 +52,12 @@ type MinIOConfig struct {
 type LogConfig struct {
 	Level string `mapstructure:"level"` // debug / info / warn / error
 	Path  string `mapstructure:"path"`
+}
+
+type AnalysisConfig struct {
+	Command    string `mapstructure:"command"`     // analyzer 可执行路径, e.g. "python3"
+	ScriptPath string `mapstructure:"script_path"` // hotmethod_analyzer.py 路径
+	ConfigPath string `mapstructure:"config_path"` // analyzer 配置文件路径
 }
 
 var Cfg Config

@@ -5,6 +5,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"mini-drop/apiserver/config"
 	"mini-drop/apiserver/pkg/storage"
 	pb "mini-drop/apiserver/proto"
 )
@@ -19,18 +20,20 @@ type GRPCClient interface {
 
 // APIServer 持有所有依赖
 type APIServer struct {
-	Db       *gorm.DB
-	GRPC     GRPCClient
-	Storage  storage.Storage
-	Schedule *ScheduleManager
+	Db          *gorm.DB
+	GRPC        GRPCClient
+	Storage     storage.Storage
+	Schedule    *ScheduleManager
+	AnalysisCmd config.AnalysisConfig
 }
 
 // New 创建 APIServer 实例
-func New(db *gorm.DB, grpcClient GRPCClient, store storage.Storage) *APIServer {
+func New(db *gorm.DB, grpcClient GRPCClient, store storage.Storage, analysisCfg config.AnalysisConfig) *APIServer {
 	return &APIServer{
-		Db:       db,
-		GRPC:     grpcClient,
-		Storage:  store,
-		Schedule: NewScheduleManager(),
+		Db:          db,
+		GRPC:        grpcClient,
+		Storage:     store,
+		Schedule:    NewScheduleManager(),
+		AnalysisCmd: analysisCfg,
 	}
 }
