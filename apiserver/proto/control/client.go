@@ -53,3 +53,6 @@ func (c *ControlClient) Close() error {
 	}
 	return nil
 }
+
+// 编译时接口校验（在 server 包中定义 GRPCClient 接口）
+// ControlClient 实现了 CreateTask/FetchData/StatAgent/Close，满足接口

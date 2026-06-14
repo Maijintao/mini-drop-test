@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"strings"
 
@@ -109,14 +110,13 @@ func (s *APIServer) loadTopN(c *gin.Context, tid string) []FuncSample {
 	}
 	defer reader.Close()
 
-	var samples []FuncSample
-	// 简单 JSON 解析
-	buf := make([]byte, 64*1024)
-	n, _ := reader.Read(buf)
-	if n > 0 {
-		// 尝试解析 JSON
-		json.Unmarshal(buf[:n], &samples)
+	data, err := io.ReadAll(reader)
+	if err != nil || len(data) == 0 {
+		return nil
 	}
+
+	var samples []FuncSample
+	json.Unmarshal(data, &samples)
 	return samples
 }
 

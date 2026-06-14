@@ -82,22 +82,26 @@ func (s *APIServer) DeleteGroup(c *gin.Context) {
 	uid := c.GetString(middleware.CtxUID)
 	gid := c.Param("gid")
 
-	// 只有 owner 能删
-	result := s.Db.Where("gid = ? AND owner_id = ?", gid, uid).Delete(&model.Group{})
-	if result.Error != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    CodeInternal,
-			"message": result.Error.Error(),
-		})
-		return
-	}
-	if result.RowsAffected == 0 {
+	// 先查组是否存在
+	var group model.Group
+	if err := s.Db.Where("gid = ?", gid).First(&group).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"code":    CodeNotFound,
-			"message": "group not found or not owner",
+			"message": "group not found",
 		})
 		return
 	}
+
+	// 校验是否 owner
+	if group.OwnerID != uid {
+		c.JSON(http.StatusForbidden, gin.H{
+			"code":    CodeForbidden,
+			"message": "not group owner",
+		})
+		return
+	}
+
+	s.Db.Delete(&group)
 
 	// 级联删成员
 	s.Db.Where("gid = ?", gid).Delete(&model.GroupMember{})

@@ -176,8 +176,7 @@ func (s *APIServer) GetTaskDetail(c *gin.Context) {
 	uid := c.GetString(middleware.CtxUID)
 
 	var task model.HotmethodTask
-	if err := s.Db.Where("tid = ? AND (uid = ? OR uid IN (SELECT uid FROM group_members WHERE gid IN (SELECT gid FROM group_members WHERE uid = ?)))",
-		tid, uid, uid).First(&task).Error; err != nil {
+	if err := s.Db.Where("tid = ?", tid).First(&task).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			c.JSON(http.StatusNotFound, gin.H{
 				"code":    CodeNotFound,
@@ -190,6 +189,27 @@ func (s *APIServer) GetTaskDetail(c *gin.Context) {
 			"message": err.Error(),
 		})
 		return
+	}
+
+	// 权限校验：自己的任务 或 组内成员的任务
+	if task.UID != uid {
+		var gids []uint
+		s.Db.Model(&model.GroupMember{}).Where("uid = ?", uid).Pluck("gid", &gids)
+		allowed := false
+		if len(gids) > 0 {
+			var count int64
+			s.Db.Model(&model.GroupMember{}).Where("uid = ? AND gid IN ?", task.UID, gids).Count(&count)
+			if count > 0 {
+				allowed = true
+			}
+		}
+		if !allowed {
+			c.JSON(http.StatusNotFound, gin.H{
+				"code":    CodeNotFound,
+				"message": "task not found",
+			})
+			return
+		}
 	}
 
 	// 查分析建议
@@ -271,29 +291,97 @@ func (s *APIServer) RetryTask(c *gin.Context) {
 		params = mustUnmarshal(task.RequestParams)
 	}
 
-	// 构造新请求
-	newReq := CreateTaskReq{
+	// 提取参数
+	var pid int32
+	var duration uint64
+	var hz uint32
+	var callgraph string
+	var subprocess bool
+	var event string
+	if v, ok := params["pid"].(float64); ok {
+		pid = int32(v)
+	}
+	if v, ok := params["duration"].(float64); ok {
+		duration = uint64(v)
+	}
+	if v, ok := params["hz"].(float64); ok {
+		hz = uint32(v)
+	}
+	if v, ok := params["callgraph"].(string); ok {
+		callgraph = v
+	}
+	if v, ok := params["subprocess"].(bool); ok {
+		subprocess = v
+	}
+	if v, ok := params["event"].(string); ok {
+		event = v
+	}
+	if hz == 0 {
+		hz = 99
+	}
+	if callgraph == "" {
+		callgraph = "dwarf"
+	}
+
+	// 直接创建新任务（不调 CreateTask，避免 body 解析问题）
+	newTID := uuid.New().String()[:12]
+	newTask := &model.HotmethodTask{
+		TID:          newTID,
 		Name:         task.Name,
 		Type:         task.Type,
 		ProfilerType: task.ProfilerType,
 		TargetIP:     task.TargetIP,
+		RequestParams: mustMarshal(gin.H{
+			"pid": pid, "duration": duration, "hz": hz, "callgraph": callgraph,
+			"subprocess": subprocess, "event": event,
+		}),
+		Status:     TaskStatusNew,
+		UID:        uid,
+		UserName:   c.GetString(middleware.CtxUserName),
+		CreateTime: time.Now(),
 	}
-	if pid, ok := params["pid"].(float64); ok {
-		newReq.PID = int32(pid)
-	}
-	if dur, ok := params["duration"].(float64); ok {
-		newReq.Duration = uint64(dur)
-	}
-	if hz, ok := params["hz"].(float64); ok {
-		newReq.Hz = uint32(hz)
-	}
-	if cg, ok := params["callgraph"].(string); ok {
-		newReq.Callgraph = cg
+	if err := s.Db.Create(newTask).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    CodeInternal,
+			"message": err.Error(),
+		})
+		return
 	}
 
-	// 复用 CreateTask 逻辑
-	c.Set("create_task_req", newReq)
-	s.CreateTask(c)
+	// gRPC 下发
+	pbReq := &pb.CreateTaskRequest{
+		TargetIp: task.TargetIP,
+		Service:  "hotmethod",
+		TaskDesc: &pb.TaskDesc{
+			TaskId:       newTID,
+			TaskType:     uint32(task.Type),
+			ProfilerType: uint32(task.ProfilerType),
+			TimeoutSec:   uint32(duration + 30),
+			SampleArgv: &pb.RecordArgv{
+				Hz: hz, Duration: duration, Pid: pid, Callgraph: callgraph,
+				Subprocess: subprocess, Event: event,
+			},
+		},
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := s.GRPC.CreateTask(ctx, pbReq); err != nil {
+		s.Db.Model(newTask).Updates(map[string]interface{}{
+			"status":      TaskStatusFailed,
+			"status_info": "dispatch failed: " + err.Error(),
+		})
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    CodeGRPCError,
+			"message": "dispatch failed: " + err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code": CodeSuccess,
+		"data": gin.H{"tid": newTID},
+	})
 }
 
 // GetCOSFiles 列任务产出文件并签名 — GET /api/v1/cosfiles?tid=xxx

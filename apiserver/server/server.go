@@ -1,22 +1,32 @@
 package server
 
 import (
+	"context"
+
 	"gorm.io/gorm"
 
 	"mini-drop/apiserver/pkg/storage"
-	"mini-drop/apiserver/proto/control"
+	pb "mini-drop/apiserver/proto"
 )
+
+// GRPCClient gRPC 客户端接口（方便 mock 测试）
+type GRPCClient interface {
+	CreateTask(ctx context.Context, req *pb.CreateTaskRequest) (*pb.CreateTaskResponse, error)
+	FetchData(ctx context.Context, req *pb.FetchDataRequest) (*pb.FetchDataResponse, error)
+	StatAgent(ctx context.Context, req *pb.StatAgentRequest) (*pb.StatAgentResponse, error)
+	Close() error
+}
 
 // APIServer 持有所有依赖
 type APIServer struct {
 	Db       *gorm.DB
-	GRPC     *control.ControlClient
+	GRPC     GRPCClient
 	Storage  storage.Storage
 	Schedule *ScheduleManager
 }
 
 // New 创建 APIServer 实例
-func New(db *gorm.DB, grpcClient *control.ControlClient, store storage.Storage) *APIServer {
+func New(db *gorm.DB, grpcClient GRPCClient, store storage.Storage) *APIServer {
 	return &APIServer{
 		Db:       db,
 		GRPC:     grpcClient,

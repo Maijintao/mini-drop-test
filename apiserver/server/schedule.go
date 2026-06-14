@@ -92,7 +92,13 @@ func (s *APIServer) CreateScheduleTask(c *gin.Context) {
 	}
 
 	// 写库记录定时任务
-	s.Db.Create(task)
+	if err := s.Db.Create(task).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    CodeInternal,
+			"message": "create schedule failed: " + err.Error(),
+		})
+		return
+	}
 
 	// 注册到 cron 调度器（MVP 阶段只记录，实际触发需集成 CreateTask 逻辑）
 	sm := s.Schedule
