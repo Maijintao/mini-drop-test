@@ -1,5 +1,4 @@
 #include "HealthCheckChannel.h"
-#include <thread>
 #include <chrono>
 #include <iostream>
 #include <unistd.h>
@@ -7,14 +6,19 @@
 
 namespace drop {
 
-HealthCheckChannel::HealthCheckChannel(const std::string& server_addr)
-    : server_addr_(server_addr) {
+HealthCheckChannel::HealthCheckChannel(const std::string& server_addr,
+                                       const std::string& uid,
+                                       const std::string& ip_addr,
+                                       std::atomic<bool>& running)
+    : server_addr_(server_addr), uid_(uid), ip_addr_(ip_addr), running_(running) {
   auto channel = grpc::CreateChannel(server_addr, grpc::InsecureChannelCredentials());
   stub_ = HealthCheck::NewStub(channel);
 }
 
 HealthCheckChannel::~HealthCheckChannel() {
-  Stop();
+  if (heartbeat_thread_.joinable()) {
+    heartbeat_thread_.join();
+  }
 }
 
 void HealthCheckChannel::SetTaskCallback(TaskCallback callback) {
@@ -22,13 +26,8 @@ void HealthCheckChannel::SetTaskCallback(TaskCallback callback) {
 }
 
 void HealthCheckChannel::Start() {
-  running_ = true;
+  heartbeat_thread_ = std::thread(&HealthCheckChannel::HeartbeatLoop, this);
   std::cout << "HealthCheck channel started to " << server_addr_ << std::endl;
-  HeartbeatLoop();
-}
-
-void HealthCheckChannel::Stop() {
-  running_ = false;
 }
 
 void HealthCheckChannel::HeartbeatLoop() {
@@ -38,12 +37,13 @@ void HealthCheckChannel::HeartbeatLoop() {
   while (running_) {
     HealthCheckRequest request;
     request.set_host_name(hostname);
-    request.set_ip_addr("127.0.0.1");
-    request.set_uid("agent-001");
+    request.set_ip_addr(ip_addr_);
+    request.set_uid(uid_);
     request.set_agent_version("0.1.0");
 
     HealthCheckResponse response;
     grpc::ClientContext context;
+    context.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(5));
 
     auto status = stub_->Do(&context, request, &response);
     if (status.ok()) {
@@ -55,7 +55,10 @@ void HealthCheckChannel::HeartbeatLoop() {
       std::cout << "Heartbeat failed: " << status.error_message() << std::endl;
     }
 
-    std::this_thread::sleep_for(std::chrono::seconds(1));
+    // 分段 sleep，快速响应退出
+    for (int i = 0; i < 10 && running_; ++i) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
   }
 }
 

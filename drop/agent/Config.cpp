@@ -15,7 +15,12 @@ Config Config::LoadFromFile(const std::string& path) {
   }
 
   nlohmann::json j;
-  file >> j;
+  try {
+    file >> j;
+  } catch (const nlohmann::json::parse_error& e) {
+    std::cerr << "Failed to parse config file: " << e.what() << std::endl;
+    return config;
+  }
 
   config.uid = j.value("uid", "agent-001");
   config.ip_addr = j.value("ip_addr", "127.0.0.1");
