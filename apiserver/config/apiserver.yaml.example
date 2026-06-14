@@ -1,0 +1,26 @@
+server:
+  port: 8191
+  mode: debug
+
+database:
+  host: localhost
+  port: 5432
+  user: postgres
+  password: dev
+  dbname: drop
+  sslmode: disable
+
+grpc:
+  target: "localhost:50051"
+
+minio:
+  endpoint: "localhost:9000"
+  access_key: drop
+  secret_key: dropdrop
+  bucket: drop-data
+  use_ssl: false
+  region: ""
+
+log:
+  level: info
+  path: ""
