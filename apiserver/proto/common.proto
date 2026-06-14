@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+package drop;
+
+option go_package = "mini-drop/apiserver/proto";
+
+// 进程资源统计
+message PidStats {
+  int32 pid = 1;
+  float cpu_percent = 2;
+  int64 rss_kb = 3;
+  int64 read_kb_per_sec = 4;
+  int64 write_kb_per_sec = 5;
+}
+
+// 文件信息
+message File {
+  string name = 1;
+  bytes content = 2;
+  int64 size = 3;
+}
+
+// 对象存储配置
+message CosConfig {
+  string endpoint = 1;
+  string bucket = 2;
+  string access_key = 3;
+  string secret_key = 4;
+  string region = 5;
+  bool use_ssl = 6;
+}

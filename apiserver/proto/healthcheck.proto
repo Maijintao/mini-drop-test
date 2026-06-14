@@ -1,0 +1,54 @@
+syntax = "proto3";
+
+package drop;
+
+option go_package = "mini-drop/apiserver/proto";
+
+import "common.proto";
+
+// Agent → Server 心跳服务
+service HealthCheck {
+  rpc Do(HealthCheckRequest) returns (HealthCheckResponse);
+}
+
+message HealthCheckRequest {
+  string host_name = 1;
+  string ip_addr = 2;
+  string uid = 3;
+  string agent_version = 4;
+  PidStats self_pstats = 5;
+  PidStats children_pstats = 6;
+}
+
+message HealthCheckResponse {
+  enum ServingStatus {
+    UNKNOWN = 0;
+    SERVING = 1;
+    NOT_SERVING = 2;
+  }
+  ServingStatus status = 1;
+  bool pending = 2;
+  TaskDesc task_desc = 3;
+}
+
+// 任务描述
+message TaskDesc {
+  string task_id = 1;
+  uint32 task_type = 2;
+  uint32 profiler_type = 3;
+  RecordArgv sample_argv = 4;
+  string container_name = 5;
+  uint32 container_type = 6;
+  uint32 timeout_sec = 7;
+  CosConfig cos_config = 8;
+  string script_content = 9;
+}
+
+message RecordArgv {
+  uint32 hz = 1;
+  uint64 duration = 2;
+  int32 pid = 3;
+  string callgraph = 4;
+  bool subprocess = 5;
+  string event = 6;
+}
