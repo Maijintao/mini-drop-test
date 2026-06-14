@@ -161,6 +161,15 @@ func setupRouter(srv *server.APIServer, logger *zap.Logger, cfg config.Config) *
 			auth.POST("/tasks/:tid/retry", srv.RetryTask)
 			auth.GET("/cosfiles", srv.GetCOSFiles)
 
+			// Suggestion
+			auth.GET("/tasks/:tid/suggestions", srv.GetSuggestions)
+			auth.POST("/tasks/:tid/suggestions", srv.CreateSuggestion)
+			auth.PUT("/tasks/:tid/analysis_status", srv.UpdateAnalysisStatus)
+
+			// Flame
+			auth.GET("/tasks/:tid/flame", srv.GetFlameData)
+			auth.POST("/flame/diff", srv.FlameDiff)
+
 			// Group
 			auth.POST("/group", srv.CreateGroup)
 			auth.GET("/groups", srv.GetGroups)

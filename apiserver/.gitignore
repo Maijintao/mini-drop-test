@@ -1,0 +1,26 @@
+# 二进制
+apiserver
+
+# 配置（只保留 example）
+config/apiserver.yaml
+config/*.yaml
+!config/apiserver.yaml.example
+
+# Go
+vendor/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 日志
+*.log
+
+# 临时文件
+tmp/
