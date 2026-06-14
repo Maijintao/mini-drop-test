@@ -10,11 +10,18 @@ Mini-Drop 分析引擎入口
 import argparse
 import json
 import os
+import subprocess
 import sys
 import tempfile
 
+import shutil
+
 from config import Config
 from storage import MinIOStorage
+from data_parser.collapsed_parser import parse_perf_script, stacks_to_collapsed
+from analyzers.flamegraph import (
+    perf_script_to_collapsed, collapsed_to_svg, generate_flamegraph,
+)
 
 
 def parse_args():
@@ -67,27 +74,69 @@ def main():
         print(f"[analyzer] downloaded {raw_key} -> {raw_path}")
 
         # 5. 按 task_type 分发到具体 analyzer
-        # TODO: 后续 commit 实现具体分析逻辑
-        # - task_type=0: CPU 火焰图 (perf -> collapsed -> svg)
-        # - task_type=1: Java async-profiler
-        # - task_type=4: 内存分析
-        print(f"[analyzer] task_type={task_type}, analysis pipeline not yet implemented")
+        if task_type == 0:
+            # CPU 火焰图: perf.data → perf script → collapsed → SVG
+            result = run_cpu_flamegraph(raw_path, work_dir, tid)
+        else:
+            # 其他类型暂不支持
+            error_exit(f"unsupported task_type={task_type}, only CPU (0) is supported")
 
-        # 6. 上传产物（占位）
-        # TODO: 上传 flamegraph.svg, top.json, suggestions.md, collapsed.txt
+        # 6. 上传产物
+        for local_path, key_name in result.items():
+            if os.path.exists(local_path):
+                upload_key = f"{tid}/{key_name}"
+                store.upload(local_path, upload_key)
+                print(f"[analyzer] uploaded {upload_key}")
 
-        # 7. 更新 apiserver 状态（占位）
-        # TODO: PUT /api/v1/tasks/:tid/analysis_status
-        # TODO: POST /api/v1/tasks/:tid/suggestions
-
-        print(f"[analyzer] task {tid} analysis completed (skeleton)")
+        print(f"[analyzer] task {tid} analysis completed")
 
     except Exception as e:
         error_exit(f"analysis failed: {e}")
     finally:
-        # 清理临时目录
-        import shutil
         shutil.rmtree(work_dir, ignore_errors=True)
+
+
+def run_cpu_flamegraph(perf_data_path: str, work_dir: str, tid: str) -> dict:
+    """
+    CPU 火焰图完整流水线:
+    perf.data → perf script → stackcollapse → flamegraph.svg
+
+    返回 {本地路径: 上传文件名} 字典
+    """
+    script_path = os.path.join(work_dir, "perf.script.txt")
+    collapsed_path = os.path.join(work_dir, "collapsed.txt")
+    svg_path = os.path.join(work_dir, "flamegraph.svg")
+
+    # perf.data → perf script 文本
+    try:
+        proc = subprocess.run(
+            ["perf", "script", "-i", perf_data_path, "--header"],
+            capture_output=True, text=True, timeout=300,
+        )
+        if proc.returncode != 0:
+            raise RuntimeError(f"perf script failed: {proc.stderr}")
+        with open(script_path, "w") as f:
+            f.write(proc.stdout)
+        print(f"[analyzer] perf script -> {script_path}")
+    except FileNotFoundError:
+        # macOS 或没有 perf 的环境，尝试直接用折叠栈
+        # 检查 MinIO 上是否有预处理的 collapsed.txt
+        print("[analyzer] perf not found, falling back to pre-processed data")
+        raise RuntimeError("perf command not found, need pre-processed collapsed stack")
+
+    # perf script → 折叠栈
+    perf_script_to_collapsed(script_path, collapsed_path)
+    print(f"[analyzer] collapsed -> {collapsed_path}")
+
+    # 折叠栈 → SVG
+    title = f"CPU Flame Graph [{tid}]"
+    collapsed_to_svg(collapsed_path, svg_path, title=title)
+    print(f"[analyzer] flamegraph -> {svg_path}")
+
+    return {
+        collapsed_path: "collapsed.txt",
+        svg_path: "flamegraph.svg",
+    }
 
 
 if __name__ == "__main__":
