@@ -1,5 +1,6 @@
 #include "PprofProfiler.h"
 #include "ProcessKiller.h"
+#include "Log.h"
 #include <iostream>
 #include <string>
 #include <vector>
@@ -33,9 +34,7 @@ int PprofProfiler::FetchFromHTTP(const std::string& host, int port,
     "curl", "-s", "-o", output_path, url
   };
 
-  std::cout << "Executing: ";
-  for (const auto& arg : args) std::cout << arg << " ";
-  std::cout << std::endl;
+  LOG_INFO("Executing: curl -s -o " + output_path + " " + url);
 
   // 转换为 char* 数组
   std::vector<char*> c_args;
@@ -46,15 +45,22 @@ int PprofProfiler::FetchFromHTTP(const std::string& host, int port,
 
   pid_t child = fork();
   if (child == -1) {
-    std::cerr << "fork failed: " << strerror(errno) << std::endl;
+    LOG_ERROR("fork failed: " + std::string(strerror(errno)));
     return -1;
   }
 
   if (child == 0) {
     // 子进程：创建独立进程组
     setpgid(0, 0);
+
+    // 关闭多余 fd
+    for (int fd = 3; fd < 1024; fd++) {
+      close(fd);
+    }
+
     execvp(c_args[0], c_args.data());
-    std::cerr << "execvp failed: " << strerror(errno) << std::endl;
+    const char* err = "execvp failed\n";
+    write(STDERR_FILENO, err, strlen(err));
     _exit(127);
   }
 
@@ -68,7 +74,7 @@ int PprofProfiler::FetchFromHTTP(const std::string& host, int port,
   killer.Stop();
 
   if (killer.IsTimeout()) {
-    std::cerr << "PprofProfiler timed out after " << (duration_sec + 60) << "s" << std::endl;
+    LOG_ERROR("PprofProfiler timed out after " + std::to_string(duration_sec + 60) + "s");
     return -2;
   }
 

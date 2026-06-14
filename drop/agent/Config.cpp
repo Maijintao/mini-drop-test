@@ -1,4 +1,5 @@
 #include "Config.h"
+#include "Log.h"
 #include <fstream>
 #include <iostream>
 #include <nlohmann/json.hpp>
@@ -10,7 +11,7 @@ Config Config::LoadFromFile(const std::string& path) {
 
   std::ifstream file(path);
   if (!file.is_open()) {
-    std::cerr << "Failed to open config file: " << path << std::endl;
+    LOG_ERROR("Failed to open config file: " + path);
     return config;
   }
 
@@ -18,7 +19,7 @@ Config Config::LoadFromFile(const std::string& path) {
   try {
     file >> j;
   } catch (const nlohmann::json::parse_error& e) {
-    std::cerr << "Failed to parse config file: " << e.what() << std::endl;
+    LOG_ERROR("Failed to parse config file: " + std::string(e.what()));
     return config;
   }
 

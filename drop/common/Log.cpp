@@ -43,8 +43,9 @@ void Log(LogLevel level, const char* file, int line, const std::string& msg) {
   }
 
   // 加锁保护，防止多线程日志交错
+  // 使用 stderr 而非 stdout，因为守护化后 stdout 被重定向到 /dev/null
   std::lock_guard<std::mutex> lock(g_log_mutex);
-  std::cout << "[" << GetCurrentTime() << "]"
+  std::cerr << "[" << GetCurrentTime() << "]"
             << "[" << level_str << "]"
             << " " << filename << ":" << line
             << " " << msg << std::endl;

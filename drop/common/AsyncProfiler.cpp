@@ -1,5 +1,6 @@
 #include "AsyncProfiler.h"
 #include "ProcessKiller.h"
+#include "Log.h"
 #include <iostream>
 #include <vector>
 #include <cstring>
@@ -21,9 +22,9 @@ int AsyncProfiler::Record(int pid, int duration_sec, int freq,
     std::to_string(pid)
   };
 
-  std::cout << "Executing: ";
-  for (const auto& arg : args) std::cout << arg << " ";
-  std::cout << std::endl;
+  LOG_INFO("Executing: " + PROFILER_PATH + " -d " + std::to_string(duration_sec) +
+           " -f " + output_path + " -e cpu -i " + std::to_string(1000000 / freq) + "us" +
+           " " + std::to_string(pid));
 
   // 转换为 char* 数组
   std::vector<char*> c_args;
@@ -34,15 +35,22 @@ int AsyncProfiler::Record(int pid, int duration_sec, int freq,
 
   pid_t child = fork();
   if (child == -1) {
-    std::cerr << "fork failed: " << strerror(errno) << std::endl;
+    LOG_ERROR("fork failed: " + std::string(strerror(errno)));
     return -1;
   }
 
   if (child == 0) {
     // 子进程：创建独立进程组
     setpgid(0, 0);
+
+    // 关闭多余 fd
+    for (int fd = 3; fd < 1024; fd++) {
+      close(fd);
+    }
+
     execvp(c_args[0], c_args.data());
-    std::cerr << "execvp failed: " << strerror(errno) << std::endl;
+    const char* err = "execvp failed\n";
+    write(STDERR_FILENO, err, strlen(err));
     _exit(127);
   }
 
@@ -56,7 +64,7 @@ int AsyncProfiler::Record(int pid, int duration_sec, int freq,
   killer.Stop();
 
   if (killer.IsTimeout()) {
-    std::cerr << "AsyncProfiler timed out after " << (duration_sec + 30) << "s" << std::endl;
+    LOG_ERROR("AsyncProfiler timed out after " + std::to_string(duration_sec + 30) + "s");
     return -2;
   }
 

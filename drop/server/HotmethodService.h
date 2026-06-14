@@ -78,6 +78,10 @@ public:
                             const TaskResult* request,
                             google::protobuf::Empty* response) override;
 
+  grpc::Status UpdateTaskStatus(grpc::ServerContext* context,
+                                const TaskStatusUpdate* request,
+                                google::protobuf::Empty* response) override;
+
 private:
   std::map<std::string, std::deque<TaskDesc>> tasks_;
   std::map<std::string, TaskResult> results_;      // 缓存任务结果

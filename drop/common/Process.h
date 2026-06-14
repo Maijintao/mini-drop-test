@@ -2,6 +2,7 @@
 
 #include <string>
 #include <vector>
+#include <chrono>
 #include "common.pb.h"
 
 namespace drop {
@@ -18,6 +19,13 @@ struct ProcStat {
 struct ProcIO {
   long long read_bytes;
   long long write_bytes;
+};
+
+// 用于速率计算的采样快照
+struct ProcSnapshot {
+  ProcStat stat;
+  ProcIO io;
+  std::chrono::steady_clock::time_point time;
 };
 
 class Process {

@@ -163,6 +163,28 @@ grpc::Status HotmethodService::NotifyResult(grpc::ServerContext* context,
   return grpc::Status::OK;
 }
 
+grpc::Status HotmethodService::UpdateTaskStatus(grpc::ServerContext* context,
+                                                 const TaskStatusUpdate* request,
+                                                 google::protobuf::Empty* response) {
+  std::lock_guard<std::mutex> lock(mutex_);
+
+  // 将 proto 状态映射到内部状态
+  TaskStatus internal_status;
+  switch (request->status()) {
+    case TASK_PENDING:    internal_status = TaskStatus::PENDING; break;
+    case TASK_DISPATCHED: internal_status = TaskStatus::DISPATCHED; break;
+    case TASK_RUNNING:    internal_status = TaskStatus::RUNNING; break;
+    case TASK_UPLOADING:  internal_status = TaskStatus::UPLOADING; break;
+    case TASK_DONE:       internal_status = TaskStatus::DONE; break;
+    case TASK_FAILED:     internal_status = TaskStatus::FAILED; break;
+    case TASK_TIMEOUT:    internal_status = TaskStatus::TIMEOUT; break;
+    default:              internal_status = TaskStatus::RUNNING; break;
+  }
+
+  UpdateTaskStatus(request->task_id(), internal_status, request->reason());
+  return grpc::Status::OK;
+}
+
 void HotmethodService::CleanupTimeoutTasks(int timeout_sec) {
   std::lock_guard<std::mutex> lock(mutex_);
   auto now = std::chrono::steady_clock::now();

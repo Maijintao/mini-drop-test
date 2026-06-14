@@ -1,4 +1,5 @@
 #include "StorageClient.h"
+#include "Log.h"
 #include <iostream>
 #include <string>
 #include <vector>
@@ -22,15 +23,22 @@ static int ExecCommand(const std::vector<std::string>& args, int timeout_sec = 3
 
   pid_t pid = fork();
   if (pid == -1) {
-    std::cerr << "fork failed: " << strerror(errno) << std::endl;
+    LOG_ERROR("fork failed: " + std::string(strerror(errno)));
     return -1;
   }
 
   if (pid == 0) {
     // 子进程：创建独立进程组，便于超时杀整组
     setpgid(0, 0);
+
+    // 关闭多余 fd（避免泄漏父进程 socket）
+    for (int fd = 3; fd < 1024; fd++) {
+      close(fd);
+    }
+
     execvp(c_args[0], c_args.data());
-    std::cerr << "execvp failed: " << strerror(errno) << std::endl;
+    const char* err = "execvp failed\n";
+    write(STDERR_FILENO, err, strlen(err));
     _exit(127);  // 命令不存在
   }
 
@@ -46,7 +54,7 @@ static int ExecCommand(const std::vector<std::string>& args, int timeout_sec = 3
       break;
     }
     if (ret == -1) {
-      std::cerr << "waitpid failed: " << strerror(errno) << std::endl;
+      LOG_ERROR("waitpid failed: " + std::string(strerror(errno)));
       return -1;
     }
     // 子进程还在运行，等 1 秒再检查
@@ -57,12 +65,12 @@ static int ExecCommand(const std::vector<std::string>& args, int timeout_sec = 3
   // 超时处理
   if (elapsed >= timeout_sec) {
     timeout = true;
-    std::cerr << "Command timed out after " << timeout_sec << "s, sending SIGTERM" << std::endl;
+    LOG_ERROR("Command timed out after " + std::to_string(timeout_sec) + "s, sending SIGTERM");
     killpg(getpgid(pid), SIGTERM);
     sleep(3);
     // 还活着就 SIGKILL
     if (kill(pid, 0) == 0) {
-      std::cerr << "Sending SIGKILL to pid=" << pid << std::endl;
+      LOG_ERROR("Sending SIGKILL to pid=" + std::to_string(pid));
       killpg(getpgid(pid), SIGKILL);
     }
     waitpid(pid, nullptr, 0);  // 回收僵尸
@@ -95,10 +103,10 @@ MinIOClient::MinIOClient(const std::string& endpoint,
     "mc", "alias", "set", "minio", url, access_key, secret_key, "--api", "S3v4"
   };
 
-  std::cout << "Initializing MinIO alias: " << url << std::endl;
+  LOG_INFO("Initializing MinIO alias: " + url);
   int ret = ExecCommand(args, 30);
   if (ret != 0) {
-    std::cerr << "Warning: mc alias set failed (code=" << ret << "), uploads may fail" << std::endl;
+    LOG_WARN("mc alias set failed (code=" + std::to_string(ret) + "), uploads may fail");
   }
 }
 
@@ -107,13 +115,13 @@ int MinIOClient::Upload(const std::string& local_path,
   std::string remote = "minio/" + bucket_ + "/" + remote_key;
   std::vector<std::string> args = {"mc", "cp", local_path, remote};
 
-  std::cout << "Uploading: " << local_path << " -> " << remote << std::endl;
+  LOG_INFO("Uploading: " + local_path + " -> " + remote);
   int ret = ExecCommand(args);
 
   if (ret == 0) {
-    std::cout << "Upload successful." << std::endl;
+    LOG_INFO("Upload successful.");
   } else {
-    std::cerr << "Upload failed with code " << ret << std::endl;
+    LOG_ERROR("Upload failed with code " + std::to_string(ret));
   }
   return ret;
 }
@@ -123,13 +131,13 @@ int MinIOClient::Download(const std::string& remote_key,
   std::string remote = "minio/" + bucket_ + "/" + remote_key;
   std::vector<std::string> args = {"mc", "cp", remote, local_path};
 
-  std::cout << "Downloading: " << remote << " -> " << local_path << std::endl;
+  LOG_INFO("Downloading: " + remote + " -> " + local_path);
   int ret = ExecCommand(args);
 
   if (ret == 0) {
-    std::cout << "Download successful." << std::endl;
+    LOG_INFO("Download successful.");
   } else {
-    std::cerr << "Download failed with code " << ret << std::endl;
+    LOG_ERROR("Download failed with code " + std::to_string(ret));
   }
   return ret;
 }
@@ -143,14 +151,76 @@ bool MinIOClient::Exists(const std::string& remote_key) {
 std::string MinIOClient::GetPresignedUrl(const std::string& remote_key,
                                           int expire_seconds) {
   std::string remote = "minio/" + bucket_ + "/" + remote_key;
-  std::vector<std::string> args = {
-    "mc", "share", "download",
-    "--expire", std::to_string(expire_seconds) + "s",
-    remote
-  };
 
-  // mc share download 输出到 stdout，需要捕获
-  // 简化实现：返回直接 URL（实际项目应解析 mc 输出）
+  // 使用 mc share download 生成真正的预签名 URL
+  // 通过 pipe 捕获 stdout 输出
+  int pipefd[2];
+  if (pipe(pipefd) < 0) {
+    LOG_ERROR("pipe failed: " + std::string(strerror(errno)));
+    return "";
+  }
+
+  pid_t pid = fork();
+  if (pid == -1) {
+    close(pipefd[0]);
+    close(pipefd[1]);
+    LOG_ERROR("fork failed: " + std::string(strerror(errno)));
+    return "";
+  }
+
+  if (pid == 0) {
+    // 子进程：重定向 stdout 到 pipe
+    close(pipefd[0]);
+    dup2(pipefd[1], STDOUT_FILENO);
+    close(pipefd[1]);
+
+    // 关闭多余 fd
+    for (int fd = 3; fd < 1024; fd++) {
+      close(fd);
+    }
+
+    std::string expire_str = std::to_string(expire_seconds) + "s";
+    char* args[] = {
+      const_cast<char*>("mc"),
+      const_cast<char*>("share"),
+      const_cast<char*>("download"),
+      const_cast<char*>("--expire"),
+      const_cast<char*>(expire_str.c_str()),
+      const_cast<char*>(remote.c_str()),
+      nullptr
+    };
+    execvp(args[0], args);
+    _exit(127);
+  }
+
+  // 父进程：从 pipe 读取输出
+  close(pipefd[1]);
+  std::string output;
+  char buf[4096];
+  ssize_t n;
+  while ((n = read(pipefd[0], buf, sizeof(buf) - 1)) > 0) {
+    buf[n] = '\0';
+    output += buf;
+  }
+  close(pipefd[0]);
+
+  int status;
+  waitpid(pid, &status, 0);
+
+  // 解析 mc share 输出，提取 URL
+  // mc share 输出格式：URL: <url>
+  size_t url_pos = output.find("URL:");
+  if (url_pos != std::string::npos) {
+    std::string url_line = output.substr(url_pos + 4);
+    // 去掉前导空格和尾部换行
+    size_t start = url_line.find_first_not_of(" \t\n\r");
+    size_t end = url_line.find_last_not_of(" \t\n\r");
+    if (start != std::string::npos) {
+      return url_line.substr(start, end - start + 1);
+    }
+  }
+
+  // 回退：返回直接 URL（可能无法访问）
   std::string protocol = use_ssl_ ? "https" : "http";
   return protocol + "://" + endpoint_ + "/" + bucket_ + "/" + remote_key;
 }

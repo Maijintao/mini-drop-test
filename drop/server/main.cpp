@@ -10,12 +10,13 @@
 #include "HotmethodService.h"
 #include "ControlService.h"
 #include "InitAgentInfoService.h"
+#include "Log.h"
 
 static std::atomic<bool> g_running{true};
 
 void SignalHandler(int sig) {
   const char msg[] = "Received signal, shutting down...\n";
-  write(STDOUT_FILENO, msg, sizeof(msg) - 1);
+  write(STDERR_FILENO, msg, sizeof(msg) - 1);
   g_running = false;
 }
 
@@ -52,7 +53,7 @@ int main(int argc, char* argv[]) {
 
   auto server = builder.BuildAndStart();
   if (!server) {
-    std::cerr << "Failed to start server on " << server_address << std::endl;
+    LOG_ERROR("Failed to start server on " + server_address);
     return 1;
   }
 
@@ -64,7 +65,7 @@ int main(int argc, char* argv[]) {
   sigaction(SIGINT, &sa, nullptr);
   sigaction(SIGTERM, &sa, nullptr);
 
-  std::cout << "drop_server listening on " << server_address << std::endl;
+  LOG_INFO("drop_server listening on " + server_address);
 
   // 启动超时清理线程
   std::thread cleanup_thread([&hotmethod_service]() {
@@ -87,6 +88,6 @@ int main(int argc, char* argv[]) {
   // 优雅关闭 Server
   server->Shutdown();
 
-  std::cout << "drop_server stopped." << std::endl;
+  LOG_INFO("drop_server stopped.");
   return 0;
 }

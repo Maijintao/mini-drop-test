@@ -1,11 +1,13 @@
 #include "BpftraceProfiler.h"
 #include "ProcessKiller.h"
+#include "Log.h"
 #include <iostream>
 #include <fstream>
 #include <string>
 #include <cstring>
 #include <unistd.h>
 #include <sys/wait.h>
+#include <fcntl.h>
 
 namespace drop {
 
@@ -18,20 +20,17 @@ int BpftraceProfiler::Record(int pid, int duration_sec, int freq,
   std::string script_path = output_path + ".bt";
   std::ofstream script_file(script_path);
   if (!script_file.is_open()) {
-    std::cerr << "Failed to create script file: " << script_path << std::endl;
+    LOG_ERROR("Failed to create script file: " + script_path);
     return -1;
   }
   script_file << script;
   script_file.close();
 
-  // 构造命令：bpftrace <script> > <output> 2>&1
-  std::string cmd = "bpftrace " + script_path + " > " + output_path + " 2>&1";
-
-  std::cout << "Executing: " << cmd << std::endl;
+  LOG_INFO("Executing: bpftrace " + script_path + " > " + output_path);
 
   pid_t child = fork();
   if (child == -1) {
-    std::cerr << "fork failed: " << strerror(errno) << std::endl;
+    LOG_ERROR("fork failed: " + std::string(strerror(errno)));
     unlink(script_path.c_str());
     return -1;
   }
@@ -39,8 +38,30 @@ int BpftraceProfiler::Record(int pid, int duration_sec, int freq,
   if (child == 0) {
     // 子进程：创建独立进程组
     setpgid(0, 0);
-    execlp("sh", "sh", "-c", cmd.c_str(), nullptr);
-    std::cerr << "execlp failed: " << strerror(errno) << std::endl;
+
+    // 重定向 stdout 到 output_path
+    int fd = open(output_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0) {
+      _exit(127);
+    }
+    dup2(fd, STDOUT_FILENO);
+    dup2(fd, STDERR_FILENO);  // bpftrace 的输出也可能走 stderr
+    close(fd);
+
+    // 关闭多余 fd
+    for (int i = 3; i < 1024; i++) {
+      close(i);
+    }
+
+    // 直接 execvp，不走 shell，避免命令注入
+    char* args[] = {
+      const_cast<char*>("bpftrace"),
+      const_cast<char*>(script_path.c_str()),
+      nullptr
+    };
+    execvp(args[0], args);
+    const char* err = "execvp bpftrace failed\n";
+    write(STDERR_FILENO, err, strlen(err));
     _exit(127);
   }
 
@@ -57,7 +78,7 @@ int BpftraceProfiler::Record(int pid, int duration_sec, int freq,
   unlink(script_path.c_str());
 
   if (killer.IsTimeout()) {
-    std::cerr << "BpftraceProfiler timed out after " << (duration_sec + 60) << "s" << std::endl;
+    LOG_ERROR("BpftraceProfiler timed out after " + std::to_string(duration_sec + 60) + "s");
     return -2;
   }
 

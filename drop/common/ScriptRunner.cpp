@@ -3,34 +3,43 @@
 #include <iostream>
 #include <unistd.h>
 #include <sys/wait.h>
+#include <cstring>
+#include "Log.h"
 
 namespace drop {
 
 class ScriptRunner {
 public:
   // 执行脚本，返回退出码
+  // 安全实现：直接 execvp 脚本路径，不走 shell 解释器
   static int Execute(const std::string& script_path,
                      const std::vector<std::string>& args) {
     std::vector<char*> c_args;
-    c_args.push_back(const_cast<char*>("sh"));
-    c_args.push_back(const_cast<char*>("-c"));
-
-    std::string cmd = script_path;
+    c_args.push_back(const_cast<char*>(script_path.c_str()));
     for (const auto& arg : args) {
-      cmd += " " + arg;
+      c_args.push_back(const_cast<char*>(arg.c_str()));
     }
-    c_args.push_back(const_cast<char*>(cmd.c_str()));
     c_args.push_back(nullptr);
 
     pid_t pid = fork();
     if (pid == -1) {
-      std::cerr << "fork failed" << std::endl;
+      LOG_ERROR("fork failed: " + std::string(strerror(errno)));
       return -1;
     }
 
     if (pid == 0) {
-      execvp("sh", c_args.data());
-      _exit(1);
+      // 子进程：创建独立进程组
+      setpgid(0, 0);
+
+      // 关闭多余 fd
+      for (int fd = 3; fd < 1024; fd++) {
+        close(fd);
+      }
+
+      execvp(c_args[0], c_args.data());
+      const char* err = "execvp failed\n";
+      write(STDERR_FILENO, err, strlen(err));
+      _exit(127);
     }
 
     int status;

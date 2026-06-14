@@ -1,4 +1,5 @@
 #include "ControlService.h"
+#include "Log.h"
 #include <iostream>
 
 namespace drop {
@@ -21,8 +22,8 @@ grpc::Status ControlService::CreateTask(grpc::ServerContext* context,
     return grpc::Status::OK;
   }
 
-  std::cout << "CreateTask: target_ip=" << request->target_ip()
-            << " task_id=" << request->task_desc().task_id() << std::endl;
+  LOG_INFO("CreateTask: target_ip=" + request->target_ip() +
+           " task_id=" + request->task_desc().task_id());
 
   bool ok = hotmethod_service_->PushTask(request->target_ip(), request->task_desc());
   if (!ok) {

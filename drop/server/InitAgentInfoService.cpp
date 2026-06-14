@@ -1,4 +1,5 @@
 #include "InitAgentInfoService.h"
+#include "Log.h"
 #include <iostream>
 
 namespace drop {
@@ -18,8 +19,7 @@ grpc::Status InitAgentInfoService::RegisterAgent(grpc::ServerContext* context,
 
   std::lock_guard<std::mutex> lock(mutex_);
 
-  std::cout << "Agent registered: " << request->host_name()
-            << " (" << request->ip_addr() << ")" << std::endl;
+  LOG_INFO("Agent registered: " + request->host_name() + " (" + request->ip_addr() + ")");
 
   registered_agents_[request->uid()] = true;
 
@@ -31,7 +31,7 @@ grpc::Status InitAgentInfoService::RegisterAgent(grpc::ServerContext* context,
 grpc::Status InitAgentInfoService::FetchConfig(grpc::ServerContext* context,
                                                 const FetchConfigRequest* request,
                                                 FetchConfigResponse* response) {
-  std::cout << "Config requested by agent: " << request->uid() << std::endl;
+  LOG_INFO("Config requested by agent: " + request->uid());
 
   // storage_config_ 是不可变的，无需加锁
   auto* cos_config = response->mutable_cos_config();

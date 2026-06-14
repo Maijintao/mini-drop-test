@@ -29,6 +29,7 @@ public:
 private:
   void WorkerLoop();
   void ReportResult(const TaskResult& result);
+  void ReportStatus(const std::string& task_id, TaskState state, const std::string& reason);
 
   std::string server_addr_;
   Config config_;

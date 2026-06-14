@@ -12,6 +12,7 @@
 #include "HealthCheckChannel.h"
 #include "HotmethodChannel.h"
 #include "Daemon.h"
+#include "Log.h"
 #include "init.grpc.pb.h"
 
 // 全局退出标志，所有组件共享引用
@@ -19,7 +20,7 @@ static std::atomic<bool> g_running{true};
 
 void SignalHandler(int sig) {
   const char msg[] = "Received signal, shutting down...\n";
-  write(STDOUT_FILENO, msg, sizeof(msg) - 1);
+  write(STDERR_FILENO, msg, sizeof(msg) - 1);
   g_running = false;
 }
 
@@ -31,12 +32,19 @@ int main(int argc, char* argv[]) {
   for (int i = 1; i < argc; i++) {
     if (strcmp(argv[i], "--daemon") == 0 || strcmp(argv[i], "-d") == 0) {
       daemon_mode = true;
-    } else {
+    } else if ((strcmp(argv[i], "--config") == 0 || strcmp(argv[i], "-c") == 0) && i + 1 < argc) {
+      config_path = argv[++i];
+    } else if (argv[i][0] != '-') {
+      // 兼容：裸路径也当作 config_path
       config_path = argv[i];
+    } else {
+      std::cerr << "Unknown option: " << argv[i] << std::endl;
+      std::cerr << "Usage: drop_agent [--daemon|-d] [--config|-c <path>] [config_path]" << std::endl;
+      return 1;
     }
   }
 
-  // 守护化
+  // 守护化（必须在日志初始化之前，因为会重定向 fd）
   if (daemon_mode) {
     if (drop::Daemonize() != 0) {
       std::cerr << "Failed to daemonize" << std::endl;
@@ -64,14 +72,14 @@ int main(int argc, char* argv[]) {
     auto deadline = std::chrono::system_clock::now() + std::chrono::seconds(2);
     if (channel->WaitForConnected(deadline)) {
       server_addr = addr;
-      std::cout << "Connected to server: " << addr << std::endl;
+      LOG_INFO("Connected to server: " + addr);
       break;
     }
-    std::cerr << "Failed to connect to " << addr << ", trying next..." << std::endl;
+    LOG_WARN("Failed to connect to " + addr + ", trying next...");
   }
 
   if (server_addr.empty()) {
-    std::cerr << "Failed to connect to any server" << std::endl;
+    LOG_ERROR("Failed to connect to any server");
     return 1;
   }
 
@@ -83,7 +91,7 @@ int main(int argc, char* argv[]) {
   sigaction(SIGINT, &sa, nullptr);
   sigaction(SIGTERM, &sa, nullptr);
 
-  std::cout << "drop_agent starting, connected to " << server_addr << std::endl;
+  LOG_INFO("drop_agent starting, connected to " + server_addr);
 
   // Agent 注册
   {
@@ -103,10 +111,10 @@ int main(int argc, char* argv[]) {
     drop::RegisterAgentResponse resp;
     auto status = init_stub->RegisterAgent(&ctx, req, &resp);
     if (status.ok() && resp.code() == 0) {
-      std::cout << "[Register] Agent registered successfully" << std::endl;
+      LOG_INFO("[Register] Agent registered successfully");
     } else {
-      std::cerr << "[Register] Agent registration failed: "
-                << (status.ok() ? resp.message() : status.error_message()) << std::endl;
+      LOG_ERROR("[Register] Agent registration failed: " +
+                (status.ok() ? resp.message() : status.error_message()));
     }
   }
 
@@ -115,7 +123,7 @@ int main(int argc, char* argv[]) {
   drop::HealthCheckChannel health_channel(server_addr, config.uid, config.ip_addr, g_running);
 
   health_channel.SetTaskCallback([&hotmethod_channel](const drop::TaskDesc& task) {
-    std::cout << "Received task " << task.task_id() << " from server." << std::endl;
+    LOG_INFO("Received task " + task.task_id() + " from server.");
     hotmethod_channel.PushTask(task);
   });
 
@@ -129,6 +137,6 @@ int main(int argc, char* argv[]) {
   }
 
   // 析构时自动 Stop() 并 join() 线程
-  std::cout << "drop_agent stopped." << std::endl;
+  LOG_INFO("drop_agent stopped.");
   return 0;
 }

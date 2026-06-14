@@ -1,5 +1,6 @@
 #include "HealthCheckChannel.h"
 #include "Process.h"
+#include "Log.h"
 #include <chrono>
 #include <iostream>
 #include <fstream>
@@ -32,7 +33,7 @@ void HealthCheckChannel::SetTaskCallback(TaskCallback callback) {
 
 void HealthCheckChannel::Start() {
   heartbeat_thread_ = std::thread(&HealthCheckChannel::HeartbeatLoop, this);
-  std::cout << "HealthCheck channel started to " << server_addr_ << std::endl;
+  LOG_INFO("HealthCheck channel started to " + server_addr_);
 }
 
 void HealthCheckChannel::HeartbeatLoop() {
@@ -47,31 +48,24 @@ void HealthCheckChannel::HeartbeatLoop() {
     request.set_agent_version("0.1.0");
 
     // 填充自监控数据
-    PidStats* self_stats = request.mutable_self_pstats();
-    self_stats->set_pid(getpid());
-    PidStats stats = Process::GetPidStats(getpid());
-    self_stats->set_cpu_percent(stats.cpu_percent());
-    self_stats->set_rss_kb(stats.rss_kb());
-    self_stats->set_read_kb_per_sec(stats.read_kb_per_sec());
-    self_stats->set_write_kb_per_sec(stats.write_kb_per_sec());
+    PidStats self_stats = Process::GetPidStats(getpid());
+    *request.mutable_self_pstats() = self_stats;
 
-    // 采集子进程数据
-    PidStats* children_stats = request.mutable_children_pstats();
-    std::string proc_path = "/proc/" + std::to_string(getpid()) + "/task";
-    std::ifstream task_dir(proc_path);
-    if (task_dir.is_open()) {
-      std::string tid;
-      while (std::getline(task_dir, tid)) {
-        // 读取子线程的 stat
-        std::string children_path = proc_path + "/" + tid + "/children";
-        std::ifstream children_file(children_path);
-        if (children_file.is_open()) {
-          std::string child_pid;
-          while (children_file >> child_pid) {
-            PidStats child = Process::GetPidStats(std::stoi(child_pid));
-            child.set_pid(std::stoi(child_pid));
-            *children_stats = child;  // 简化：只采集一个子进程
-          }
+    // 采集子进程数据：读取 /proc/<agent_pid>/task/<agent_pid>/children
+    // （Agent 的直接子进程，如 perf record 子进程）
+    std::string children_path = "/proc/" + std::to_string(getpid()) + "/task/" +
+                                std::to_string(getpid()) + "/children";
+    std::ifstream children_file(children_path);
+    if (children_file.is_open()) {
+      std::string child_pid_str;
+      while (children_file >> child_pid_str) {
+        try {
+          int child_pid = std::stoi(child_pid_str);
+          PidStats child = Process::GetPidStats(child_pid);
+          child.set_pid(child_pid);
+          *request.add_children_pstats() = child;
+        } catch (const std::exception& e) {
+          // 跳过解析失败的 PID
         }
       }
     }
@@ -82,16 +76,16 @@ void HealthCheckChannel::HeartbeatLoop() {
 
     auto status = stub_->Do(&context, request, &response);
     if (status.ok()) {
-      std::cout << "Heartbeat OK, pending=" << response.pending() << std::endl;
       if (response.pending() && task_callback_) {
+        LOG_INFO("Heartbeat OK, pending task: " + response.task_desc().task_id());
         task_callback_(response.task_desc());
       }
     } else {
-      std::cout << "Heartbeat failed: " << status.error_message() << std::endl;
+      LOG_ERROR("Heartbeat failed: " + status.error_message());
     }
 
-    // 心跳间隔 1 秒 (1Hz)，分段 sleep 快速响应退出
-    for (int i = 0; i < 10 && running_; ++i) {
+    // 心跳间隔 5 秒（题目要求），分段 sleep 快速响应退出
+    for (int i = 0; i < 50 && running_; ++i) {
       std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
   }

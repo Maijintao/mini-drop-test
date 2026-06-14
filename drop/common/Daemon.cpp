@@ -47,10 +47,16 @@ int Daemonize() {
   close(STDOUT_FILENO);
   close(STDERR_FILENO);
 
-  // 重定向到 /dev/null
+  // stdin/stdout 重定向到 /dev/null
   open("/dev/null", O_RDONLY);  // stdin
   open("/dev/null", O_WRONLY);  // stdout
-  open("/dev/null", O_WRONLY);  // stderr
+
+  // stderr 重定向到日志文件（保留日志输出能力）
+  int log_fd = open("/var/log/mini-drop.log", O_WRONLY | O_CREAT | O_APPEND, 0644);
+  if (log_fd < 0) {
+    // 日志目录不可写时回退到 /dev/null
+    open("/dev/null", O_WRONLY);
+  }
 
   return 0;
 }

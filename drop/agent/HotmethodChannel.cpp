@@ -4,6 +4,7 @@
 #include "BpftraceProfiler.h"
 #include "AsyncProfiler.h"
 #include "PprofProfiler.h"
+#include "Log.h"
 #include <iostream>
 #include <chrono>
 #include <fstream>
@@ -43,20 +44,20 @@ HotmethodChannel::~HotmethodChannel() {
     result.set_task_id(task.task_id());
     result.set_error_message("agent shutting down");
     ReportResult(result);
-    std::cout << "Task " << task.task_id() << " cancelled (agent shutdown)" << std::endl;
+    LOG_INFO("Task " + task.task_id() + " cancelled (agent shutdown)");
     task_queue_.pop();
   }
 }
 
 void HotmethodChannel::Start() {
   worker_thread_ = std::thread(&HotmethodChannel::WorkerLoop, this);
-  std::cout << "Hotmethod channel started." << std::endl;
+  LOG_INFO("Hotmethod channel started.");
 }
 
 void HotmethodChannel::PushTask(const TaskDesc& task) {
   std::lock_guard<std::mutex> lock(mutex_);
   if (task_queue_.size() >= MAX_TASK_QUEUE_SIZE) {
-    std::cerr << "Task queue full, dropping task " << task.task_id() << std::endl;
+    LOG_ERROR("Task queue full, dropping task " + task.task_id());
     return;
   }
   task_queue_.push(task);
@@ -69,9 +70,23 @@ void HotmethodChannel::ReportResult(const TaskResult& result) {
   google::protobuf::Empty empty;
   auto status = stub_->NotifyResult(&context, result, &empty);
   if (status.ok()) {
-    std::cout << "Task " << result.task_id() << " result reported." << std::endl;
+    LOG_INFO("Task " + result.task_id() + " result reported.");
   } else {
-    std::cout << "Failed to report result: " << status.error_message() << std::endl;
+    LOG_ERROR("Failed to report result: " + status.error_message());
+  }
+}
+
+void HotmethodChannel::ReportStatus(const std::string& task_id, TaskState state, const std::string& reason) {
+  grpc::ClientContext context;
+  context.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(5));
+  TaskStatusUpdate update;
+  update.set_task_id(task_id);
+  update.set_status(state);
+  update.set_reason(reason);
+  google::protobuf::Empty empty;
+  auto status = stub_->UpdateTaskStatus(&context, update, &empty);
+  if (!status.ok()) {
+    LOG_ERROR("Failed to report status for task " + task_id + ": " + status.error_message());
   }
 }
 
@@ -79,7 +94,7 @@ void HotmethodChannel::ReportResult(const TaskResult& result) {
 static std::unique_ptr<IProfiler> CreateProfiler(int profiler_type) {
   switch (profiler_type) {
     case PROFILER_PERF:
-      return nullptr;  // Perf 使用静态方法
+      return std::make_unique<Perf>();
     case PROFILER_ASYNC_PROFILER:
       return std::make_unique<AsyncProfiler>();
     case PROFILER_PPROF:
@@ -105,12 +120,15 @@ void HotmethodChannel::WorkerLoop() {
     // 使用 TaskDesc.timeout_sec 作为超时保护
     int timeout_sec = task.timeout_sec() > 0 ? task.timeout_sec() : 60;
 
-    std::cout << "Executing task " << task.task_id()
-              << " type=" << task.task_type()
-              << " profiler_type=" << task.profiler_type()
-              << " pid=" << task.sample_argv().pid()
-              << " duration=" << task.sample_argv().duration() << "s"
-              << " timeout=" << timeout_sec << "s" << std::endl;
+    LOG_INFO("Executing task " + task.task_id() +
+             " type=" + std::to_string(task.task_type()) +
+             " profiler_type=" + std::to_string(task.profiler_type()) +
+             " pid=" + std::to_string(task.sample_argv().pid()) +
+             " duration=" + std::to_string(task.sample_argv().duration()) + "s" +
+             " timeout=" + std::to_string(timeout_sec) + "s");
+
+    // 状态迁移：RUNNING（Agent 开始执行采集）
+    ReportStatus(task.task_id(), TASK_RUNNING, "Agent 开始执行采集任务");
 
     // 根据采集器类型选择输出文件扩展名
     std::string ext = ".data";
@@ -125,26 +143,17 @@ void HotmethodChannel::WorkerLoop() {
     std::string output_path = "/tmp/profiler_" + task.task_id() + ext;
     int ret = -1;
 
-    // 选择采集器执行
-    if (task.profiler_type() == PROFILER_PERF) {
-      ret = Perf::Record(
+    // 选择采集器执行（统一走 IProfiler 多态接口）
+    auto profiler = CreateProfiler(task.profiler_type());
+    if (profiler) {
+      ret = profiler->Record(
         task.sample_argv().pid(),
         task.sample_argv().duration(),
         task.sample_argv().hz(),
         output_path
       );
     } else {
-      auto profiler = CreateProfiler(task.profiler_type());
-      if (profiler) {
-        ret = profiler->Record(
-          task.sample_argv().pid(),
-          task.sample_argv().duration(),
-          task.sample_argv().hz(),
-          output_path
-        );
-      } else {
-        std::cerr << "Unknown profiler type: " << task.profiler_type() << std::endl;
-      }
+      LOG_ERROR("Unknown profiler type: " + std::to_string(task.profiler_type()));
     }
 
     // 上报结果
@@ -152,23 +161,28 @@ void HotmethodChannel::WorkerLoop() {
     result.set_task_id(task.task_id());
 
     if (ret == 0) {
-      std::cout << "Task " << task.task_id() << " completed, output: " << output_path << std::endl;
+      LOG_INFO("Task " + task.task_id() + " completed, output: " + output_path);
       result.set_error_message("");
+
+      // 状态迁移：UPLOADING（正在上传到存储）
+      ReportStatus(task.task_id(), TASK_UPLOADING, "采集完成，正在上传结果到存储");
 
       // 上传采集结果到 MinIO
       if (storage_) {
-        std::cout << "Task " << task.task_id() << " uploading..." << std::endl;
+        LOG_INFO("Task " + task.task_id() + " uploading...");
         std::string remote_key = "profiler/" + task.task_id() + "/" + task.task_id() + ext;
         int upload_ret = storage_->Upload(output_path, remote_key);
         if (upload_ret == 0) {
-          std::cout << "Task " << task.task_id() << " uploaded to " << remote_key << std::endl;
+          LOG_INFO("Task " + task.task_id() + " uploaded to " + remote_key);
+          result.set_cos_key(remote_key);  // 设置 cos_key
           std::remove(output_path.c_str());
         } else {
-          std::cerr << "Task " << task.task_id() << " upload failed" << std::endl;
+          LOG_ERROR("Task " + task.task_id() + " upload failed");
+          // 上传失败不影响任务成功状态，但 cos_key 为空
         }
       }
     } else {
-      std::cout << "Task " << task.task_id() << " failed with code " << ret << std::endl;
+      LOG_ERROR("Task " + task.task_id() + " failed with code " + std::to_string(ret));
       result.set_error_message("profiler failed with code " + std::to_string(ret));
     }
 

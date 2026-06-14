@@ -1,4 +1,5 @@
 #include "ProcessKiller.h"
+#include "Log.h"
 #include <iostream>
 #include <signal.h>
 #include <sys/wait.h>
@@ -17,8 +18,8 @@ void ProcessKiller::Start() {
   running_ = true;
   timeout_ = false;
   monitor_thread_ = std::thread(&ProcessKiller::MonitorLoop, this);
-  std::cout << "ProcessKiller: monitoring pid=" << pid_
-            << " timeout=" << timeout_sec_ << "s" << std::endl;
+  LOG_DEBUG("ProcessKiller: monitoring pid=" + std::to_string(pid_) +
+            " timeout=" + std::to_string(timeout_sec_) + "s");
 }
 
 void ProcessKiller::Stop() {
@@ -40,14 +41,14 @@ void ProcessKiller::MonitorLoop() {
 
     // 检查进程是否还存在
     if (kill(pid_, 0) != 0) {
-      std::cout << "ProcessKiller: pid=" << pid_ << " already exited." << std::endl;
+      LOG_DEBUG("ProcessKiller: pid=" + std::to_string(pid_) + " already exited.");
       return;
     }
   }
 
   if (running_) {
     timeout_ = true;
-    std::cout << "ProcessKiller: timeout! sending SIGTERM to pid=" << pid_ << std::endl;
+    LOG_WARN("ProcessKiller: timeout! sending SIGTERM to pid=" + std::to_string(pid_));
 
     // 发送 SIGTERM
     killpg(getpgid(pid_), SIGTERM);
@@ -55,7 +56,7 @@ void ProcessKiller::MonitorLoop() {
 
     // 如果还活着，发送 SIGKILL
     if (kill(pid_, 0) == 0) {
-      std::cout << "ProcessKiller: sending SIGKILL to pid=" << pid_ << std::endl;
+      LOG_WARN("ProcessKiller: sending SIGKILL to pid=" + std::to_string(pid_));
       killpg(getpgid(pid_), SIGKILL);
     }
   }

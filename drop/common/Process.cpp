@@ -78,36 +78,74 @@ float Process::CalculateCPU(const ProcStat& prev, const ProcStat& curr, float in
   return (float)total / hz / interval_sec * 100.0f;
 }
 
-// 用于 CPU 计算的上次采样值
-static std::map<int, ProcStat> g_last_stats;
-static std::map<int, std::chrono::steady_clock::time_point> g_last_time;
+// 全局采样缓存，用于差值计算
+static std::map<int, ProcSnapshot> g_snapshots;
 static std::mutex g_stats_mutex;
+
+// 清理超过 60 秒未更新的 PID 缓存（避免内存泄漏）
+static void CleanupStaleSnapshots(std::lock_guard<std::mutex>& /*guard*/) {
+  auto now = std::chrono::steady_clock::now();
+  for (auto it = g_snapshots.begin(); it != g_snapshots.end(); ) {
+    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - it->second.time).count();
+    if (elapsed > 60) {
+      it = g_snapshots.erase(it);
+    } else {
+      ++it;
+    }
+  }
+}
 
 PidStats Process::GetPidStats(int pid) {
   PidStats stats;
   stats.set_pid(pid);
 
   ProcStat stat;
-  if (ReadStat(pid, &stat)) {
-    stats.set_rss_kb(stat.rss * (sysconf(_SC_PAGESIZE) / 1024));
+  ProcIO io;
+  auto now = std::chrono::steady_clock::now();
 
-    // 计算 CPU 使用率
-    std::lock_guard<std::mutex> lock(g_stats_mutex);
-    auto now = std::chrono::steady_clock::now();
-    auto it = g_last_stats.find(pid);
-    if (it != g_last_stats.end()) {
-      float interval = std::chrono::duration<float>(now - g_last_time[pid]).count();
-      float cpu = CalculateCPU(it->second, stat, interval);
-      stats.set_cpu_percent(cpu);
-    }
-    g_last_stats[pid] = stat;
-    g_last_time[pid] = now;
+  bool has_stat = ReadStat(pid, &stat);
+  bool has_io = ReadIO(pid, &io);
+
+  if (has_stat) {
+    stats.set_rss_kb(stat.rss * (sysconf(_SC_PAGESIZE) / 1024));
   }
 
-  ProcIO io;
-  if (ReadIO(pid, &io)) {
-    stats.set_read_kb_per_sec(io.read_bytes / 1024);
-    stats.set_write_kb_per_sec(io.write_bytes / 1024);
+  {
+    std::lock_guard<std::mutex> lock(g_stats_mutex);
+
+    // 定期清理过期缓存
+    CleanupStaleSnapshots(lock);
+
+    auto it = g_snapshots.find(pid);
+    if (it != g_snapshots.end() && has_stat) {
+      float interval = std::chrono::duration<float>(now - it->second.time).count();
+      if (interval > 0) {
+        // CPU 使用率：两次采样差值
+        float cpu = CalculateCPU(it->second.stat, stat, interval);
+        stats.set_cpu_percent(cpu);
+
+        // IO 速率：两次采样差值 / 间隔时间（KB/s）
+        if (has_io) {
+          long long delta_read = io.read_bytes - it->second.io.read_bytes;
+          long long delta_write = io.write_bytes - it->second.io.write_bytes;
+          if (delta_read >= 0) {
+            stats.set_read_kb_per_sec((delta_read / 1024.0) / interval);
+          }
+          if (delta_write >= 0) {
+            stats.set_write_kb_per_sec((delta_write / 1024.0) / interval);
+          }
+        }
+      }
+    }
+
+    // 保存本次快照
+    if (has_stat) {
+      ProcSnapshot snap;
+      snap.stat = stat;
+      snap.io = io;
+      snap.time = now;
+      g_snapshots[pid] = snap;
+    }
   }
 
   return stats;

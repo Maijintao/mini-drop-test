@@ -1,4 +1,5 @@
 #include "HealthCheckService.h"
+#include "Log.h"
 #include <iostream>
 
 namespace drop {
@@ -9,8 +10,8 @@ HealthCheckService::HealthCheckService(HotmethodService* hotmethod_service)
 grpc::Status HealthCheckService::Do(grpc::ServerContext* context,
                                      const HealthCheckRequest* request,
                                      HealthCheckResponse* response) {
-  std::cout << "Heartbeat from " << request->host_name()
-            << " (" << request->ip_addr() << ")" << std::endl;
+  // 心跳日志降级为 DEBUG，避免刷屏（每 5 秒一次）
+  LOG_DEBUG("Heartbeat from " + request->host_name() + " (" + request->ip_addr() + ")");
 
   // 更新 Agent 心跳状态（供 StatAgent 查询）
   hotmethod_service_->UpdateAgentStatus(
@@ -28,8 +29,7 @@ grpc::Status HealthCheckService::Do(grpc::ServerContext* context,
   if (hotmethod_service_->PopTask(request->ip_addr(), &task)) {
     response->set_pending(true);
     *response->mutable_task_desc() = task;
-    std::cout << "Dispatching task " << task.task_id()
-              << " to " << request->ip_addr() << std::endl;
+    LOG_INFO("Dispatching task " + task.task_id() + " to " + request->ip_addr());
   } else {
     response->set_pending(false);
   }
