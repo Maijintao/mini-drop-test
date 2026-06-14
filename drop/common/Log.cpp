@@ -1,19 +1,12 @@
+#include "Log.h"
 #include <iostream>
-#include <string>
 #include <ctime>
 #include <iomanip>
 #include <sstream>
 
 namespace drop {
 
-enum class LogLevel {
-  INFO,
-  WARN,
-  ERROR,
-  DEBUG
-};
-
-static LogLevel current_level = LogLevel::INFO;
+static LogLevel g_current_level = LogLevel::INFO;
 
 std::string GetCurrentTime() {
   auto now = std::time(nullptr);
@@ -24,29 +17,33 @@ std::string GetCurrentTime() {
 }
 
 void SetLogLevel(LogLevel level) {
-  current_level = level;
+  g_current_level = level;
 }
 
-void Log(LogLevel level, const std::string& file, int line, const std::string& msg) {
-  if (level < current_level) return;
+LogLevel GetLogLevel() {
+  return g_current_level;
+}
 
+void Log(LogLevel level, const char* file, int line, const std::string& msg) {
   const char* level_str = "";
   switch (level) {
-    case LogLevel::INFO:  level_str = "INFO"; break;
-    case LogLevel::WARN:  level_str = "WARN"; break;
-    case LogLevel::ERROR: level_str = "ERROR"; break;
     case LogLevel::DEBUG: level_str = "DEBUG"; break;
+    case LogLevel::INFO:  level_str = "INFO";  break;
+    case LogLevel::WARN:  level_str = "WARN";  break;
+    case LogLevel::ERROR: level_str = "ERROR"; break;
+  }
+
+  // 只输出文件名，不输出完整路径
+  std::string filename(file);
+  size_t pos = filename.find_last_of("/\\");
+  if (pos != std::string::npos) {
+    filename = filename.substr(pos + 1);
   }
 
   std::cout << "[" << GetCurrentTime() << "]"
             << "[" << level_str << "]"
-            << " " << file << ":" << line
+            << " " << filename << ":" << line
             << " " << msg << std::endl;
 }
 
 }  // namespace drop
-
-#define LOG_INFO(msg)  drop::Log(drop::LogLevel::INFO, __FILE__, __LINE__, msg)
-#define LOG_WARN(msg)  drop::Log(drop::LogLevel::WARN, __FILE__, __LINE__, msg)
-#define LOG_ERROR(msg) drop::Log(drop::LogLevel::ERROR, __FILE__, __LINE__, msg)
-#define LOG_DEBUG(msg) drop::Log(drop::LogLevel::DEBUG, __FILE__, __LINE__, msg)

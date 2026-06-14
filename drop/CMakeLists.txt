@@ -61,5 +61,6 @@ add_executable(drop_server
   server/HotmethodService.cpp
   server/ControlService.cpp
   server/InitAgentInfoService.cpp
+  common/Log.cpp
 )
 target_link_libraries(drop_server PRIVATE drop_proto)
