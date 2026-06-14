@@ -1,0 +1,16 @@
+[minio]
+endpoint = localhost:9000
+access_key = minioadmin
+secret_key = minioadmin
+bucket = drop-data
+secure = false
+
+[postgres]
+host = localhost
+port = 5432
+user = postgres
+password = dev
+dbname = drop
+
+[apiserver]
+url = http://localhost:8191
