@@ -1,7 +1,8 @@
-FROM python:3.10-slim
+FROM python:3.10-bookworm
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     perl \
+    linux-perf \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app/analysis

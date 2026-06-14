@@ -9,6 +9,7 @@ Mini-Drop 分析引擎入口
 """
 import argparse
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -20,6 +21,22 @@ from apiserver_client import APIServerClient
 from config import Config
 from error import ErrorInfo, ERR_STORAGE, ERR_NOT_FOUND, ERR_ANALYZER, ERR_UNSUPPORTED
 from storage import MinIOStorage
+
+
+def setup_logging():
+    """配置结构化日志"""
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(logging.Formatter(
+        '{"time":"%(asctime)s","level":"%(levelname)s","msg":"%(message)s"}',
+        datefmt="%Y-%m-%dT%H:%M:%S",
+    ))
+    logger = logging.getLogger("analyzer")
+    logger.setLevel(logging.INFO)
+    logger.addHandler(handler)
+    return logger
+
+
+log = setup_logging()
 from data_parser.collapsed_parser import (
     parse_perf_script, parse_collapsed, stacks_to_collapsed,
 )
@@ -72,7 +89,7 @@ def main():
         resp = api._request("GET", f"/api/v1/tasks/{tid}")
         task = resp.get("data", {}).get("task", {})
         if task.get("analysis_status") == 2:  # 已成功
-            print(f"[analyzer] task {tid} already analyzed, skipping")
+            log.info("task %s already analyzed, skipping", tid)
             sys.exit(0)
     except Exception:
         pass  # 查不到就继续
@@ -80,9 +97,9 @@ def main():
     # 5. 标记分析开始
     try:
         api.update_analysis_status(tid, 1)  # AnalysisStatusRunning
-        print(f"[analyzer] analysis_status -> 1 (running)")
+        log.info("analysis_status -> 1 (running)")
     except Exception as e:
-        print(f"[analyzer] warn: failed to update status: {e}", file=sys.stderr)
+        log.warning("failed to update status: %s", e)
 
     # 6. 创建临时工作目录
     work_dir = tempfile.mkdtemp(prefix=f"analysis_{tid}_")
@@ -96,7 +113,7 @@ def main():
             error_exit(f"raw data not found: {raw_key}", ERR_NOT_FOUND)
 
         store.download(raw_key, raw_path)
-        print(f"[analyzer] downloaded {raw_key} -> {raw_path}")
+        log.info("downloaded %s", raw_key)
 
         # 7. 按 task_type 分发到具体 analyzer
         if task_type == 0:
@@ -109,19 +126,17 @@ def main():
             if os.path.exists(local_path):
                 upload_key = f"{tid}/{key_name}"
                 store.upload(local_path, upload_key)
-                print(f"[analyzer] uploaded {upload_key}")
+                log.info("uploaded %s", upload_key)
 
         # 9. 写入分析建议到 apiserver
-        suggestions_path = result.get(
-            os.path.join(work_dir, "suggestions.md"), None
-        )
-        if suggestions_path and os.path.exists(suggestions_path):
+        suggestions_path = os.path.join(work_dir, "suggestions.md")
+        if os.path.exists(suggestions_path):
             _write_suggestions_to_apiserver(api, tid, suggestions_path)
 
         # 10. 标记分析完成
         api.update_analysis_status(tid, 2)  # AnalysisStatusSuccess
-        print(f"[analyzer] analysis_status -> 2 (success)")
-        print(f"[analyzer] task {tid} analysis completed")
+        log.info("analysis_status -> 2 (success)")
+        log.info("task %s analysis completed", tid)
 
     except Exception as e:
         # 标记分析失败
@@ -155,21 +170,19 @@ def run_cpu_flamegraph(perf_data_path: str, work_dir: str, tid: str) -> dict:
             raise RuntimeError(f"perf script failed: {proc.stderr}")
         with open(script_path, "w") as f:
             f.write(proc.stdout)
-        print(f"[analyzer] perf script -> {script_path}")
+        log.info("perf script -> %s", script_path)
     except FileNotFoundError:
-        # macOS 或没有 perf 的环境，尝试直接用折叠栈
-        # 检查 MinIO 上是否有预处理的 collapsed.txt
-        print("[analyzer] perf not found, falling back to pre-processed data")
+        log.warning("perf not found, falling back to pre-processed data")
         raise RuntimeError("perf command not found, need pre-processed collapsed stack")
 
     # perf script → 折叠栈
     perf_script_to_collapsed(script_path, collapsed_path)
-    print(f"[analyzer] collapsed -> {collapsed_path}")
+    log.info("collapsed -> %s", collapsed_path)
 
     # 折叠栈 → SVG
     title = f"CPU Flame Graph [{tid}]"
     collapsed_to_svg(collapsed_path, svg_path, title=title)
-    print(f"[analyzer] flamegraph -> {svg_path}")
+    log.info("flamegraph -> %s", svg_path)
 
     # 折叠栈 → TopN 热点
     stacks = parse_collapsed(open(collapsed_path).read())
@@ -177,7 +190,7 @@ def run_cpu_flamegraph(perf_data_path: str, work_dir: str, tid: str) -> dict:
     topn_path = os.path.join(work_dir, "top.json")
     with open(topn_path, "w") as f:
         f.write(topn_to_json(topn))
-    print(f"[analyzer] topn -> {topn_path} ({len(topn)} functions)")
+    log.info("topn -> %s (%d functions)", topn_path, len(topn))
 
     # TopN → 规则建议
     rules = load_rules()
@@ -185,7 +198,7 @@ def run_cpu_flamegraph(perf_data_path: str, work_dir: str, tid: str) -> dict:
     suggestions_path = os.path.join(work_dir, "suggestions.md")
     with open(suggestions_path, "w") as f:
         f.write(suggestions_to_markdown(suggestions, tid=tid))
-    print(f"[analyzer] suggestions -> {suggestions_path} ({len(suggestions)} matches)")
+    log.info("suggestions -> %s (%d matches)", suggestions_path, len(suggestions))
 
     return {
         collapsed_path: "collapsed.txt",
@@ -220,10 +233,9 @@ def _write_suggestions_to_apiserver(api: APIServerClient, tid: str,
                 suggestion=s["advice"],
             )
         except Exception as e:
-            print(f"[analyzer] warn: failed to write suggestion for {s['func']}: {e}",
-                  file=sys.stderr)
+            log.warning("failed to write suggestion for %s: %s", s["func"], e)
 
-    print(f"[analyzer] wrote {len(suggestions)} suggestions to apiserver")
+    log.info("wrote %d suggestions to apiserver", len(suggestions))
 
 
 if __name__ == "__main__":
