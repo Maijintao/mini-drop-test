@@ -11,6 +11,22 @@ namespace drop {
 
 static constexpr size_t MAX_TASK_QUEUE_SIZE = 100;
 
+// 任务状态枚举（对应题目要求的状态机）
+enum class TaskStatus {
+  PENDING = 0,    // 新建，等待派发
+  RUNNING = 1,    // 已派发给 Agent，执行中
+  UPLOADING = 2,  // 采集完成，正在上传
+  DONE = 3,       // 成功完成
+  FAILED = 4      // 失败
+};
+
+// 任务状态记录（用于落库和审计）
+struct TaskState {
+  TaskStatus status = TaskStatus::PENDING;
+  std::string reason;           // 状态迁移原因
+  std::chrono::steady_clock::time_point timestamp;  // 状态更新时间
+};
+
 // Agent 心跳状态（每次心跳更新，供 StatAgent 查询）
 struct AgentStatus {
   std::string host_name;
@@ -19,6 +35,7 @@ struct AgentStatus {
   PidStats self_pstats;
   PidStats children_pstats;
   std::chrono::steady_clock::time_point last_heartbeat;
+  bool online = true;           // 是否在线
 };
 
 class HotmethodService final : public Hotmethod::Service {
@@ -42,14 +59,24 @@ public:
   // 查询 Agent 状态（StatAgent 时调用）
   bool GetAgentStatus(const std::string& ip_addr, AgentStatus* status);
 
+  // 检查 Agent 是否在线（30s 无心跳判离线）
+  bool IsAgentOnline(const std::string& ip_addr);
+
+  // 获取任务状态
+  bool GetTaskStatus(const std::string& task_id, TaskState* state);
+
+  // 更新任务状态（带 reason）
+  void UpdateTaskStatus(const std::string& task_id, TaskStatus status, const std::string& reason);
+
   grpc::Status NotifyResult(grpc::ServerContext* context,
                             const TaskResult* request,
                             google::protobuf::Empty* response) override;
 
 private:
   std::map<std::string, std::deque<TaskDesc>> tasks_;
-  std::map<std::string, TaskResult> results_;  // 缓存任务结果
-  std::map<std::string, AgentStatus> agents_;  // Agent 心跳状态
+  std::map<std::string, TaskResult> results_;      // 缓存任务结果
+  std::map<std::string, AgentStatus> agents_;      // Agent 心跳状态
+  std::map<std::string, TaskState> tasks_state_;   // 任务状态跟踪
   std::mutex mutex_;
 };
 

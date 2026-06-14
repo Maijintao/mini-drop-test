@@ -55,8 +55,8 @@ void HealthCheckChannel::HeartbeatLoop() {
       std::cout << "Heartbeat failed: " << status.error_message() << std::endl;
     }
 
-    // 分段 sleep，快速响应退出
-    for (int i = 0; i < 10 && running_; ++i) {
+    // 心跳间隔 5 秒，分段 sleep 快速响应退出
+    for (int i = 0; i < 50 && running_; ++i) {
       std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
   }

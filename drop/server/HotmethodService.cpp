@@ -1,4 +1,5 @@
 #include "HotmethodService.h"
+#include "Log.h"
 #include <iostream>
 
 namespace drop {
@@ -7,11 +8,15 @@ bool HotmethodService::PushTask(const std::string& target_ip, const TaskDesc& ta
   std::lock_guard<std::mutex> lock(mutex_);
   auto& queue = tasks_[target_ip];
   if (queue.size() >= MAX_TASK_QUEUE_SIZE) {
-    std::cerr << "Task queue full for " << target_ip << std::endl;
+    LOG_ERROR("Task queue full for " + target_ip);
     return false;
   }
   queue.push_back(task);
-  std::cout << "Task " << task.task_id() << " queued for " << target_ip << std::endl;
+
+  // 状态迁移：PENDING（任务创建）
+  UpdateTaskStatus(task.task_id(), TaskStatus::PENDING, "任务创建，等待派发");
+
+  LOG_INFO("Task " + task.task_id() + " queued for " + target_ip);
   return true;
 }
 
@@ -26,6 +31,10 @@ bool HotmethodService::PopTask(const std::string& target_ip, TaskDesc* task) {
   if (it->second.empty()) {
     tasks_.erase(it);  // 清理空条目
   }
+
+  // 状态迁移：RUNNING（任务派发给 Agent）
+  UpdateTaskStatus(task->task_id(), TaskStatus::RUNNING, "任务派发给 Agent " + target_ip);
+
   return true;
 }
 
@@ -45,6 +54,9 @@ void HotmethodService::UpdateAgentStatus(const std::string& ip_addr,
                                           const PidStats& self_pstats,
                                           const PidStats& children_pstats) {
   std::lock_guard<std::mutex> lock(mutex_);
+  auto it = agents_.find(ip_addr);
+  bool was_online = (it != agents_.end()) && it->second.online;
+
   auto& agent = agents_[ip_addr];
   agent.host_name = host_name;
   agent.ip_addr = ip_addr;
@@ -52,6 +64,12 @@ void HotmethodService::UpdateAgentStatus(const std::string& ip_addr,
   agent.self_pstats = self_pstats;
   agent.children_pstats = children_pstats;
   agent.last_heartbeat = std::chrono::steady_clock::now();
+  agent.online = true;
+
+  // 审计日志：Agent 恢复上线
+  if (!was_online) {
+    LOG_INFO("[AUDIT] Agent " + host_name + " (" + ip_addr + ") 恢复上线");
+  }
 }
 
 bool HotmethodService::GetAgentStatus(const std::string& ip_addr, AgentStatus* status) {
@@ -60,23 +78,91 @@ bool HotmethodService::GetAgentStatus(const std::string& ip_addr, AgentStatus* s
   if (it == agents_.end()) {
     return false;
   }
+
+  // 检查是否离线（30s 无心跳）
+  auto now = std::chrono::steady_clock::now();
+  auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - it->second.last_heartbeat).count();
+  if (elapsed > 30) {
+    it->second.online = false;
+  }
+
   *status = it->second;
   return true;
+}
+
+bool HotmethodService::IsAgentOnline(const std::string& ip_addr) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  auto it = agents_.find(ip_addr);
+  if (it == agents_.end()) {
+    return false;
+  }
+
+  // 检查是否离线（30s 无心跳）
+  auto now = std::chrono::steady_clock::now();
+  auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - it->second.last_heartbeat).count();
+  if (elapsed > 30) {
+    if (it->second.online) {
+      // 审计日志：Agent 离线
+      LOG_INFO("[AUDIT] Agent " + it->second.host_name + " (" + ip_addr + ") 离线，无心跳 " + std::to_string(elapsed) + " 秒");
+      it->second.online = false;
+    }
+    return false;
+  }
+
+  return true;
+}
+
+bool HotmethodService::GetTaskStatus(const std::string& task_id, TaskState* state) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  auto it = tasks_state_.find(task_id);
+  if (it == tasks_state_.end()) {
+    return false;
+  }
+  *state = it->second;
+  return true;
+}
+
+void HotmethodService::UpdateTaskStatus(const std::string& task_id, TaskStatus status, const std::string& reason) {
+  // 注意：调用者已持有锁
+  auto& state = tasks_state_[task_id];
+  state.status = status;
+  state.reason = reason;
+  state.timestamp = std::chrono::steady_clock::now();
+
+  // 状态迁移日志（模拟落库）
+  std::string status_str;
+  switch (status) {
+    case TaskStatus::PENDING:   status_str = "PENDING"; break;
+    case TaskStatus::RUNNING:   status_str = "RUNNING"; break;
+    case TaskStatus::UPLOADING: status_str = "UPLOADING"; break;
+    case TaskStatus::DONE:      status_str = "DONE"; break;
+    case TaskStatus::FAILED:    status_str = "FAILED"; break;
+  }
+  LOG_INFO("[STATE] Task " + task_id + " -> " + status_str + " (reason: " + reason + ")");
 }
 
 grpc::Status HotmethodService::NotifyResult(grpc::ServerContext* context,
                                              const TaskResult* request,
                                              google::protobuf::Empty* response) {
-  std::cout << "Task " << request->task_id() << " completed";
-  if (!request->error_message().empty()) {
-    std::cout << " with error: " << request->error_message();
+  std::string task_id = request->task_id();
+  std::string error_msg = request->error_message();
+
+  if (error_msg.empty()) {
+    LOG_INFO("Task " + task_id + " completed successfully");
+
+    // 状态迁移：DONE（采集成功）
+    UpdateTaskStatus(task_id, TaskStatus::DONE, "采集完成");
+  } else {
+    LOG_ERROR("Task " + task_id + " failed: " + error_msg);
+
+    // 状态迁移：FAILED（采集失败）
+    UpdateTaskStatus(task_id, TaskStatus::FAILED, "采集失败: " + error_msg);
   }
-  std::cout << std::endl;
 
   // 缓存任务结果
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    results_[request->task_id()] = *request;
+    results_[task_id] = *request;
   }
 
   return grpc::Status::OK;

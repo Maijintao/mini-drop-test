@@ -153,6 +153,7 @@ void HotmethodChannel::WorkerLoop() {
 
       // 上传采集结果到 MinIO
       if (storage_) {
+        std::cout << "Task " << task.task_id() << " uploading..." << std::endl;
         std::string remote_key = "profiler/" + task.task_id() + "/" + task.task_id() + ext;
         int upload_ret = storage_->Upload(output_path, remote_key);
         if (upload_ret == 0) {
