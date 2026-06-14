@@ -4,6 +4,9 @@ build/
 *.so
 *.a
 
+# Go 测试编译产物
+grpc_integration_test
+
 # protobuf 自动生成
 *.pb.cc
 *.pb.h
