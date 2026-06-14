@@ -1,0 +1,56 @@
+version: '3.8'
+
+services:
+  # Drop Server - 任务调度服务
+  drop-server:
+    build:
+      context: ./drop
+      dockerfile: Dockerfile
+    container_name: drop-server
+    ports:
+      - "50051:50051"
+    volumes:
+      - ./drop/etc:/etc/drop
+    command: ["drop_server", "--port", "50051"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=:50051"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # Drop Agent - 性能采集代理（可多实例）
+  drop-agent:
+    build:
+      context: ./drop
+      dockerfile: Dockerfile
+    container_name: drop-agent
+    depends_on:
+      - drop-server
+    volumes:
+      - ./drop/etc:/etc/drop
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+    privileged: true  # perf/bpftrace 需要
+    command: ["drop_agent"]
+    restart: unless-stopped
+    environment:
+      - SERVER_ADDR=drop-server:50051
+
+  # MinIO - 对象存储（可选）
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+    command: server /data --console-address ":9001"
+    restart: unless-stopped
+
+volumes:
+  minio-data:

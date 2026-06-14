@@ -3,6 +3,8 @@
 #include <signal.h>
 #include <unistd.h>
 #include <atomic>
+#include <thread>
+#include <chrono>
 #include <grpcpp/grpcpp.h>
 #include "HealthCheckService.h"
 #include "HotmethodService.h"
@@ -10,20 +12,22 @@
 #include "InitAgentInfoService.h"
 
 static std::atomic<bool> g_running{true};
-static grpc::Server* g_server = nullptr;  // 仅用于信号处理
 
 void SignalHandler(int sig) {
   const char msg[] = "Received signal, shutting down...\n";
   write(STDOUT_FILENO, msg, sizeof(msg) - 1);
   g_running = false;
-  // gRPC Shutdown 是线程安全的，可以在信号处理中调用
-  if (g_server) {
-    g_server->Shutdown();
-  }
 }
 
 int main(int argc, char* argv[]) {
-  std::string server_address("0.0.0.0:50051");
+  int port = 50051;
+  for (int i = 1; i < argc - 1; i++) {
+    if (std::string(argv[i]) == "--port") {
+      port = std::stoi(argv[i + 1]);
+      break;
+    }
+  }
+  std::string server_address = "0.0.0.0:" + std::to_string(port);
 
   // 从环境变量读取存储配置
   drop::AgentConfig storage_config;
@@ -51,7 +55,6 @@ int main(int argc, char* argv[]) {
     std::cerr << "Failed to start server on " << server_address << std::endl;
     return 1;
   }
-  g_server = server.get();
 
   // 注册信号处理
   struct sigaction sa;
@@ -63,8 +66,26 @@ int main(int argc, char* argv[]) {
 
   std::cout << "drop_server listening on " << server_address << std::endl;
 
-  // 阻塞等待，直到 Shutdown 被调用
-  server->Wait();
+  // 启动超时清理线程
+  std::thread cleanup_thread([&hotmethod_service]() {
+    while (g_running) {
+      hotmethod_service.CleanupTimeoutTasks(30);  // 30 秒超时
+      std::this_thread::sleep_for(std::chrono::seconds(10));  // 每 10 秒检查一次
+    }
+  });
+
+  // 等待退出信号，然后优雅关闭
+  while (g_running) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  }
+
+  // 等待清理线程结束
+  if (cleanup_thread.joinable()) {
+    cleanup_thread.join();
+  }
+
+  // 优雅关闭 Server
+  server->Shutdown();
 
   std::cout << "drop_server stopped." << std::endl;
   return 0;

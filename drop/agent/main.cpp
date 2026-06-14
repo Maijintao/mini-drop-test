@@ -1,13 +1,18 @@
 #include <iostream>
 #include <string>
+#include <vector>
 #include <signal.h>
 #include <unistd.h>
 #include <atomic>
 #include <thread>
 #include <chrono>
+#include <cstring>
+#include <grpcpp/grpcpp.h>
 #include "Config.h"
 #include "HealthCheckChannel.h"
 #include "HotmethodChannel.h"
+#include "Daemon.h"
+#include "init.grpc.pb.h"
 
 // 全局退出标志，所有组件共享引用
 static std::atomic<bool> g_running{true};
@@ -20,16 +25,55 @@ void SignalHandler(int sig) {
 
 int main(int argc, char* argv[]) {
   std::string config_path = "etc/config.json";
-  if (argc > 1) {
-    config_path = argv[1];
+  bool daemon_mode = false;
+
+  // 解析参数
+  for (int i = 1; i < argc; i++) {
+    if (strcmp(argv[i], "--daemon") == 0 || strcmp(argv[i], "-d") == 0) {
+      daemon_mode = true;
+    } else {
+      config_path = argv[i];
+    }
+  }
+
+  // 守护化
+  if (daemon_mode) {
+    if (drop::Daemonize() != 0) {
+      std::cerr << "Failed to daemonize" << std::endl;
+      return 1;
+    }
   }
 
   // 加载配置
   drop::Config config = drop::Config::LoadFromFile(config_path);
 
-  std::string server_addr = config.server_ips.empty()
-    ? "localhost:50051"
-    : config.server_ips[0] + ":" + std::to_string(config.server_port);
+  // 构建 Server 地址列表
+  std::vector<std::string> server_addrs;
+  if (config.server_ips.empty()) {
+    server_addrs.push_back("localhost:" + std::to_string(config.server_port));
+  } else {
+    for (const auto& ip : config.server_ips) {
+      server_addrs.push_back(ip + ":" + std::to_string(config.server_port));
+    }
+  }
+
+  // 多Server故障转移：尝试连接每个Server
+  std::string server_addr;
+  for (const auto& addr : server_addrs) {
+    auto channel = grpc::CreateChannel(addr, grpc::InsecureChannelCredentials());
+    auto deadline = std::chrono::system_clock::now() + std::chrono::seconds(2);
+    if (channel->WaitForConnected(deadline)) {
+      server_addr = addr;
+      std::cout << "Connected to server: " << addr << std::endl;
+      break;
+    }
+    std::cerr << "Failed to connect to " << addr << ", trying next..." << std::endl;
+  }
+
+  if (server_addr.empty()) {
+    std::cerr << "Failed to connect to any server" << std::endl;
+    return 1;
+  }
 
   // 注册信号处理
   struct sigaction sa;
@@ -39,7 +83,32 @@ int main(int argc, char* argv[]) {
   sigaction(SIGINT, &sa, nullptr);
   sigaction(SIGTERM, &sa, nullptr);
 
-  std::cout << "drop_agent starting, connecting to " << server_addr << std::endl;
+  std::cout << "drop_agent starting, connected to " << server_addr << std::endl;
+
+  // Agent 注册
+  {
+    auto channel = grpc::CreateChannel(server_addr, grpc::InsecureChannelCredentials());
+    auto init_stub = drop::Init::NewStub(channel);
+    grpc::ClientContext ctx;
+    ctx.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(5));
+
+    drop::RegisterAgentRequest req;
+    char hostname[256];
+    gethostname(hostname, sizeof(hostname));
+    req.set_host_name(hostname);
+    req.set_ip_addr(config.ip_addr);
+    req.set_uid(config.uid);
+    req.set_agent_version("0.1.0");
+
+    drop::RegisterAgentResponse resp;
+    auto status = init_stub->RegisterAgent(&ctx, req, &resp);
+    if (status.ok() && resp.code() == 0) {
+      std::cout << "[Register] Agent registered successfully" << std::endl;
+    } else {
+      std::cerr << "[Register] Agent registration failed: "
+                << (status.ok() ? resp.message() : status.error_message()) << std::endl;
+    }
+  }
 
   // 创建组件，共享退出标志
   drop::HotmethodChannel hotmethod_channel(server_addr, config, g_running);

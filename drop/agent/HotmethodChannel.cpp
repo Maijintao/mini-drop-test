@@ -102,11 +102,15 @@ void HotmethodChannel::WorkerLoop() {
       task_queue_.pop();
     }
 
+    // 使用 TaskDesc.timeout_sec 作为超时保护
+    int timeout_sec = task.timeout_sec() > 0 ? task.timeout_sec() : 60;
+
     std::cout << "Executing task " << task.task_id()
               << " type=" << task.task_type()
               << " profiler_type=" << task.profiler_type()
               << " pid=" << task.sample_argv().pid()
-              << " duration=" << task.sample_argv().duration() << "s" << std::endl;
+              << " duration=" << task.sample_argv().duration() << "s"
+              << " timeout=" << timeout_sec << "s" << std::endl;
 
     // 根据采集器类型选择输出文件扩展名
     std::string ext = ".data";

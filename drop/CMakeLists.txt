@@ -5,8 +5,11 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Find dependencies
+set(protobuf_MODULE_COMPATIBLE ON)
 find_package(Protobuf CONFIG REQUIRED)
 find_package(gRPC CONFIG REQUIRED)
+find_package(nlohmann_json CONFIG REQUIRED)
+find_package(Threads REQUIRED)
 
 # Proto files
 set(PROTO_FILES
@@ -17,9 +20,31 @@ set(PROTO_FILES
   common/proto/init.proto
 )
 
-# Generate protobuf/gRPC code
+# Generate protobuf code
 protobuf_generate_cpp(PROTO_SRCS PROTO_HDRS ${PROTO_FILES})
-grpc_generate_cpp(GRPC_SRCS GRPC_HDRS ${PROTO_FILES})
+
+# Generate gRPC code
+set(GRPC_SRCS "")
+set(GRPC_HDRS "")
+set(PROTO_IMPORT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/common/proto")
+foreach(PROTO_FILE ${PROTO_FILES})
+  get_filename_component(PROTO_NAME ${PROTO_FILE} NAME_WE)
+  get_filename_component(PROTO_ABS "${PROTO_FILE}" ABSOLUTE)
+  set(GRPC_SRC "${CMAKE_CURRENT_BINARY_DIR}/${PROTO_NAME}.grpc.pb.cc")
+  set(GRPC_HDR "${CMAKE_CURRENT_BINARY_DIR}/${PROTO_NAME}.grpc.pb.h")
+  list(APPEND GRPC_SRCS ${GRPC_SRC})
+  list(APPEND GRPC_HDRS ${GRPC_HDR})
+  add_custom_command(
+    OUTPUT ${GRPC_SRC} ${GRPC_HDR}
+    COMMAND protobuf::protoc
+    --grpc_out=${CMAKE_CURRENT_BINARY_DIR}
+    --plugin=protoc-gen-grpc=$<TARGET_FILE:gRPC::grpc_cpp_plugin>
+    -I ${PROTO_IMPORT_DIR}
+    ${PROTO_ABS}
+    DEPENDS ${PROTO_ABS} gRPC::grpc_cpp_plugin
+    COMMENT "Generating gRPC code for ${PROTO_NAME}"
+  )
+endforeach()
 
 # Common library (proto generated code)
 add_library(drop_proto STATIC
@@ -28,6 +53,7 @@ add_library(drop_proto STATIC
 )
 target_include_directories(drop_proto PUBLIC
   ${CMAKE_CURRENT_BINARY_DIR}
+  ${CMAKE_CURRENT_SOURCE_DIR}/common
 )
 target_link_libraries(drop_proto PUBLIC
   protobuf::libprotobuf
@@ -52,7 +78,7 @@ add_executable(drop_agent
   common/Log.cpp
   common/ScriptRunner.cpp
 )
-target_link_libraries(drop_agent PRIVATE drop_proto)
+target_link_libraries(drop_agent PRIVATE drop_proto Threads::Threads)
 
 # Server binary
 add_executable(drop_server
@@ -63,4 +89,4 @@ add_executable(drop_server
   server/InitAgentInfoService.cpp
   common/Log.cpp
 )
-target_link_libraries(drop_server PRIVATE drop_proto)
+target_link_libraries(drop_server PRIVATE drop_proto Threads::Threads)

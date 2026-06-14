@@ -32,10 +32,10 @@ assert_eq() {
 
     if [ "$expected" = "$actual" ]; then
         echo -e "  ${GREEN}✓${NC} $test_name"
-        ((pass_count++))
+        pass_count=$((pass_count + 1))
     else
         echo -e "  ${RED}✗${NC} $test_name (expected: $expected, actual: $actual)"
-        ((fail_count++))
+        fail_count=$((fail_count + 1))
     fi
 }
 
@@ -46,10 +46,10 @@ assert_contains() {
 
     if echo "$text" | grep -q "$pattern"; then
         echo -e "  ${GREEN}✓${NC} $test_name"
-        ((pass_count++))
+        pass_count=$((pass_count + 1))
     else
         echo -e "  ${RED}✗${NC} $test_name (pattern '$pattern' not found)"
-        ((fail_count++))
+        fail_count=$((fail_count + 1))
     fi
 }
 
@@ -242,7 +242,10 @@ test_agent_config_loading() {
     # 检查是否可以编译运行（如果已编译）
     if [ -f "$BUILD_DIR/drop_agent" ]; then
         # 尝试用无效配置启动，应该报错但不会崩溃
-        timeout 2 "$BUILD_DIR/drop_agent" /nonexistent/config.json > /tmp/agent_config_test.log 2>&1 || true
+        "$BUILD_DIR/drop_agent" /nonexistent/config.json > /tmp/agent_config_test.log 2>&1 &
+        local pid=$!
+        sleep 2
+        kill $pid 2>/dev/null; wait $pid 2>/dev/null
 
         if [ -f /tmp/agent_config_test.log ]; then
             assert_contains "Agent 无效配置报错" "Failed to open config" "$(cat /tmp/agent_config_test.log)"

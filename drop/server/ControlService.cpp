@@ -49,8 +49,10 @@ grpc::Status ControlService::FetchData(grpc::ServerContext* context,
   if (hotmethod_service_->GetResult(request->task_id(), &result)) {
     response->set_code(0);
     response->set_message("OK");
-    auto* task_result = response->mutable_result();
-    *task_result = result;
+    if (result.has_file()) {
+      *response->mutable_file() = result.file();
+    }
+    response->set_cos_key(result.cos_key());
   } else {
     response->set_code(-1);
     response->set_message("Result not found");

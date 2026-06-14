@@ -32,8 +32,8 @@ bool HotmethodService::PopTask(const std::string& target_ip, TaskDesc* task) {
     tasks_.erase(it);  // 清理空条目
   }
 
-  // 状态迁移：RUNNING（任务派发给 Agent）
-  UpdateTaskStatus(task->task_id(), TaskStatus::RUNNING, "任务派发给 Agent " + target_ip);
+  // 状态迁移：DISPATCHED（任务派发给 Agent）
+  UpdateTaskStatus(task->task_id(), TaskStatus::DISPATCHED, "任务派发给 Agent " + target_ip);
 
   return true;
 }
@@ -132,11 +132,13 @@ void HotmethodService::UpdateTaskStatus(const std::string& task_id, TaskStatus s
   // 状态迁移日志（模拟落库）
   std::string status_str;
   switch (status) {
-    case TaskStatus::PENDING:   status_str = "PENDING"; break;
-    case TaskStatus::RUNNING:   status_str = "RUNNING"; break;
-    case TaskStatus::UPLOADING: status_str = "UPLOADING"; break;
-    case TaskStatus::DONE:      status_str = "DONE"; break;
-    case TaskStatus::FAILED:    status_str = "FAILED"; break;
+    case TaskStatus::PENDING:    status_str = "PENDING"; break;
+    case TaskStatus::DISPATCHED: status_str = "DISPATCHED"; break;
+    case TaskStatus::RUNNING:    status_str = "RUNNING"; break;
+    case TaskStatus::UPLOADING:  status_str = "UPLOADING"; break;
+    case TaskStatus::DONE:       status_str = "DONE"; break;
+    case TaskStatus::FAILED:     status_str = "FAILED"; break;
+    case TaskStatus::TIMEOUT:    status_str = "TIMEOUT"; break;
   }
   LOG_INFO("[STATE] Task " + task_id + " -> " + status_str + " (reason: " + reason + ")");
 }
@@ -144,28 +146,57 @@ void HotmethodService::UpdateTaskStatus(const std::string& task_id, TaskStatus s
 grpc::Status HotmethodService::NotifyResult(grpc::ServerContext* context,
                                              const TaskResult* request,
                                              google::protobuf::Empty* response) {
+  std::lock_guard<std::mutex> lock(mutex_);
+
   std::string task_id = request->task_id();
   std::string error_msg = request->error_message();
 
   if (error_msg.empty()) {
     LOG_INFO("Task " + task_id + " completed successfully");
-
-    // 状态迁移：DONE（采集成功）
     UpdateTaskStatus(task_id, TaskStatus::DONE, "采集完成");
   } else {
     LOG_ERROR("Task " + task_id + " failed: " + error_msg);
-
-    // 状态迁移：FAILED（采集失败）
     UpdateTaskStatus(task_id, TaskStatus::FAILED, "采集失败: " + error_msg);
   }
 
-  // 缓存任务结果
-  {
-    std::lock_guard<std::mutex> lock(mutex_);
-    results_[task_id] = *request;
+  results_[task_id] = *request;
+  return grpc::Status::OK;
+}
+
+void HotmethodService::CleanupTimeoutTasks(int timeout_sec) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  auto now = std::chrono::steady_clock::now();
+
+  // 超时检测：DISPATCHED/RUNNING 超时标记为 TIMEOUT
+  for (auto& [task_id, state] : tasks_state_) {
+    if (state.status != TaskStatus::DISPATCHED &&
+        state.status != TaskStatus::RUNNING) {
+      continue;
+    }
+    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - state.timestamp).count();
+    if (elapsed > timeout_sec) {
+      state.status = TaskStatus::TIMEOUT;
+      state.reason = "任务超时，Agent 可能已掉线";
+      state.timestamp = now;
+      LOG_INFO("[STATE] Task " + task_id + " -> TIMEOUT (reason: 超时 " + std::to_string(elapsed) + "s)");
+    }
   }
 
-  return grpc::Status::OK;
+  // TTL 清理：DONE/FAILED/TIMEOUT 超过 1 小时的删除
+  constexpr int TTL_SEC = 3600;
+  for (auto it = tasks_state_.begin(); it != tasks_state_.end(); ) {
+    if (it->second.status == TaskStatus::DONE ||
+        it->second.status == TaskStatus::FAILED ||
+        it->second.status == TaskStatus::TIMEOUT) {
+      auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - it->second.timestamp).count();
+      if (elapsed > TTL_SEC) {
+        results_.erase(it->first);
+        it = tasks_state_.erase(it);
+        continue;
+      }
+    }
+    ++it;
+  }
 }
 
 }  // namespace drop

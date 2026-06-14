@@ -2,6 +2,7 @@
 
 #include <grpcpp/grpcpp.h>
 #include "hotmethod.grpc.pb.h"
+#include "healthcheck.grpc.pb.h"
 #include <map>
 #include <deque>
 #include <mutex>
@@ -13,11 +14,13 @@ static constexpr size_t MAX_TASK_QUEUE_SIZE = 100;
 
 // 任务状态枚举（对应题目要求的状态机）
 enum class TaskStatus {
-  PENDING = 0,    // 新建，等待派发
-  RUNNING = 1,    // 已派发给 Agent，执行中
-  UPLOADING = 2,  // 采集完成，正在上传
-  DONE = 3,       // 成功完成
-  FAILED = 4      // 失败
+  PENDING = 0,      // 新建，等待派发
+  DISPATCHED = 1,   // 已派发给 Agent，等待执行
+  RUNNING = 2,      // Agent 正在执行采集
+  UPLOADING = 3,    // 采集完成，正在上传
+  DONE = 4,         // 成功完成
+  FAILED = 5,       // 失败
+  TIMEOUT = 6       // 超时
 };
 
 // 任务状态记录（用于落库和审计）
@@ -67,6 +70,9 @@ public:
 
   // 更新任务状态（带 reason）
   void UpdateTaskStatus(const std::string& task_id, TaskStatus status, const std::string& reason);
+
+  // 超时清理：检查 DISPATCHED 超过 timeout_sec 的任务
+  void CleanupTimeoutTasks(int timeout_sec = 30);
 
   grpc::Status NotifyResult(grpc::ServerContext* context,
                             const TaskResult* request,

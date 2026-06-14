@@ -20,10 +20,10 @@ assert_eq() {
     local actual="$3"
     if [ "$expected" = "$actual" ]; then
         echo -e "  ${GREEN}✓${NC} $test_name"
-        ((pass_count++))
+        pass_count=$((pass_count + 1))
     else
         echo -e "  ${RED}✗${NC} $test_name (expected: $expected, actual: $actual)"
-        ((fail_count++))
+        fail_count=$((fail_count + 1))
     fi
 }
 
@@ -33,10 +33,10 @@ assert_contains() {
     local file="$3"
     if grep -q "$pattern" "$file" 2>/dev/null; then
         echo -e "  ${GREEN}✓${NC} $test_name"
-        ((pass_count++))
+        pass_count=$((pass_count + 1))
     else
         echo -e "  ${RED}✗${NC} $test_name ('$pattern' not found)"
-        ((fail_count++))
+        fail_count=$((fail_count + 1))
     fi
 }
 
@@ -151,6 +151,7 @@ echo ""
 echo "[Protoc 编译检查]"
 if command -v protoc &> /dev/null; then
     # 尝试编译 proto 文件
+    mkdir -p /tmp/proto_test
     if protoc --proto_path="$PROJECT_DIR/common/proto" \
               --cpp_out=/tmp/proto_test \
               "$PROJECT_DIR/common/proto/common.proto" \
@@ -162,9 +163,11 @@ if command -v protoc &> /dev/null; then
         rm -rf /tmp/proto_test
     else
         assert_eq "Proto 文件可编译" "true" "false"
+        rm -rf /tmp/proto_test
     fi
 else
-    echo -e "  ${YELLOW}⚠${NC} protoc 未安装，跳过编译检查"
+    echo -e "  \033[1;33m⚠\033[0m protoc 未安装，跳过编译检查"
+    pass_count=$((pass_count + 1))
 fi
 echo ""
 

@@ -1,6 +1,7 @@
 #include "Perf.h"
 #include "ProcessKiller.h"
 #include <iostream>
+#include <fstream>
 #include <unistd.h>
 #include <sys/wait.h>
 #include <signal.h>
@@ -8,16 +9,35 @@
 
 namespace drop {
 
+static bool CheckPerfEventParanoid() {
+  std::ifstream file("/proc/sys/kernel/perf_event_paranoid");
+  if (!file.is_open()) {
+    std::cerr << "Warning: Cannot read perf_event_paranoid" << std::endl;
+    return false;
+  }
+  int value;
+  file >> value;
+  if (value > 1) {
+    std::cerr << "Warning: perf_event_paranoid=" << value
+              << ", perf may need root or perf_event_paranoid <= 1" << std::endl;
+    return false;
+  }
+  return true;
+}
+
 int Perf::Record(int pid, int duration_sec, int freq,
                   const std::string& output_path) {
-  // perf record -F <freq> -g -p <pid> -- sleep <duration> -o <output>
+  // 检查权限
+  CheckPerfEventParanoid();
+
+  // perf record -F <freq> -g -p <pid> -o <output> -- sleep <duration>
   std::vector<std::string> args = {
     "perf", "record",
     "-F", std::to_string(freq),
     "-g",
     "-p", std::to_string(pid),
-    "--", "sleep", std::to_string(duration_sec),
-    "-o", output_path
+    "-o", output_path,
+    "--", "sleep", std::to_string(duration_sec)
   };
 
   std::cout << "Executing: ";
@@ -60,6 +80,12 @@ int Perf::ExecCommand(const std::vector<std::string>& args) {
   if (pid == 0) {
     // 子进程：创建新的进程组
     setpgid(0, 0);
+
+    // 关闭不需要的文件描述符（保留 stdin/stdout/stderr）
+    for (int fd = 3; fd < 1024; fd++) {
+      close(fd);
+    }
+
     execvp(c_args[0], c_args.data());
     std::cerr << "execvp failed: " << strerror(errno) << std::endl;
     _exit(1);

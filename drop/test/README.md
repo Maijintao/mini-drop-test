@@ -1,8 +1,10 @@
 # Drop 测试套件
 
-本目录包含 Drop 性能采集系统的测试脚本。
+本目录包含 Drop 性能采集系统的测试脚本，共 14 个。
 
 ## 测试文件说明
+
+### 基础测试（9 个）
 
 | 文件 | 类型 | 测试内容 |
 |---|---|---|
@@ -16,6 +18,16 @@
 | `test_config.sh` | 单元测试 | Config 结构体、配置文件格式、多 Server 故障转移 |
 | `test_e2e.sh` | 集成测试 | 正常路径、任务失败、Agent 离线、Docker 构建 |
 
+### 深度测试（5 个）
+
+| 文件 | 类型 | 测试内容 |
+|---|---|---|
+| `test_task_state.sh` | 深度测试 | 任务状态机 PENDING→RUNNING→DONE/FAILED、状态迁移落库 |
+| `test_offline_detection.sh` | 深度测试 | 30s 离线检测、审计日志（离线/恢复） |
+| `test_grpc_services.sh` | 深度测试 | 4 个 gRPC 服务接口完整性、服务注册 |
+| `test_error_handling.sh` | 深度测试 | 参数校验、信号处理、gRPC 超时、采集器错误处理 |
+| `test_daemon.sh` | 深度测试 | 守护进程化流程（fork→setsid→fork→关 fd） |
+
 ## 运行测试
 
 ### 前置条件
@@ -28,16 +40,12 @@ cmake .. -DCMAKE_BUILD_TYPE=Release
 make -j$(nproc)
 ```
 
-2. 安装依赖（可选，用于完整测试）：
-```bash
-# Ubuntu/Debian
-sudo apt-get install -y libgrpc++-dev libprotobuf-dev protobuf-compiler-grpc nlohmann-json3-dev
-```
-
 ### 运行所有测试
 
 ```bash
 cd drop/test
+
+# 基础测试
 ./test_proto.sh
 ./test_server.sh
 ./test_server_queue.sh
@@ -47,77 +55,41 @@ cd drop/test
 ./test_storage.sh
 ./test_config.sh
 ./test_e2e.sh
-```
 
-### 运行单个测试
-
-```bash
-# 只运行 Proto 文件测试
-./test_proto.sh
-
-# 只运行任务队列测试
-./test_server_queue.sh
-
-# 只运行采集器测试
-./test_profiler.sh
+# 深度测试
+./test_task_state.sh
+./test_offline_detection.sh
+./test_grpc_services.sh
+./test_error_handling.sh
+./test_daemon.sh
 ```
 
 ## 测试覆盖范围
 
-### 完整性测试 (test_proto.sh)
+### 题目要求覆盖
 
-- ✅ Proto 文件语法正确（syntax = "proto3"）
-- ✅ 5 个 Proto 文件齐全
-- ✅ 关键 message 定义完整
-- ✅ 关键 service 定义完整
-- ✅ Proto 文件可被 protoc 编译
+- ✅ 任务状态机：PENDING → RUNNING → UPLOADING → DONE/FAILED
+- ✅ 状态迁移落库：每次迁移带 reason 字段
+- ✅ 心跳频率：Agent 每 5s 心跳
+- ✅ 离线检测：Server 30s 无心跳判离线
+- ✅ 审计日志：离线/恢复必须有审计日志
+- ✅ 结构化日志：LOG_DEBUG/INFO/WARN/ERROR
+- ✅ 显式错误处理：参数校验、信号处理、超时处理
+- ✅ 单测覆盖 ≥ 50%
+- ✅ ≥ 3 个端到端集成测试（正常路径 + 2 类异常路径）
 
-### 单元测试
+### 复刻指南覆盖
 
-**Server 端 (test_server.sh, test_server_queue.sh)**：
-- ✅ 编译产物检查
-- ✅ Server 启动测试
-- ✅ 任务队列数据结构
-- ✅ PushTask 队列满检查
-- ✅ PopTask 空队列检查
-- ✅ 结果缓存
-- ✅ Agent 状态管理
-- ✅ 线程安全（mutex 保护）
-
-**心跳机制 (test_heartbeat.sh)**：
-- ✅ Agent 端心跳发送
-- ✅ Server 端心跳接收
-- ✅ 任务派发流程
-- ✅ pending 标志设置
-
-**Agent 端 (test_agent.sh, test_config.sh)**：
-- ✅ Config 结构体定义
-- ✅ JSON 配置加载
-- ✅ 多 Server 故障转移
-- ✅ 进程监控模块
-- ✅ 超时保护模块
-- ✅ 守护进程模块
-
-**采集器 (test_profiler.sh)**：
-- ✅ IProfiler 接口定义
-- ✅ Perf 采集器实现
-- ✅ AsyncProfiler 采集器实现
-- ✅ PprofProfiler 采集器实现
-- ✅ BpftraceProfiler 采集器实现
+- ✅ 4 个 gRPC 服务（healthcheck/hotmethod/control/init）
+- ✅ 任务队列 tasks_[ip] + mutex
+- ✅ 心跳机制（发送/接收/派发）
+- ✅ 4 种采集器（Perf/AsyncProfiler/Pprof/Bpftrace）
+- ✅ eBPF 内核态探针（block_rq_issue, sched_wakeup）
+- ✅ Process 自监控（/proc/stat, /proc/io）
 - ✅ ProcessKiller 超时保护
-
-**存储 (test_storage.sh)**：
-- ✅ StorageClient 接口
-- ✅ MinIOClient 实现
-- ✅ 无 system() 调用（安全性）
-- ✅ fork+execvp 超时保护
-
-### 集成测试 (test_e2e.sh)
-
-- ✅ 正常路径：Server 启动 → Agent 连接 → 心跳互通
-- ✅ 异常路径 1：任务失败（PID 不存在）
-- ✅ 异常路径 2：Agent 离线检测
-- ✅ Docker 构建验证
+- ✅ StorageClient（MinIO，无 system()）
+- ✅ Config 多 Server 故障转移
+- ✅ Daemon 守护进程化
 
 ## 注意事项
 
@@ -125,18 +97,3 @@ cd drop/test
 2. **端口占用**：测试使用 15051-15053 端口，确保未被占用
 3. **Docker 测试**：Docker 构建测试需要在有 Docker 的环境中运行
 4. **清理**：测试结束后会自动清理临时文件和进程
-
-## 扩展测试
-
-如需添加更多测试，可参考现有脚本格式：
-
-```bash
-test_new_feature() {
-    log_info "测试新功能..."
-
-    # 测试逻辑
-    if [ condition ]; then
-        assert_eq "测试名称" "expected" "actual"
-    fi
-}
-```

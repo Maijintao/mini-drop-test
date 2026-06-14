@@ -20,10 +20,10 @@ assert_contains() {
     local file="$3"
     if grep -q "$pattern" "$file" 2>/dev/null; then
         echo -e "  ${GREEN}✓${NC} $test_name"
-        ((pass_count++))
+        pass_count=$((pass_count + 1))
     else
         echo -e "  ${RED}✗${NC} $test_name ('$pattern' not found)"
-        ((fail_count++))
+        fail_count=$((fail_count + 1))
     fi
 }
 
@@ -33,10 +33,10 @@ assert_not_contains() {
     local file="$3"
     if ! grep -q "$pattern" "$file" 2>/dev/null; then
         echo -e "  ${GREEN}✓${NC} $test_name"
-        ((pass_count++))
+        pass_count=$((pass_count + 1))
     else
         echo -e "  ${RED}✗${NC} $test_name ('$pattern' found but should not)"
-        ((fail_count++))
+        fail_count=$((fail_count + 1))
     fi
 }
 
@@ -106,7 +106,7 @@ echo "[NotifyResult 方法]"
 
 assert_contains "NotifyResult 方法声明" 'grpc::Status NotifyResult' "$HEADER"
 assert_contains "NotifyResult 实现" 'HotmethodService::NotifyResult' "$IMPL"
-assert_contains "缓存结果" 'results_[request->task_id()]' "$IMPL"
+assert_contains "缓存结果" 'results_\[task_id\]' "$IMPL"
 echo ""
 
 # ============================================
@@ -130,10 +130,10 @@ echo "[线程安全]"
 LOCK_COUNT=$(grep -c 'std::lock_guard<std::mutex>' "$IMPL" || true)
 if [ "$LOCK_COUNT" -ge 4 ]; then
     echo -e "  ${GREEN}✓${NC} 所有关键方法都有锁保护 ($LOCK_COUNT 处)"
-    ((pass_count++))
+    pass_count=$((pass_count + 1))
 else
     echo -e "  ${RED}✗${NC} 锁保护不足 ($LOCK_COUNT 处，至少需要 4 处)"
-    ((fail_count++))
+    fail_count=$((fail_count + 1))
 fi
 echo ""
 

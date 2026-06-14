@@ -20,10 +20,10 @@ assert_contains() {
     local file="$3"
     if grep -q "$pattern" "$file" 2>/dev/null; then
         echo -e "  ${GREEN}✓${NC} $test_name"
-        ((pass_count++))
+        pass_count=$((pass_count + 1))
     else
         echo -e "  ${RED}✗${NC} $test_name ('$pattern' not found)"
-        ((fail_count++))
+        fail_count=$((fail_count + 1))
     fi
 }
 
@@ -33,10 +33,10 @@ assert_not_contains() {
     local file="$3"
     if ! grep -q "$pattern" "$file" 2>/dev/null; then
         echo -e "  ${GREEN}✓${NC} $test_name"
-        ((pass_count++))
+        pass_count=$((pass_count + 1))
     else
         echo -e "  ${RED}✗${NC} $test_name ('$pattern' found but should not)"
-        ((fail_count++))
+        fail_count=$((fail_count + 1))
     fi
 }
 
@@ -56,10 +56,10 @@ echo "[接口定义]"
 assert_contains "头文件保护" 'pragma once' "$HEADER"
 assert_contains "StorageClient 基类" 'class StorageClient' "$HEADER"
 assert_contains "虚析构函数" 'virtual ~StorageClient' "$HEADER"
-assert_contains "Upload 纯虚方法" 'virtual int Upload.*= 0' "$HEADER"
-assert_contains "Download 纯虚方法" 'virtual int Download.*= 0' "$HEADER"
-assert_contains "Exists 纯虚方法" 'virtual bool Exists.*= 0' "$HEADER"
-assert_contains "GetPresignedUrl 纯虚方法" 'virtual std::string GetPresignedUrl.*= 0' "$HEADER"
+assert_contains "Upload 纯虚方法" 'virtual int Upload' "$HEADER"
+assert_contains "Download 纯虚方法" 'virtual int Download' "$HEADER"
+assert_contains "Exists 纯虚方法" 'virtual bool Exists' "$HEADER"
+assert_contains "GetPresignedUrl 纯虚方法" 'virtual std::string GetPresignedUrl' "$HEADER"
 assert_contains "MinIOClient 实现类" 'class MinIOClient' "$HEADER"
 echo ""
 

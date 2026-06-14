@@ -31,8 +31,9 @@ message FetchDataRequest {
 
 message FetchDataResponse {
   int32 code = 1;
-  File file = 2;
-  string cos_key = 3;
+  string message = 2;
+  File file = 3;
+  string cos_key = 4;
 }
 
 message StatAgentRequest {
@@ -41,6 +42,7 @@ message StatAgentRequest {
 
 message StatAgentResponse {
   int32 code = 1;
-  PidStats self_pstats = 2;
-  PidStats children_pstats = 3;
+  string message = 2;
+  PidStats self_pstats = 3;
+  PidStats children_pstats = 4;
 }

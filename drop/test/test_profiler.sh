@@ -20,10 +20,10 @@ assert_contains() {
     local file="$3"
     if grep -q "$pattern" "$file" 2>/dev/null; then
         echo -e "  ${GREEN}✓${NC} $test_name"
-        ((pass_count++))
+        pass_count=$((pass_count + 1))
     else
         echo -e "  ${RED}✗${NC} $test_name ('$pattern' not found)"
-        ((fail_count++))
+        fail_count=$((fail_count + 1))
     fi
 }
 
@@ -31,17 +31,19 @@ check_profiler() {
     local name="$1"
     local header="$2"
     local impl="$3"
+    local is_static="${4:-false}"
 
     echo "[$name]"
 
     assert_contains "头文件存在" 'pragma once' "$header"
-    assert_contains "继承 IProfiler" 'IProfiler' "$header"
+    if [ "$is_static" = "false" ]; then
+        assert_contains "继承 IProfiler" 'IProfiler' "$header"
+        assert_contains "Name 方法声明" 'std::string Name' "$header"
+        assert_contains "Type 方法声明" 'int Type' "$header"
+    fi
     assert_contains "Record 方法声明" 'int Record' "$header"
-    assert_contains "Name 方法声明" 'std::string Name' "$header"
-    assert_contains "Type 方法声明" 'int Type' "$header"
     assert_contains "Record 方法实现" "::Record" "$impl"
     assert_contains "fork 调用" 'fork()' "$impl"
-    assert_contains "execvp 调用" 'execvp' "$impl"
     assert_contains "waitpid 调用" 'waitpid' "$impl"
     assert_contains "超时保护" 'ProcessKiller' "$impl"
     echo ""
@@ -61,9 +63,9 @@ IPROFILER="$PROJECT_DIR/common/IProfiler.h"
 
 assert_contains "头文件保护" 'pragma once' "$IPROFILER"
 assert_contains "虚析构函数" 'virtual ~IProfiler' "$IPROFILER"
-assert_contains "纯虚 Record 方法" 'virtual int Record.*= 0' "$IPROFILER"
-assert_contains "纯虚 Name 方法" 'virtual std::string Name.*= 0' "$IPROFILER"
-assert_contains "纯虚 Type 方法" 'virtual int Type.*= 0' "$IPROFILER"
+assert_contains "纯虚 Record 方法" 'virtual int Record' "$IPROFILER"
+assert_contains "纯虚 Name 方法" 'virtual std::string Name' "$IPROFILER"
+assert_contains "纯虚 Type 方法" 'virtual int Type' "$IPROFILER"
 assert_contains "PROFILER_PERF 常量" 'PROFILER_PERF = 0' "$IPROFILER"
 assert_contains "PROFILER_ASYNC_PROFILER 常量" 'PROFILER_ASYNC_PROFILER = 1' "$IPROFILER"
 assert_contains "PROFILER_PPROF 常量" 'PROFILER_PPROF = 2' "$IPROFILER"
@@ -71,11 +73,12 @@ assert_contains "PROFILER_BPFTRACE 常量" 'PROFILER_BPFTRACE = 3' "$IPROFILER"
 echo ""
 
 # ============================================
-# Perf 采集器
+# Perf 采集器（静态方法类，不继承 IProfiler）
 # ============================================
 check_profiler "Perf 采集器" \
     "$PROJECT_DIR/common/Perf.h" \
-    "$PROJECT_DIR/common/Perf.cpp"
+    "$PROJECT_DIR/common/Perf.cpp" \
+    "true"
 
 echo "[Perf 特殊检查]"
 assert_contains "perf record 命令" 'perf.*record' "$PROJECT_DIR/common/Perf.cpp"

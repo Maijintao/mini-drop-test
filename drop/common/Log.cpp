@@ -3,10 +3,12 @@
 #include <ctime>
 #include <iomanip>
 #include <sstream>
+#include <mutex>
 
 namespace drop {
 
 static LogLevel g_current_level = LogLevel::INFO;
+static std::mutex g_log_mutex;
 
 std::string GetCurrentTime() {
   auto now = std::time(nullptr);
@@ -40,6 +42,8 @@ void Log(LogLevel level, const char* file, int line, const std::string& msg) {
     filename = filename.substr(pos + 1);
   }
 
+  // 加锁保护，防止多线程日志交错
+  std::lock_guard<std::mutex> lock(g_log_mutex);
   std::cout << "[" << GetCurrentTime() << "]"
             << "[" << level_str << "]"
             << " " << filename << ":" << line

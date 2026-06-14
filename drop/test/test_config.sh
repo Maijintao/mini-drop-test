@@ -21,10 +21,10 @@ assert_contains() {
     local file="$3"
     if grep -q "$pattern" "$file" 2>/dev/null; then
         echo -e "  ${GREEN}✓${NC} $test_name"
-        ((pass_count++))
+        pass_count=$((pass_count + 1))
     else
         echo -e "  ${RED}✗${NC} $test_name ('$pattern' not found)"
-        ((fail_count++))
+        fail_count=$((fail_count + 1))
     fi
 }
 
@@ -34,10 +34,10 @@ assert_eq() {
     local actual="$3"
     if [ "$expected" = "$actual" ]; then
         echo -e "  ${GREEN}✓${NC} $test_name"
-        ((pass_count++))
+        pass_count=$((pass_count + 1))
     else
         echo -e "  ${RED}✗${NC} $test_name (expected: $expected, actual: $actual)"
-        ((fail_count++))
+        fail_count=$((fail_count + 1))
     fi
 }
 
