@@ -7,7 +7,7 @@
 import sys, os, tempfile, shutil, json
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from data_parser.collapsed_parser import parse_collapsed, stacks_to_collapsed
+from data_parser.collapsed_parser import parse_collapsed, parse_perf_script, stacks_to_collapsed
 from analyzers.flamegraph import collapsed_to_svg
 from analyzers.topn import analyze_topn, topn_to_json
 from analyzers.advisor import load_rules, match_rules, suggestions_to_markdown
@@ -152,6 +152,70 @@ nginx 1234 [000] 1000.002: cpu-cycles:
         shutil.rmtree(work_dir)
 
 
+def test_pipeline_data_not_found():
+    """异常路径1：折叠栈为空导致无热点"""
+    work_dir = tempfile.mkdtemp(prefix="e2e_empty_")
+    try:
+        # 空折叠栈
+        stacks = parse_collapsed("")
+        assert stacks == {}
+
+        # TopN 应返回空
+        topn = analyze_topn(stacks, top_k=10)
+        assert topn == []
+
+        # 建议应返回空
+        rules = load_rules()
+        suggestions = match_rules(topn, rules)
+        assert suggestions == []
+
+        # Markdown 应提示无建议
+        md = suggestions_to_markdown(suggestions, tid="empty-test")
+        assert "未发现" in md
+
+        print("[e2e-empty] ALL PASSED - empty stack handled gracefully")
+    finally:
+        shutil.rmtree(work_dir)
+
+
+def test_pipeline_perf_script_fails():
+    """异常路径2：perf script 输出为空（无采样数据）"""
+    work_dir = tempfile.mkdtemp(prefix="e2e_nosample_")
+    try:
+        # 空的 perf script 输出
+        stacks = parse_perf_script("")
+        assert stacks == {}
+
+        # 生成空折叠栈文件
+        collapsed_path = os.path.join(work_dir, "collapsed.txt")
+        with open(collapsed_path, "w") as f:
+            f.write("")
+
+        # 火焰图：空输入时 flamegraph.pl 会报错（Stack count is low）
+        svg_path = os.path.join(work_dir, "flamegraph.svg")
+        try:
+            collapsed_to_svg(collapsed_path, svg_path, title="Empty")
+            # 如果没报错，至少检查文件存在
+            assert os.path.exists(svg_path)
+        except RuntimeError as e:
+            # 预期错误：空数据
+            assert "Stack count" in str(e) or "No stack" in str(e)
+
+        # TopN + 建议：空输入
+        topn = analyze_topn(stacks, top_k=10)
+        assert topn == []
+
+        rules = load_rules()
+        suggestions = match_rules(topn, rules)
+        assert suggestions == []
+
+        print("[e2e-nosample] ALL PASSED - no sample data handled gracefully")
+    finally:
+        shutil.rmtree(work_dir)
+
+
 if __name__ == "__main__":
     test_full_pipeline()
     test_pipeline_with_real_perf_script()
+    test_pipeline_data_not_found()
+    test_pipeline_perf_script_fails()
