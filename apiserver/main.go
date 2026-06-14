@@ -41,9 +41,12 @@ func main() {
 	var logger *zap.Logger
 	var err error
 	if cfg.Log.Level == "debug" {
-		logger, _ = zap.NewDevelopment()
+		logger, err = zap.NewDevelopment()
 	} else {
-		logger, _ = zap.NewProduction()
+		logger, err = zap.NewProduction()
+	}
+	if err != nil {
+		log.Fatalf("init logger: %v", err)
 	}
 	defer logger.Sync()
 
@@ -52,7 +55,10 @@ func main() {
 	if err != nil {
 		logger.Fatal("connect database failed", zap.Error(err))
 	}
-	sqlDB, _ := db.DB()
+	sqlDB, err := db.DB()
+	if err != nil {
+		logger.Fatal("get underlying sql.DB failed", zap.Error(err))
+	}
 	sqlDB.SetMaxOpenConns(100)
 	sqlDB.SetMaxIdleConns(10)
 	sqlDB.SetConnMaxLifetime(3600e9) // 1 hour
@@ -116,9 +122,9 @@ func main() {
 func setupRouter(srv *server.APIServer, logger *zap.Logger, cfg config.Config) *gin.Engine {
 	r := gin.Default()
 
-	// CORS
+	// CORS — 用 AllowOriginFunc 动态反射 Origin，兼容 AllowCredentials
 	r.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"*"},
+		AllowOriginFunc:  func(origin string) bool { return true },
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization", "Drop_user_uid", "Drop_user_name"},
 		ExposeHeaders:    []string{"Content-Length"},

@@ -223,7 +223,10 @@ func (s *APIServer) GetTaskDetail(c *gin.Context) {
 		prefix := tid + "/"
 		objects := s.listStorageObjects(c, prefix)
 		for _, obj := range objects {
-			url, _ := s.Storage.PreSign(c, obj, 1*time.Hour)
+			url, err := s.Storage.PreSign(c, obj, 1*time.Hour)
+			if err != nil {
+				continue // 跳过签名失败的文件
+			}
 			cosFiles = append(cosFiles, gin.H{
 				"key": obj,
 				"url": url,
@@ -400,7 +403,10 @@ func (s *APIServer) GetCOSFiles(c *gin.Context) {
 
 	var files []gin.H
 	for _, obj := range objects {
-		url, _ := s.Storage.PreSign(c, obj, 1*time.Hour)
+		url, err := s.Storage.PreSign(c, obj, 1*time.Hour)
+		if err != nil {
+			continue // 跳过签名失败的文件
+		}
 		files = append(files, gin.H{
 			"key": obj,
 			"url": url,

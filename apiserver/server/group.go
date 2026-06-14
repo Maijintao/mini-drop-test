@@ -51,7 +51,14 @@ func (s *APIServer) CreateGroup(c *gin.Context) {
 	}
 
 	// 创建者自动加入组
-	s.Db.Create(&model.GroupMember{GID: group.GID, UID: uid})
+	if err := s.Db.Create(&model.GroupMember{GID: group.GID, UID: uid}).Error; err != nil {
+		// 组已创建但加人失败，记录警告但不回滚
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    CodeInternal,
+			"message": "group created but failed to add owner as member: " + err.Error(),
+		})
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"code": CodeSuccess,

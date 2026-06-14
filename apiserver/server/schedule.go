@@ -146,7 +146,14 @@ func (s *APIServer) DeleteScheduleTask(c *gin.Context) {
 	tid := c.Param("tid")
 
 	result := s.Db.Where("tid = ? AND uid = ?", tid, uid).Delete(&model.HotmethodTask{})
-	if result.Error != nil || result.RowsAffected == 0 {
+	if result.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    CodeInternal,
+			"message": result.Error.Error(),
+		})
+		return
+	}
+	if result.RowsAffected == 0 {
 		c.JSON(http.StatusNotFound, gin.H{
 			"code":    CodeNotFound,
 			"message": "schedule not found",

@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -59,9 +60,23 @@ func (s *APIServer) GetFlameData(c *gin.Context) {
 
 	// 尝试获取 SVG
 	svgKey := tid + "/flamegraph.svg"
-	exists, _ := s.Storage.IsExist(c, svgKey)
+	exists, err := s.Storage.IsExist(c, svgKey)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    CodeInternal,
+			"message": "storage error: " + err.Error(),
+		})
+		return
+	}
 	if exists {
-		url, _ := s.Storage.PreSign(c, svgKey, 3600e9) // 1小时
+		url, err := s.Storage.PreSign(c, svgKey, 1*time.Hour)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"code":    CodeInternal,
+				"message": "presign error: " + err.Error(),
+			})
+			return
+		}
 		c.JSON(http.StatusOK, gin.H{
 			"code": CodeSuccess,
 			"data": gin.H{
@@ -74,9 +89,23 @@ func (s *APIServer) GetFlameData(c *gin.Context) {
 
 	// 尝试获取折叠栈 JSON
 	topKey := tid + "/top.json"
-	exists, _ = s.Storage.IsExist(c, topKey)
+	exists, err = s.Storage.IsExist(c, topKey)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    CodeInternal,
+			"message": "storage error: " + err.Error(),
+		})
+		return
+	}
 	if exists {
-		url, _ := s.Storage.PreSign(c, topKey, 3600e9)
+		url, err := s.Storage.PreSign(c, topKey, 1*time.Hour)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"code":    CodeInternal,
+				"message": "presign error: " + err.Error(),
+			})
+			return
+		}
 		c.JSON(http.StatusOK, gin.H{
 			"code": CodeSuccess,
 			"data": gin.H{

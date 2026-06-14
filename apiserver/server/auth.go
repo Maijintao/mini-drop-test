@@ -23,7 +23,13 @@ func (s *APIServer) AuthCheck(c *gin.Context) {
 				UID:  uid,
 				Name: userName,
 			}
-			s.Db.Create(&user)
+			if createErr := s.Db.Create(&user).Error; createErr != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{
+					"code":    CodeInternal,
+					"message": "auto-create user failed: " + createErr.Error(),
+				})
+				return
+			}
 		}
 	}
 

@@ -18,12 +18,11 @@ type ControlClient struct {
 
 // NewControlClient 连接 drop_server
 func NewControlClient(target string) (*ControlClient, error) {
-	conn, err := grpc.Dial(target,
+	conn, err := grpc.NewClient(target,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithBlock(),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("grpc dial %s: %w", target, err)
+		return nil, fmt.Errorf("grpc new client %s: %w", target, err)
 	}
 	return &ControlClient{
 		conn:   conn,

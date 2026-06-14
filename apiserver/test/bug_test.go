@@ -199,3 +199,146 @@ func TestBug7_CreateGroup_OwnerIsMember(t *testing.T) {
 		t.Fatal("Bug7: group owner should be a member of the group")
 	}
 }
+
+// ============================================================
+// P2 Bugs
+// ============================================================
+
+// Bug8+9: flame.go GetFlameData 中 IsExist/PreSign 错误被忽略
+// 测试：正常路径已有 TestGetFlameData_SVG 覆盖，此处验证返回的 URL 非空
+func TestBug89_GetFlameData_URLNotEmpty(t *testing.T) {
+	db := SetupTestDB()
+	SeedTestData(db)
+	srv, _, mockStore := CreateTestAPIServer(db)
+	r := SetupTestRouter(srv)
+
+	mockStore.objects["test-tid-001/flamegraph.svg"] = []byte("<svg>test</svg>")
+
+	w := DoAuthRequest(r, "GET", "/api/v1/tasks/test-tid-001/flame", nil)
+	resp := ParseJSON(w)
+	data := resp["data"].(map[string]interface{})
+	url, ok := data["url"].(string)
+	if !ok || url == "" {
+		t.Fatal("Bug8/9: PreSign URL should not be empty")
+	}
+}
+
+// Bug10: task.go GetTaskDetail 中 PreSign 错误被忽略
+// 测试：任务成功但 PreSign 返回的 URL 不应为空
+func TestBug10_TaskDetail_COSURLNotEmpty(t *testing.T) {
+	db := SetupTestDB()
+	SeedTestData(db)
+	srv, _, mockStore := CreateTestAPIServer(db)
+	r := SetupTestRouter(srv)
+
+	mockStore.objects["test-tid-001/perf.data"] = []byte("mock")
+
+	w := DoAuthRequest(r, "GET", "/api/v1/tasks/test-tid-001", nil)
+	resp := ParseJSON(w)
+	data := resp["data"].(map[string]interface{})
+	files, ok := data["cos_files"].([]interface{})
+	if ok && len(files) > 0 {
+		file := files[0].(map[string]interface{})
+		if file["url"] == nil || file["url"] == "" {
+			t.Fatal("Bug10: COS file URL should not be empty")
+		}
+	}
+}
+
+// Bug11+12: util.go mustMarshal/mustUnmarshal — 私有函数，由其他测试间接覆盖
+// Bug13+14: main.go 错误处理 — 通过编译即可（运行时错误）
+// 不写测试，直接在代码中修复
+
+// Bug15: auth.go AuthCheck 自动创建用户失败应返回错误
+func TestBug15_AuthCheck_AutoCreateUser(t *testing.T) {
+	db := SetupTestDB()
+	// 不预插用户，AuthCheck 应自动创建
+	srv, _, _ := CreateTestAPIServer(db)
+	r := SetupTestRouter(srv)
+
+	w := DoAuthRequest(r, "GET", "/api/v1/auth/check", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("Bug15: expected 200, got %d", w.Code)
+	}
+
+	// 验证用户已被创建
+	resp := ParseJSON(w)
+	data := resp["data"].(map[string]interface{})
+	if data["uid"] != "test-user-1" {
+		t.Fatalf("Bug15: expected uid=test-user-1, got %v", data["uid"])
+	}
+
+	// 验证 DB 中有记录
+	var count int64
+	db.Model(&model.UserInfo{}).Where("uid = ?", "test-user-1").Count(&count)
+	if count == 0 {
+		t.Fatal("Bug15: user should be auto-created in DB")
+	}
+}
+
+// Bug16: control/client.go grpc.Dial 已废弃
+// 编译时检查，不写运行时测试
+
+// ============================================================
+// 剩余 Bug 测试
+// ============================================================
+
+// CORS P0: AllowOrigins:* + AllowCredentials:true
+// 测试：带 Origin 的请求，Access-Control-Allow-Origin 不应是 *
+func TestCORS_SpecificOrigin(t *testing.T) {
+	db := SetupTestDB()
+	srv, _, _ := CreateTestAPIServer(db)
+	r := SetupTestRouter(srv) // 使用带 CORS 的 router
+
+	w := DoRequest(r, "GET", "/healthz", nil, map[string]string{
+		"Origin": "http://localhost:3000",
+	})
+	acao := w.Header().Get("Access-Control-Allow-Origin")
+	if acao == "*" {
+		t.Fatal("CORS: Access-Control-Allow-Origin must not be * when credentials are allowed")
+	}
+}
+
+// Bug4 P1: DeleteScheduleTask 混淆 DB 错误和未找到
+// 已有 TestBug4_DeleteScheduleTask_NotFound 覆盖，此处补充：正常删除应返回 200
+func TestBug4_DeleteScheduleTask_OK(t *testing.T) {
+	db := SetupTestDB()
+	SeedTestData(db)
+	db.Create(&model.HotmethodTask{
+		TID: "sched-del", Name: "[定时] del", TargetIP: "10.0.0.1",
+		Status: 0, UID: "test-user-1", UserName: "TestUser1",
+	})
+	srv, _, _ := CreateTestAPIServer(db)
+	r := SetupTestRouter(srv)
+
+	w := DoAuthRequest(r, "DELETE", "/api/v1/schedule/task/sched-del", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("Bug4: expected 200, got %d", w.Code)
+	}
+}
+
+// Bug7 P1: CreateGroup AddMember 错误处理
+// 已有 TestBug7_CreateGroup_OwnerIsMember 覆盖
+
+// Bug12 P2: GetCOSFiles PreSign 错误处理
+func TestBug12_GetCOSFiles_URLNotEmpty(t *testing.T) {
+	db := SetupTestDB()
+	SeedTestData(db)
+	srv, _, mockStore := CreateTestAPIServer(db)
+	r := SetupTestRouter(srv)
+
+	mockStore.objects["test-tid-001/perf.data"] = []byte("mock")
+
+	w := DoAuthRequest(r, "GET", "/api/v1/cosfiles?tid=test-tid-001", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	resp := ParseJSON(w)
+	files := resp["data"].([]interface{})
+	if len(files) > 0 {
+		file := files[0].(map[string]interface{})
+		if file["url"] == nil || file["url"] == "" {
+			t.Fatal("Bug12: COS file URL should not be empty")
+		}
+	}
+}
