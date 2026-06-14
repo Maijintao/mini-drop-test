@@ -18,6 +18,7 @@ import shutil
 
 from apiserver_client import APIServerClient
 from config import Config
+from error import ErrorInfo, ERR_STORAGE, ERR_NOT_FOUND, ERR_ANALYZER, ERR_UNSUPPORTED
 from storage import MinIOStorage
 from data_parser.collapsed_parser import (
     parse_perf_script, parse_collapsed, stacks_to_collapsed,
@@ -35,9 +36,10 @@ def parse_args():
     return parser.parse_args()
 
 
-def error_exit(message: str, code: int = 1):
-    """输出错误到 stderr 并退出"""
-    print(json.dumps({"error": message}), file=sys.stderr)
+def error_exit(message: str, code: int = 1, detail: str = ""):
+    """输出 ErrorInfo JSON 到 stderr 并退出"""
+    info = ErrorInfo(code, message, detail)
+    print(json.dumps(info.to_dict()), file=sys.stderr)
     sys.exit(code)
 
 
@@ -57,7 +59,7 @@ def main():
             secure=cfg.minio_secure,
         )
     except Exception as e:
-        error_exit(f"init storage failed: {e}")
+        error_exit(f"init storage failed: {e}", ERR_STORAGE)
 
     tid = args.task_id
     task_type = args.task_type
@@ -65,14 +67,24 @@ def main():
     # 3. 初始化 apiserver 客户端
     api = APIServerClient(cfg.apiserver_url)
 
-    # 4. 标记分析开始
+    # 4. 幂等性检查：通过 apiserver 查询任务状态
+    try:
+        resp = api._request("GET", f"/api/v1/tasks/{tid}")
+        task = resp.get("data", {}).get("task", {})
+        if task.get("analysis_status") == 2:  # 已成功
+            print(f"[analyzer] task {tid} already analyzed, skipping")
+            sys.exit(0)
+    except Exception:
+        pass  # 查不到就继续
+
+    # 5. 标记分析开始
     try:
         api.update_analysis_status(tid, 1)  # AnalysisStatusRunning
         print(f"[analyzer] analysis_status -> 1 (running)")
     except Exception as e:
         print(f"[analyzer] warn: failed to update status: {e}", file=sys.stderr)
 
-    # 5. 创建临时工作目录
+    # 6. 创建临时工作目录
     work_dir = tempfile.mkdtemp(prefix=f"analysis_{tid}_")
 
     try:
@@ -81,7 +93,7 @@ def main():
         raw_path = os.path.join(work_dir, "perf.data")
 
         if not store.exists(raw_key):
-            error_exit(f"raw data not found: {raw_key}")
+            error_exit(f"raw data not found: {raw_key}", ERR_NOT_FOUND)
 
         store.download(raw_key, raw_path)
         print(f"[analyzer] downloaded {raw_key} -> {raw_path}")
@@ -90,7 +102,7 @@ def main():
         if task_type == 0:
             result = run_cpu_flamegraph(raw_path, work_dir, tid)
         else:
-            error_exit(f"unsupported task_type={task_type}, only CPU (0) is supported")
+            error_exit(f"unsupported task_type={task_type}, only CPU (0) is supported", ERR_UNSUPPORTED)
 
         # 8. 上传产物
         for local_path, key_name in result.items():
@@ -117,7 +129,7 @@ def main():
             api.update_analysis_status(tid, 3, str(e))  # AnalysisStatusFailed
         except Exception:
             pass
-        error_exit(f"analysis failed: {e}")
+        error_exit(f"analysis failed: {e}", ERR_ANALYZER)
     finally:
         shutil.rmtree(work_dir, ignore_errors=True)
 
