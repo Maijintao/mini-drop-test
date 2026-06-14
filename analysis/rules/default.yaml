@@ -1,0 +1,54 @@
+# 默认优化建议规则
+# pattern: 正则表达式匹配函数名
+# advice: 优化建议
+
+rules:
+  # 内存分配
+  - pattern: ".*malloc.*|.*calloc.*|.*realloc.*"
+    advice: "频繁内存分配可能导致碎片化和性能下降，考虑使用对象池、jemalloc 或预分配策略。"
+
+  - pattern: ".*free$|.*_free$"
+    advice: "高频 free 操作可能与 malloc 配对问题有关，检查是否存在内存泄漏或频繁分配释放。"
+
+  # 锁与同步
+  - pattern: ".*mutex.*|.*lock.*|.*pthread_mutex.*"
+    advice: "检测到锁操作，可能存在锁竞争。考虑使用无锁数据结构、减小临界区或读写锁分离。"
+
+  - pattern: ".*spin.*lock.*|.*spinlock.*"
+    advice: "自旋锁在高竞争场景下会浪费 CPU，考虑改为互斥锁或减少锁粒度。"
+
+  # 系统调用
+  - pattern: ".*syscall.*|.*__kernel_*"
+    advice: "频繁系统调用会带来用户态/内核态切换开销，考虑批量操作或使用 io_uring 等异步接口。"
+
+  - pattern: ".*epoll.*|.*select.*|.*poll$"
+    advice: "IO 多路复用调用频繁，检查是否有不必要的轮询或事件处理。"
+
+  # 字符串操作
+  - pattern: ".*memcpy.*|.*memmove.*|.*memset.*"
+    advice: "大量内存拷贝操作，检查是否有不必要的数据复制，考虑零拷贝或引用计数。"
+
+  - pattern: ".*str.*cmp.*|.*str.*cpy.*|.*str.*cat.*|.*strlen.*"
+    advice: "频繁字符串操作，考虑使用字符串池、预分配 buffer 或避免不必要的字符串拼接。"
+
+  # 压缩与序列化
+  - pattern: ".*compress.*|.*deflate.*|.*inflate.*|.*zlib.*"
+    advice: "压缩/解压是 CPU 密集操作，检查压缩级别是否合理，或考虑异步压缩。"
+
+  - pattern: ".*json.*encode.*|.*json.*decode.*|.*serialize.*|.*deserialize.*"
+    advice: "序列化/反序列化开销大，考虑使用更高效的编码格式（protobuf/msgpack）或缓存结果。"
+
+  # 正则表达式
+  - pattern: ".*regex.*|.*regexp.*|.*pcre.*"
+    advice: "正则表达式匹配可能很慢，检查是否有回溯问题，考虑预编译或使用简单字符串匹配替代。"
+
+  # Java 相关
+  - pattern: ".*GC.*|.*garbage.*collect.*"
+    advice: "GC 活动频繁，检查是否存在大量临时对象分配，调整堆大小或 GC 策略。"
+
+  - pattern: ".*JIT.*|.*compile.*"
+    advice: "JIT 编译热点，首次运行可能较慢，考虑预热或 AOT 编译。"
+
+  # 网络
+  - pattern: ".*socket.*|.*send.*|.*recv.*|.*writev.*|.*readv.*"
+    advice: "网络 IO 操作频繁，考虑使用连接池、批量发送或异步 IO。"

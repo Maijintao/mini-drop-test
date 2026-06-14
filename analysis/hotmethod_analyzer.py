@@ -18,10 +18,12 @@ import shutil
 
 from config import Config
 from storage import MinIOStorage
-from data_parser.collapsed_parser import parse_perf_script, stacks_to_collapsed
-from analyzers.flamegraph import (
-    perf_script_to_collapsed, collapsed_to_svg, generate_flamegraph,
+from data_parser.collapsed_parser import (
+    parse_perf_script, parse_collapsed, stacks_to_collapsed,
 )
+from analyzers.flamegraph import perf_script_to_collapsed, collapsed_to_svg
+from analyzers.topn import analyze_topn, topn_to_json
+from analyzers.advisor import load_rules, match_rules, suggestions_to_markdown
 
 
 def parse_args():
@@ -133,9 +135,27 @@ def run_cpu_flamegraph(perf_data_path: str, work_dir: str, tid: str) -> dict:
     collapsed_to_svg(collapsed_path, svg_path, title=title)
     print(f"[analyzer] flamegraph -> {svg_path}")
 
+    # 折叠栈 → TopN 热点
+    stacks = parse_collapsed(open(collapsed_path).read())
+    topn = analyze_topn(stacks, top_k=50)
+    topn_path = os.path.join(work_dir, "top.json")
+    with open(topn_path, "w") as f:
+        f.write(topn_to_json(topn))
+    print(f"[analyzer] topn -> {topn_path} ({len(topn)} functions)")
+
+    # TopN → 规则建议
+    rules = load_rules()
+    suggestions = match_rules(topn, rules)
+    suggestions_path = os.path.join(work_dir, "suggestions.md")
+    with open(suggestions_path, "w") as f:
+        f.write(suggestions_to_markdown(suggestions, tid=tid))
+    print(f"[analyzer] suggestions -> {suggestions_path} ({len(suggestions)} matches)")
+
     return {
         collapsed_path: "collapsed.txt",
         svg_path: "flamegraph.svg",
+        topn_path: "top.json",
+        suggestions_path: "suggestions.md",
     }
 
 
