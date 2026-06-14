@@ -105,19 +105,32 @@ def main():
     work_dir = tempfile.mkdtemp(prefix=f"analysis_{tid}_")
 
     try:
-        # 6. 下载原始数据
+        # 6. 下载原始数据（优先 perf.data，fallback 到 collapsed.txt）
         raw_key = f"{tid}/perf.data"
+        collapsed_key = f"{tid}/collapsed.txt"
         raw_path = os.path.join(work_dir, "perf.data")
+        pre_collapsed_path = os.path.join(work_dir, "pre_collapsed.txt")
 
-        if not store.exists(raw_key):
-            error_exit(f"raw data not found: {raw_key}", ERR_NOT_FOUND)
+        has_perf_data = store.exists(raw_key)
+        has_collapsed = store.exists(collapsed_key)
+        log.info("data check: perf.data=%s, collapsed=%s", has_perf_data, has_collapsed)
 
-        store.download(raw_key, raw_path)
-        log.info("downloaded %s", raw_key)
+        if not has_perf_data and not has_collapsed:
+            error_exit(f"no data found: {raw_key} or {collapsed_key}", ERR_NOT_FOUND)
+
+        if has_perf_data:
+            store.download(raw_key, raw_path)
+            log.info("downloaded %s", raw_key)
+
+        if has_collapsed:
+            store.download(collapsed_key, pre_collapsed_path)
+            log.info("downloaded pre-processed %s -> %s (exists=%s)",
+                     collapsed_key, pre_collapsed_path, os.path.exists(pre_collapsed_path))
 
         # 7. 按 task_type 分发到具体 analyzer
         if task_type == 0:
-            result = run_cpu_flamegraph(raw_path, work_dir, tid)
+            result = run_cpu_flamegraph(raw_path, work_dir, tid,
+                                        pre_collapsed_path if has_collapsed else None)
         else:
             error_exit(f"unsupported task_type={task_type}, only CPU (0) is supported", ERR_UNSUPPORTED)
 
@@ -133,9 +146,12 @@ def main():
         if os.path.exists(suggestions_path):
             _write_suggestions_to_apiserver(api, tid, suggestions_path)
 
-        # 10. 标记分析完成
-        api.update_analysis_status(tid, 2)  # AnalysisStatusSuccess
-        log.info("analysis_status -> 2 (success)")
+        # 10. 标记分析完成（失败不阻塞，产物已上传）
+        try:
+            api.update_analysis_status(tid, 2)  # AnalysisStatusSuccess
+            log.info("analysis_status -> 2 (success)")
+        except Exception as e:
+            log.warning("failed to update final status: %s (products already uploaded)", e)
         log.info("task %s analysis completed", tid)
 
     except Exception as e:
@@ -149,10 +165,13 @@ def main():
         shutil.rmtree(work_dir, ignore_errors=True)
 
 
-def run_cpu_flamegraph(perf_data_path: str, work_dir: str, tid: str) -> dict:
+def run_cpu_flamegraph(perf_data_path: str, work_dir: str, tid: str,
+                       pre_collapsed_path: str = None) -> dict:
     """
     CPU 火焰图完整流水线:
     perf.data → perf script → stackcollapse → flamegraph.svg
+
+    如果 pre_collapsed_path 存在，跳过 perf.script 步骤直接使用。
 
     返回 {本地路径: 上传文件名} 字典
     """
@@ -160,24 +179,29 @@ def run_cpu_flamegraph(perf_data_path: str, work_dir: str, tid: str) -> dict:
     collapsed_path = os.path.join(work_dir, "collapsed.txt")
     svg_path = os.path.join(work_dir, "flamegraph.svg")
 
-    # perf.data → perf script 文本
-    try:
-        proc = subprocess.run(
-            ["perf", "script", "-i", perf_data_path, "--header"],
-            capture_output=True, text=True, timeout=300,
-        )
-        if proc.returncode != 0:
-            raise RuntimeError(f"perf script failed: {proc.stderr}")
-        with open(script_path, "w") as f:
-            f.write(proc.stdout)
-        log.info("perf script -> %s", script_path)
-    except FileNotFoundError:
-        log.warning("perf not found, falling back to pre-processed data")
-        raise RuntimeError("perf command not found, need pre-processed collapsed stack")
+    # 如果有预处理的折叠栈，直接使用
+    if pre_collapsed_path and os.path.exists(pre_collapsed_path):
+        shutil.copy2(pre_collapsed_path, collapsed_path)
+        log.info("using pre-processed collapsed stack")
+    else:
+        # perf.data → perf script 文本
+        try:
+            proc = subprocess.run(
+                ["perf", "script", "-i", perf_data_path, "--header"],
+                capture_output=True, text=True, timeout=300,
+            )
+            if proc.returncode != 0:
+                raise RuntimeError(f"perf script failed: {proc.stderr}")
+            with open(script_path, "w") as f:
+                f.write(proc.stdout)
+            log.info("perf script -> %s", script_path)
+        except FileNotFoundError:
+            log.warning("perf not found, falling back to pre-processed data")
+            raise RuntimeError("perf command not found, need pre-processed collapsed stack")
 
-    # perf script → 折叠栈
-    perf_script_to_collapsed(script_path, collapsed_path)
-    log.info("collapsed -> %s", collapsed_path)
+        # perf script → 折叠栈
+        perf_script_to_collapsed(script_path, collapsed_path)
+        log.info("collapsed -> %s", collapsed_path)
 
     # 折叠栈 → SVG
     title = f"CPU Flame Graph [{tid}]"
