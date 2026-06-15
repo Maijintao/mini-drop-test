@@ -4,6 +4,8 @@ import Login from '@/pages/Login';
 import Home from '@/pages/Home';
 import TaskList from '@/pages/TaskList';
 import TaskResult from '@/pages/TaskResult';
+import Agents from '@/pages/Agents';
+import Settings from '@/pages/Settings';
 
 const router = createBrowserRouter([
   {
@@ -18,6 +20,8 @@ const router = createBrowserRouter([
       { path: 'index', element: <Home /> },
       { path: 'tasks', element: <TaskList /> },
       { path: 'task/result', element: <TaskResult /> },
+      { path: 'agents', element: <Agents /> },
+      { path: 'settings', element: <Settings /> },
     ],
   },
 ]);
