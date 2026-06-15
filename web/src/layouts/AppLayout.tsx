@@ -14,7 +14,7 @@ const NAV_ITEMS = [
 ];
 
 export default function AppLayout() {
-  const { isAuth, loading, uid, userName } = useAuth();
+  const { isAuth, loading, userName } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [collapsed, setCollapsed] = useState(false);
@@ -27,7 +27,13 @@ export default function AppLayout() {
 
   useGSAP(() => {
     const el = document.querySelector('.main-content');
-    if (el) gsap.from(el, { opacity: 0, y: 8, duration: 0.35, ease: 'power2.out' });
+    if (el) {
+      gsap.fromTo(
+        el,
+        { opacity: 0, y: 8 },
+        { opacity: 1, y: 0, duration: 0.3, ease: 'power2.out', clearProps: 'transform,opacity' },
+      );
+    }
   }, [location.pathname]);
 
   if (loading) return <div style={{ padding: 40, textAlign: 'center', color: 'rgba(255,255,255,0.4)' }}>加载中...</div>;

@@ -29,8 +29,24 @@ export default function Agents() {
   const [search, setSearch] = useState('');
 
   useGSAP(() => {
-    gsap.from('.agent-header', { y: -10, opacity: 0, duration: 0.4, ease: 'power2.out' });
-    gsap.from('.agent-card', { y: 15, opacity: 0, stagger: 0.08, duration: 0.4, ease: 'power2.out', delay: 0.15 });
+    gsap.fromTo(
+      '.agent-header',
+      { y: -10, autoAlpha: 0 },
+      { y: 0, autoAlpha: 1, duration: 0.35, ease: 'power2.out', clearProps: 'transform,opacity,visibility' },
+    );
+    gsap.fromTo(
+      '.agent-card',
+      { y: 14, autoAlpha: 0 },
+      {
+        y: 0,
+        autoAlpha: 1,
+        stagger: 0.06,
+        duration: 0.35,
+        ease: 'power2.out',
+        delay: 0.08,
+        clearProps: 'transform,opacity,visibility',
+      },
+    );
   }, { scope: containerRef });
 
   const filtered = mockAgents.filter(a =>
