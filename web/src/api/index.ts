@@ -1,4 +1,14 @@
 import axios from 'axios';
+import type {
+  AgentInfo,
+  AgentStatData,
+  AnalysisSuggestion,
+  ApiResponse,
+  CosFile,
+  CreateTaskParams,
+  TaskDetailData,
+  TaskListData,
+} from '@/domain';
 
 // ---------- axios 实例 ----------
 
@@ -39,41 +49,34 @@ function getCookie(name: string): string | null {
 // ---------- API 函数 ----------
 
 // Auth
-export const authCheck = () => api.get('/auth/check');
-export const getUsers = () => api.get('/users');
+export const authCheck = (): Promise<ApiResponse<{ uid: string; user_name: string }>> => api.get('/auth/check') as unknown as Promise<ApiResponse<{ uid: string; user_name: string }>>;
+export const getUsers = (): Promise<ApiResponse<any>> => api.get('/users') as unknown as Promise<ApiResponse<any>>;
 
 // Agent
-export const getAgents = () => api.get('/agents');
-export const statAgent = (ip: string) => api.get('/agent/stat', { params: { ip } });
+export const getAgents = (): Promise<ApiResponse<AgentInfo[]>> => api.get('/agents') as unknown as Promise<ApiResponse<AgentInfo[]>>;
+export const statAgent = (ip: string): Promise<ApiResponse<AgentStatData>> =>
+  api.get('/agent/stat', { params: { ip } }) as unknown as Promise<ApiResponse<AgentStatData>>;
 
 // Task
-export interface CreateTaskParams {
-  name: string;
-  type?: number;
-  profiler_type?: number;
-  target_ip: string;
-  pid: number;
-  duration: number;
-  hz?: number;
-  callgraph?: string;
-  subprocess?: boolean;
-  event?: string;
-}
-
-export const createTask = (data: CreateTaskParams) => api.post('/tasks', data);
+export const createTask = (data: CreateTaskParams): Promise<ApiResponse<{ tid: string }>> => api.post('/tasks', data) as unknown as Promise<ApiResponse<{ tid: string }>>;
 export const getTasks = (params?: { page?: number; size?: number; status?: string; keyword?: string }) =>
-  api.get('/tasks', { params });
-export const getTaskDetail = (tid: string) => api.get(`/tasks/${tid}`);
-export const deleteTask = (tid: string) => api.delete(`/tasks/${tid}`);
-export const retryTask = (tid: string) => api.post(`/tasks/${tid}/retry`);
-export const getCosFiles = (tid: string) => api.get('/cosfiles', { params: { tid } });
+  api.get('/tasks', { params }) as unknown as Promise<ApiResponse<TaskListData>>;
+export const getTaskDetail = (tid: string): Promise<ApiResponse<TaskDetailData>> => api.get(`/tasks/${tid}`) as unknown as Promise<ApiResponse<TaskDetailData>>;
+export const deleteTask = (tid: string): Promise<ApiResponse<unknown>> => api.delete(`/tasks/${tid}`) as unknown as Promise<ApiResponse<unknown>>;
+export const retryTask = (tid: string): Promise<ApiResponse<{ tid: string }>> => api.post(`/tasks/${tid}/retry`) as unknown as Promise<ApiResponse<{ tid: string }>>;
+export const getCosFiles = (tid: string): Promise<ApiResponse<CosFile[]>> => api.get('/cosfiles', { params: { tid } }) as unknown as Promise<ApiResponse<CosFile[]>>;
 
 // Suggestion & Analysis
-export const getSuggestions = (tid: string) => api.get(`/tasks/${tid}/suggestions`);
-export const triggerAnalysis = (tid: string) => api.post(`/tasks/${tid}/analyze`);
+export const getSuggestions = (tid: string): Promise<ApiResponse<AnalysisSuggestion[]>> => api.get(`/tasks/${tid}/suggestions`) as unknown as Promise<ApiResponse<AnalysisSuggestion[]>>;
+export const triggerAnalysis = (tid: string): Promise<ApiResponse<unknown>> => api.post(`/tasks/${tid}/analyze`) as unknown as Promise<ApiResponse<unknown>>;
 
 // Flame
-export const getFlameData = (tid: string) => api.get(`/tasks/${tid}/flame`);
+export const getFlameData = (tid: string): Promise<ApiResponse<{ type: string; url: string }>> => api.get(`/tasks/${tid}/flame`) as unknown as Promise<ApiResponse<{ type: string; url: string }>>;
+
+export const fetchSignedJson = async <T>(url: string): Promise<T> => {
+  const res = await axios.get<T>(url, { withCredentials: false, timeout: 30000 });
+  return res.data;
+};
 
 // Group
 export const createGroup = (data: { name: string }) => api.post('/group', data);

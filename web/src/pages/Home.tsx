@@ -2,7 +2,9 @@ import { useRef, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useGSAP } from '@gsap/react';
 import gsap from 'gsap';
-import { getTasks } from '@/api';
+import { createTask, getAgents, getTasks } from '@/api';
+import type { AgentInfo, CreateTaskParams, HotmethodTask } from '@/domain';
+import { formatDate, formatRelativeTime, statusMap } from '@/domain';
 
 gsap.registerPlugin(useGSAP);
 
@@ -19,57 +21,26 @@ const glassCard: React.CSSProperties = {
   borderRadius: 16,
 };
 
-interface Task {
-  tid: string;
-  name: string;
-  status: number;
-  analysis_status: number;
-  create_time: string;
-}
-
-const mockAgents = [
-  {
-    id: 'agent-001',
-    hostname: 'web-server-01',
-    ip: '192.168.1.100',
-    online: true,
-    version: '1.0.0',
-    environment: 'production',
-    lastHeartbeat: '刚刚',
-  },
-  {
-    id: 'agent-002',
-    hostname: 'api-gateway-02',
-    ip: '192.168.1.101',
-    online: true,
-    version: '1.0.0',
-    environment: 'staging',
-    lastHeartbeat: '2 分钟前',
-  },
-  {
-    id: 'agent-003',
-    hostname: 'worker-node-04',
-    ip: '192.168.1.103',
-    online: false,
-    version: '0.9.8',
-    environment: 'dev',
-    lastHeartbeat: '34 分钟前',
-  },
-];
-
-const statusLabel: Record<number, { label: string; color: string }> = {
-  0: { label: '新建', color: 'rgba(255,255,255,0.45)' },
-  1: { label: '执行中', color: '#60a5fa' },
-  2: { label: '成功', color: '#4ade80' },
-  3: { label: '失败', color: '#f87171' },
-};
-
 export default function Home() {
   const containerRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
-  const [tasks, setTasks] = useState<Task[]>([]);
+  const [tasks, setTasks] = useState<HotmethodTask[]>([]);
+  const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [form, setForm] = useState<CreateTaskParams>({
+    name: '',
+    type: 0,
+    profiler_type: 0,
+    target_ip: '',
+    pid: 0,
+    duration: 30,
+    hz: 99,
+    callgraph: 'dwarf',
+    subprocess: true,
+    event: 'cpu-cycles',
+  });
 
   useGSAP(() => {
     gsap.from('.stat-card', { y: 15, opacity: 0, stagger: 0.08, duration: 0.5, ease: 'power2.out' });
@@ -80,8 +51,19 @@ export default function Home() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const taskRes = await getTasks({ page: 1, size: 100 });
-        if ((taskRes as any).code === 0) setTasks((taskRes as any).data?.list || []);
+        const [taskRes, agentRes] = await Promise.all([
+          getTasks({ page: 1, size: 100 }),
+          getAgents(),
+        ]);
+        if (taskRes.code === 0) setTasks(taskRes.data?.list || []);
+        if (agentRes.code === 0) {
+          const list = agentRes.data || [];
+          setAgents(list);
+          const firstOnline = list.find(agent => agent.online);
+          if (firstOnline) {
+            setForm(prev => ({ ...prev, target_ip: prev.target_ip || firstOnline.ip_addr }));
+          }
+        }
       } catch (e) {
         console.error('Failed to fetch home data:', e);
       } finally {
@@ -92,6 +74,27 @@ export default function Home() {
   }, []);
 
   const recentTasks = tasks.slice(0, 3);
+  const onlineAgents = agents.filter(agent => agent.online);
+
+  const submitTask = async () => {
+    if (!form.target_ip || !form.pid || !form.duration) return;
+    setSubmitting(true);
+    try {
+      const payload = {
+        ...form,
+        name: form.name || `CPU 采样 - ${form.target_ip}`,
+        pid: Number(form.pid),
+        duration: Number(form.duration),
+        hz: Number(form.hz || 99),
+      };
+      await createTask(payload);
+      setShowCreate(false);
+      const taskRes = await getTasks({ page: 1, size: 100 });
+      if (taskRes.code === 0) setTasks(taskRes.data?.list || []);
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   return (
     <div ref={containerRef}>
@@ -189,8 +192,12 @@ export default function Home() {
             </button>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {mockAgents.map((agent) => (
-              <div key={agent.id} style={{
+            {agents.length === 0 ? (
+              <div style={{ padding: 24, textAlign: 'center', color: 'rgba(255,255,255,0.35)', fontSize: 13 }}>
+                暂无 Agent
+              </div>
+            ) : agents.slice(0, 4).map((agent) => (
+              <div key={agent.id || agent.ip_addr} style={{
                 padding: '14px 16px',
                 background: 'rgba(255,255,255,0.03)',
                 border: '0.5px solid rgba(255,255,255,0.05)',
@@ -223,11 +230,14 @@ export default function Home() {
                     </span>
                   </div>
                   <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.36)' }}>
-                    {agent.ip} · v{agent.version} · 心跳 {agent.lastHeartbeat}
+                    {agent.ip_addr} · v{agent.version || '-'} · 心跳 {formatRelativeTime(agent.last_heartbeat)}
                   </div>
                 </div>
                 <button
-                  onClick={() => setShowCreate(true)}
+                  onClick={() => {
+                    setForm(prev => ({ ...prev, target_ip: agent.ip_addr }));
+                    setShowCreate(true);
+                  }}
                   disabled={!agent.online}
                   style={{
                     padding: '7px 12px',
@@ -280,7 +290,7 @@ export default function Home() {
                 暂无任务
               </div>
             ) : recentTasks.map((task) => {
-              const s = statusLabel[task.status] || statusLabel[0];
+              const s = statusMap[task.status] || statusMap[0];
               return (
                 <div key={task.tid} style={{
                   display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -297,7 +307,7 @@ export default function Home() {
                   <div>
                     <div style={{ fontSize: 14, fontWeight: 500, color: 'rgba(255,255,255,0.85)' }}>{task.name}</div>
                     <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.3)' }}>
-                      {task.create_time ? new Date(task.create_time).toLocaleString() : '-'}
+                      {formatDate(task.create_time)}
                     </div>
                   </div>
                   <span style={{
@@ -348,7 +358,7 @@ export default function Home() {
             <div style={{ display: 'grid', gap: 15 }}>
               <div>
                 <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: 'rgba(255,255,255,0.48)', marginBottom: 6 }}>目标 Agent</label>
-                <select defaultValue={mockAgents.find(agent => agent.online)?.ip} style={{
+                <select value={form.target_ip} onChange={(e) => setForm(prev => ({ ...prev, target_ip: e.target.value }))} style={{
                   width: '100%', padding: '10px 12px',
                   background: 'rgba(255,255,255,0.04)',
                   border: '0.5px solid rgba(255,255,255,0.1)',
@@ -356,18 +366,21 @@ export default function Home() {
                   color: '#fff',
                   outline: 'none',
                 }}>
-                  {mockAgents.map(agent => (
-                    <option key={agent.id} value={agent.ip} disabled={!agent.online} style={{ background: '#1a1e2e' }}>
-                      {agent.hostname} ({agent.ip}) {agent.online ? '' : '- 离线'}
+                  {agents.map(agent => (
+                    <option key={agent.id || agent.ip_addr} value={agent.ip_addr} disabled={!agent.online} style={{ background: '#1a1e2e' }}>
+                      {agent.hostname} ({agent.ip_addr}) {agent.online ? '' : '- 离线'}
                     </option>
                   ))}
                 </select>
+                {onlineAgents.length === 0 && (
+                  <div style={{ marginTop: 6, fontSize: 12, color: '#fbbf24' }}>当前没有在线 Agent，无法创建任务。</div>
+                )}
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div>
                   <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: 'rgba(255,255,255,0.48)', marginBottom: 6 }}>采集类型</label>
-                  <select defaultValue="cpu" style={{
+                  <select value={form.type} onChange={(e) => setForm(prev => ({ ...prev, type: Number(e.target.value), profiler_type: Number(e.target.value) === 1 ? 1 : 0 }))} style={{
                     width: '100%', padding: '10px 12px',
                     background: 'rgba(255,255,255,0.04)',
                     border: '0.5px solid rgba(255,255,255,0.1)',
@@ -375,15 +388,15 @@ export default function Home() {
                     color: '#fff',
                     outline: 'none',
                   }}>
-                    <option value="cpu" style={{ background: '#1a1e2e' }}>CPU / perf</option>
-                    <option value="memory" style={{ background: '#1a1e2e' }}>内存采样</option>
-                    <option value="io" style={{ background: '#1a1e2e' }}>IO 采样</option>
-                    <option value="java" style={{ background: '#1a1e2e' }}>Java async-profiler</option>
+                    <option value={0} style={{ background: '#1a1e2e' }}>CPU / perf</option>
+                    <option value={1} style={{ background: '#1a1e2e' }}>Java async-profiler</option>
+                    <option value={4} style={{ background: '#1a1e2e' }}>MemCheck</option>
+                    <option value={6} style={{ background: '#1a1e2e' }}>Java Heap</option>
                   </select>
                 </div>
                 <div>
                   <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: 'rgba(255,255,255,0.48)', marginBottom: 6 }}>目标 PID</label>
-                  <input type="number" placeholder="例如 12345" style={{
+                  <input type="number" placeholder="例如 12345" value={form.pid || ''} onChange={(e) => setForm(prev => ({ ...prev, pid: Number(e.target.value) }))} style={{
                     width: '100%', padding: '10px 12px',
                     background: 'rgba(255,255,255,0.04)',
                     border: '0.5px solid rgba(255,255,255,0.1)',
@@ -398,7 +411,7 @@ export default function Home() {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
                 <div>
                   <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: 'rgba(255,255,255,0.48)', marginBottom: 6 }}>时长</label>
-                  <input type="number" defaultValue={30} style={{
+                  <input type="number" value={form.duration} onChange={(e) => setForm(prev => ({ ...prev, duration: Number(e.target.value) }))} style={{
                     width: '100%', padding: '10px 12px',
                     background: 'rgba(255,255,255,0.04)',
                     border: '0.5px solid rgba(255,255,255,0.1)',
@@ -410,7 +423,7 @@ export default function Home() {
                 </div>
                 <div>
                   <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: 'rgba(255,255,255,0.48)', marginBottom: 6 }}>频率 Hz</label>
-                  <input type="number" defaultValue={99} style={{
+                  <input type="number" value={form.hz} onChange={(e) => setForm(prev => ({ ...prev, hz: Number(e.target.value) }))} style={{
                     width: '100%', padding: '10px 12px',
                     background: 'rgba(255,255,255,0.04)',
                     border: '0.5px solid rgba(255,255,255,0.1)',
@@ -422,7 +435,7 @@ export default function Home() {
                 </div>
                 <div>
                   <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: 'rgba(255,255,255,0.48)', marginBottom: 6 }}>Callgraph</label>
-                  <select defaultValue="dwarf" style={{
+                  <select value={form.callgraph} onChange={(e) => setForm(prev => ({ ...prev, callgraph: e.target.value }))} style={{
                     width: '100%', padding: '10px 12px',
                     background: 'rgba(255,255,255,0.04)',
                     border: '0.5px solid rgba(255,255,255,0.1)',
@@ -440,7 +453,8 @@ export default function Home() {
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, marginTop: 24 }}>
               <button
-                onClick={() => setShowCreate(false)}
+                onClick={submitTask}
+                disabled={submitting || !form.target_ip || !form.pid}
                 style={{
                   padding: '10px 18px',
                   background: 'rgba(255,255,255,0.04)',
@@ -461,10 +475,10 @@ export default function Home() {
                   borderRadius: 10,
                   color: '#fff',
                   fontWeight: 600,
-                  cursor: 'pointer',
+                  cursor: submitting || !form.target_ip || !form.pid ? 'not-allowed' : 'pointer',
                 }}
               >
-                创建采样
+                {submitting ? '创建中...' : '创建采样'}
               </button>
             </div>
           </div>

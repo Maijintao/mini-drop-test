@@ -1,6 +1,9 @@
-import { useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useGSAP } from '@gsap/react';
 import gsap from 'gsap';
+import { getAgents, statAgent } from '@/api';
+import type { AgentInfo, AgentStatData } from '@/domain';
+import { formatRelativeTime } from '@/domain';
 
 gsap.registerPlugin(useGSAP);
 
@@ -17,16 +20,13 @@ const glassCard: React.CSSProperties = {
   borderRadius: 16,
 };
 
-const mockAgents = [
-  { uid: 'agent-001', name: 'web-server-01', ip: '192.168.1.100', status: 'online', cpu: '12%', mem: '45%', tasks: 8, lastSeen: '2 分钟前' },
-  { uid: 'agent-002', name: 'api-gateway-02', ip: '192.168.1.101', status: 'online', cpu: '8%', mem: '32%', tasks: 3, lastSeen: '1 分钟前' },
-  { uid: 'agent-003', name: 'db-proxy-03', ip: '192.168.1.102', status: 'offline', cpu: '-', mem: '-', tasks: 0, lastSeen: '3 小时前' },
-  { uid: 'agent-004', name: 'worker-node-04', ip: '192.168.1.103', status: 'online', cpu: '25%', mem: '68%', tasks: 12, lastSeen: '刚刚' },
-];
-
 export default function Agents() {
   const containerRef = useRef<HTMLDivElement>(null);
   const [search, setSearch] = useState('');
+  const [agents, setAgents] = useState<AgentInfo[]>([]);
+  const [stats, setStats] = useState<Record<string, AgentStatData>>({});
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
   useGSAP(() => {
     gsap.fromTo(
@@ -49,9 +49,45 @@ export default function Agents() {
     );
   }, { scope: containerRef });
 
-  const filtered = mockAgents.filter(a =>
-    a.name.includes(search) || a.ip.includes(search)
-  );
+  const loadAgents = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const res = await getAgents();
+      const list = res.code === 0 ? (res.data || []) : [];
+      setAgents(list);
+
+      const statEntries = await Promise.all(
+        list
+          .filter(agent => agent.online)
+          .map(async (agent) => {
+            try {
+              const stat = await statAgent(agent.ip_addr);
+              return [agent.ip_addr, stat.data] as const;
+            } catch {
+              return [agent.ip_addr, undefined] as const;
+            }
+          }),
+      );
+      setStats(Object.fromEntries(statEntries.filter((entry): entry is readonly [string, AgentStatData] => Boolean(entry[1]))));
+    } catch (e: any) {
+      setError(e?.response?.data?.message || e?.message || 'Agent 列表加载失败');
+      setAgents([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadAgents();
+  }, []);
+
+  const filtered = useMemo(() => (
+    agents.filter(a => a.hostname.includes(search) || a.ip_addr.includes(search))
+  ), [agents, search]);
+
+  const onlineCount = agents.filter(agent => agent.online).length;
+  const offlineCount = agents.length - onlineCount;
 
   return (
     <div ref={containerRef}>
@@ -63,9 +99,9 @@ export default function Agents() {
       {/* Stats Row */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 24 }}>
         {[
-          { label: '在线 Agent', value: '3', icon: '🟢', color: '#4ade80' },
-          { label: '离线 Agent', value: '1', icon: '⚪', color: 'rgba(255,255,255,0.4)' },
-          { label: '总任务数', value: '23', icon: '📊', color: '#60a5fa' },
+          { label: '在线 Agent', value: String(onlineCount), icon: '🟢', color: '#4ade80' },
+          { label: '离线 Agent', value: String(offlineCount), icon: '⚪', color: 'rgba(255,255,255,0.4)' },
+          { label: '总 Agent', value: String(agents.length), icon: '📊', color: '#60a5fa' },
         ].map((s, i) => (
           <div key={i} style={{ ...glassCard, padding: '20px 16px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
@@ -79,26 +115,53 @@ export default function Agents() {
 
       {/* Search */}
       <div style={{ marginBottom: 16 }}>
-        <input
-          type="text"
-          placeholder="搜索 Agent 名称或 IP..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          style={{
-            width: 280, padding: '10px 14px',
-            background: 'rgba(255,255,255,0.04)',
-            border: '0.5px solid rgba(255,255,255,0.1)',
-            borderRadius: 10, fontSize: 13, color: '#fff', outline: 'none',
-          }}
-        />
+        <div style={{ display: 'flex', gap: 12 }}>
+          <input
+            type="text"
+            placeholder="搜索 Agent 名称或 IP..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            style={{
+              width: 280, padding: '10px 14px',
+              background: 'rgba(255,255,255,0.04)',
+              border: '0.5px solid rgba(255,255,255,0.1)',
+              borderRadius: 10, fontSize: 13, color: '#fff', outline: 'none',
+            }}
+          />
+          <button
+            onClick={loadAgents}
+            style={{
+              padding: '10px 16px',
+              background: 'rgba(255,255,255,0.06)',
+              border: '0.5px solid rgba(255,255,255,0.1)',
+              borderRadius: 10,
+              color: 'rgba(255,255,255,0.7)',
+              cursor: 'pointer',
+            }}
+          >
+            刷新
+          </button>
+        </div>
       </div>
 
       {/* Agent Cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 16 }}>
-        {filtered.map((agent, i) => {
-          const online = agent.status === 'online';
+        {loading && (
+          <div style={{ ...glassCard, padding: 28, color: 'rgba(255,255,255,0.45)', gridColumn: '1 / -1' }}>加载 Agent 中...</div>
+        )}
+        {!loading && error && (
+          <div style={{ ...glassCard, padding: 28, color: '#f87171', gridColumn: '1 / -1' }}>{error}</div>
+        )}
+        {!loading && !error && filtered.length === 0 && (
+          <div style={{ ...glassCard, padding: 28, color: 'rgba(255,255,255,0.45)', gridColumn: '1 / -1' }}>暂无 Agent</div>
+        )}
+        {!loading && filtered.map((agent) => {
+          const online = agent.online;
+          const stat = stats[agent.ip_addr];
+          const cpu = stat?.self_pstats?.cpu_percent;
+          const rssKb = stat?.self_pstats?.rss_kb;
           return (
-            <div key={i} className="agent-card" style={{
+            <div key={agent.id || agent.ip_addr} className="agent-card" style={{
               ...glassCard, padding: 24, transition: 'all 0.15s',
             }}
               onMouseEnter={(e) => e.currentTarget.style.borderColor = 'rgba(255,255,255,0.12)'}
@@ -113,11 +176,11 @@ export default function Agents() {
                     display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18,
                   }}>🖥️</div>
                   <div>
-                    <div style={{ fontSize: 15, fontWeight: 600, color: 'rgba(255,255,255,0.85)' }}>{agent.name}</div>
+                    <div style={{ fontSize: 15, fontWeight: 600, color: 'rgba(255,255,255,0.85)' }}>{agent.hostname || '-'}</div>
                     <code style={{
                       fontSize: 12, color: 'rgba(255,255,255,0.35)',
                       background: 'rgba(255,255,255,0.04)', padding: '1px 6px', borderRadius: 4,
-                    }}>{agent.ip}</code>
+                    }}>{agent.ip_addr}</code>
                   </div>
                 </div>
                 <span style={{
@@ -137,20 +200,20 @@ export default function Agents() {
               }}>
                 <div>
                   <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', marginBottom: 4 }}>CPU</div>
-                  <div style={{ fontSize: 14, fontWeight: 600, color: 'rgba(255,255,255,0.85)' }}>{agent.cpu}</div>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: 'rgba(255,255,255,0.85)' }}>{typeof cpu === 'number' ? `${cpu.toFixed(1)}%` : '-'}</div>
                 </div>
                 <div>
-                  <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', marginBottom: 4 }}>内存</div>
-                  <div style={{ fontSize: 14, fontWeight: 600, color: 'rgba(255,255,255,0.85)' }}>{agent.mem}</div>
+                  <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', marginBottom: 4 }}>RSS</div>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: 'rgba(255,255,255,0.85)' }}>{typeof rssKb === 'number' ? `${Math.round(rssKb / 1024)} MB` : '-'}</div>
                 </div>
                 <div>
-                  <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', marginBottom: 4 }}>任务数</div>
-                  <div style={{ fontSize: 14, fontWeight: 600, color: 'rgba(255,255,255,0.85)' }}>{agent.tasks}</div>
+                  <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', marginBottom: 4 }}>环境</div>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: 'rgba(255,255,255,0.85)' }}>{agent.environment || '-'}</div>
                 </div>
               </div>
 
               <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.3)', marginTop: 8 }}>
-                最后活跃: {agent.lastSeen}
+                版本: {agent.version || '-'} · 最后心跳: {formatRelativeTime(agent.last_heartbeat)}
               </div>
             </div>
           );

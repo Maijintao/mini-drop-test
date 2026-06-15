@@ -1,6 +1,7 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useGSAP } from '@gsap/react';
 import gsap from 'gsap';
+import api, { getUsers } from '@/api';
 
 gsap.registerPlugin(useGSAP);
 
@@ -17,127 +18,104 @@ const glassCard: React.CSSProperties = {
   borderRadius: 16,
 };
 
-const inputStyle: React.CSSProperties = {
-  width: '100%', padding: '10px 14px',
-  background: 'rgba(255,255,255,0.04)',
-  border: '0.5px solid rgba(255,255,255,0.1)',
-  borderRadius: 10, fontSize: 14, color: '#fff', outline: 'none',
-  boxSizing: 'border-box' as const,
-};
+interface UserInfo {
+  uid: string;
+  name: string;
+  groups?: unknown;
+}
 
 export default function Settings() {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [saved, setSaved] = useState(false);
+  const [user, setUser] = useState<UserInfo | null>(null);
+  const [apiHealthy, setApiHealthy] = useState<'checking' | 'ok' | 'fail'>('checking');
+  const [error, setError] = useState('');
 
   useGSAP(() => {
-    gsap.from('.settings-header', { y: -10, opacity: 0, duration: 0.4, ease: 'power2.out' });
-    gsap.from('.settings-section', { y: 15, opacity: 0, stagger: 0.1, duration: 0.4, ease: 'power2.out', delay: 0.15 });
+    gsap.fromTo('.settings-header', { y: -10, autoAlpha: 0 }, { y: 0, autoAlpha: 1, duration: 0.35, clearProps: 'transform,opacity,visibility' });
+    gsap.fromTo('.settings-section', { y: 14, autoAlpha: 0 }, { y: 0, autoAlpha: 1, stagger: 0.06, duration: 0.35, delay: 0.08, clearProps: 'transform,opacity,visibility' });
   }, { scope: containerRef });
 
-  const handleSave = () => {
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+  const load = async () => {
+    setError('');
+    setApiHealthy('checking');
+    try {
+      await api.get('/healthz');
+      setApiHealthy('ok');
+    } catch {
+      setApiHealthy('fail');
+    }
+
+    try {
+      const res = await getUsers();
+      if (res.code === 0) setUser(res.data || null);
+    } catch (e: any) {
+      setError(e?.response?.data?.message || e?.message || '用户信息加载失败');
+    }
   };
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  const rows = [
+    { label: 'API Base URL', value: '/api/v1' },
+    { label: '请求超时', value: '30000 ms' },
+    { label: 'Cookie 鉴权', value: 'Drop_user_uid / Drop_user_name' },
+    { label: 'API 健康状态', value: apiHealthy === 'checking' ? '检查中' : apiHealthy === 'ok' ? '正常' : '异常', color: apiHealthy === 'ok' ? '#4ade80' : apiHealthy === 'fail' ? '#f87171' : 'rgba(255,255,255,0.55)' },
+  ];
 
   return (
     <div ref={containerRef}>
       <div className="settings-header" style={{ marginBottom: 24 }}>
         <h1 style={{ fontSize: 24, fontWeight: 700, color: '#fff', margin: '0 0 6px' }}>设置</h1>
-        <p style={{ fontSize: 14, color: 'rgba(255,255,255,0.45)', margin: 0 }}>配置平台参数和分析引擎</p>
+        <p style={{ fontSize: 14, color: 'rgba(255,255,255,0.45)', margin: 0 }}>查看当前前端运行配置和用户上下文</p>
       </div>
 
-      {/* API Server */}
+      {error && <div style={{ ...glassCard, padding: 18, marginBottom: 20, color: '#f87171' }}>{error}</div>}
+
       <div className="settings-section" style={{ ...glassCard, padding: 24, marginBottom: 20 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
-          <div style={{
-            width: 32, height: 32,
-            background: 'rgba(255,255,255,0.06)',
-            border: '0.5px solid rgba(255,255,255,0.08)',
-            borderRadius: 8,
-            display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15,
-          }}>🌐</div>
-          <h3 style={{ fontSize: 16, fontWeight: 600, color: '#fff', margin: 0 }}>API 服务</h3>
-        </div>
-        <div style={{ display: 'grid', gap: 16 }}>
-          <div>
-            <label style={{ display: 'block', fontSize: 13, fontWeight: 500, color: 'rgba(255,255,255,0.5)', marginBottom: 6 }}>API 地址</label>
-            <input type="text" defaultValue="http://localhost:8191" style={inputStyle} />
-          </div>
-          <div>
-            <label style={{ display: 'block', fontSize: 13, fontWeight: 500, color: 'rgba(255,255,255,0.5)', marginBottom: 6 }}>请求超时 (ms)</label>
-            <input type="number" defaultValue="10000" style={{ ...inputStyle, width: 200 }} />
-          </div>
+        <h3 style={{ fontSize: 16, fontWeight: 600, color: '#fff', margin: '0 0 20px' }}>API 服务</h3>
+        <div style={{ display: 'grid', gap: 14 }}>
+          {rows.map(item => (
+            <div key={item.label} style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: 12, borderBottom: '0.5px solid rgba(255,255,255,0.05)' }}>
+              <span style={{ color: 'rgba(255,255,255,0.45)', fontSize: 13 }}>{item.label}</span>
+              <span style={{ color: item.color || 'rgba(255,255,255,0.82)', fontSize: 14, fontWeight: 600 }}>{item.value}</span>
+            </div>
+          ))}
         </div>
       </div>
 
-      {/* Analysis Engine */}
       <div className="settings-section" style={{ ...glassCard, padding: 24, marginBottom: 20 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
-          <div style={{
-            width: 32, height: 32,
-            background: 'rgba(255,255,255,0.06)',
-            border: '0.5px solid rgba(255,255,255,0.08)',
-            borderRadius: 8,
-            display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15,
-          }}>⚙️</div>
-          <h3 style={{ fontSize: 16, fontWeight: 600, color: '#fff', margin: 0 }}>分析引擎</h3>
-        </div>
-        <div style={{ display: 'grid', gap: 16 }}>
-          <div>
-            <label style={{ display: 'block', fontSize: 13, fontWeight: 500, color: 'rgba(255,255,255,0.5)', marginBottom: 6 }}>Python 分析服务地址</label>
-            <input type="text" defaultValue="http://localhost:8192" style={inputStyle} />
-          </div>
-          <div>
-            <label style={{ display: 'block', fontSize: 13, fontWeight: 500, color: 'rgba(255,255,255,0.5)', marginBottom: 6 }}>默认采样频率 (Hz)</label>
-            <input type="number" defaultValue="99" style={{ ...inputStyle, width: 200 }} />
-          </div>
+        <h3 style={{ fontSize: 16, fontWeight: 600, color: '#fff', margin: '0 0 20px' }}>当前用户</h3>
+        <div style={{ display: 'grid', gap: 14 }}>
+          {[
+            { label: 'UID', value: user?.uid || '-' },
+            { label: '用户名', value: user?.name || '-' },
+            { label: '用户组', value: user?.groups ? JSON.stringify(user.groups) : '-' },
+          ].map(item => (
+            <div key={item.label} style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: 12, borderBottom: '0.5px solid rgba(255,255,255,0.05)' }}>
+              <span style={{ color: 'rgba(255,255,255,0.45)', fontSize: 13 }}>{item.label}</span>
+              <span style={{ color: 'rgba(255,255,255,0.82)', fontSize: 14, fontWeight: 600 }}>{item.value}</span>
+            </div>
+          ))}
         </div>
       </div>
 
-      {/* COS Storage */}
-      <div className="settings-section" style={{ ...glassCard, padding: 24, marginBottom: 20 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
-          <div style={{
-            width: 32, height: 32,
-            background: 'rgba(255,255,255,0.06)',
-            border: '0.5px solid rgba(255,255,255,0.08)',
-            borderRadius: 8,
-            display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15,
-          }}>☁️</div>
-          <h3 style={{ fontSize: 16, fontWeight: 600, color: '#fff', margin: 0 }}>对象存储</h3>
-        </div>
-        <div style={{ display: 'grid', gap: 16 }}>
-          <div>
-            <label style={{ display: 'block', fontSize: 13, fontWeight: 500, color: 'rgba(255,255,255,0.5)', marginBottom: 6 }}>COS Bucket</label>
-            <input type="text" defaultValue="mini-drop-1250000000" style={inputStyle} />
-          </div>
-          <div>
-            <label style={{ display: 'block', fontSize: 13, fontWeight: 500, color: 'rgba(255,255,255,0.5)', marginBottom: 6 }}>Region</label>
-            <input type="text" defaultValue="ap-guangzhou" style={{ ...inputStyle, width: 300 }} />
-          </div>
-        </div>
-      </div>
-
-      {/* Save Button */}
-      <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-        <button
-          onClick={handleSave}
-          style={{
-            padding: '10px 24px',
-            background: 'rgba(255,255,255,0.1)',
-            border: '0.5px solid rgba(255,255,255,0.15)',
-            borderRadius: 10, color: '#fff', fontSize: 14, fontWeight: 500, cursor: 'pointer',
-            transition: 'all 0.15s',
-          }}
-          onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.15)'}
-          onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.1)'}
-        >
-          保存配置
-        </button>
-        {saved && (
-          <span style={{ fontSize: 14, color: '#4ade80', fontWeight: 500 }}>✓ 已保存</span>
-        )}
-      </div>
+      <button
+        onClick={load}
+        style={{
+          padding: '10px 24px',
+          background: 'rgba(255,255,255,0.1)',
+          border: '0.5px solid rgba(255,255,255,0.15)',
+          borderRadius: 10,
+          color: '#fff',
+          fontSize: 14,
+          fontWeight: 500,
+          cursor: 'pointer',
+        }}
+      >
+        刷新状态
+      </button>
     </div>
   );
 }
