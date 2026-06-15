@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test:api": "node test/api-smoke.mjs"
+    "test:api": "node test/api-smoke.mjs",
+    "test:web": "node test/run.mjs"
   },
   "dependencies": {
     "@ant-design/icons": "^6.2.5",
