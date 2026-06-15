@@ -30,49 +30,72 @@ export default function AppLayout() {
     if (el) gsap.from(el, { opacity: 0, y: 8, duration: 0.35, ease: 'power2.out' });
   }, [location.pathname]);
 
-  if (loading) return <div style={{ padding: 40, textAlign: 'center', color: '#94a3b8' }}>加载中...</div>;
+  if (loading) return <div style={{ padding: 40, textAlign: 'center', color: 'rgba(255,255,255,0.4)' }}>加载中...</div>;
   if (!isAuth) return <Navigate to="/login" replace />;
 
   return (
-    <div style={{ minHeight: '100vh', background: '#f8fafc' }}>
+    <div style={{ minHeight: '100vh', background: '#1a1e2e' }}>
+      {/* 背景 */}
+      <div style={{
+        position: 'fixed', inset: 0, zIndex: 0,
+        background:
+          'radial-gradient(ellipse at 30% 40%, rgba(45,55,80,0.8) 0%, transparent 60%), ' +
+          'radial-gradient(ellipse at 70% 30%, rgba(35,45,65,0.6) 0%, transparent 50%), ' +
+          'radial-gradient(ellipse at 50% 80%, rgba(25,30,50,0.9) 0%, transparent 60%), ' +
+          'linear-gradient(180deg, #151928 0%, #1a2035 40%, #1e2540 100%)',
+        pointerEvents: 'none',
+      }} />
+
       {/* Top Header */}
       <header style={{
         position: 'fixed', top: 0, left: 0, right: 0, height: 56, zIndex: 100,
-        background: '#fff', borderBottom: '1px solid #e2e8f0',
+        background: 'transparent',
+        backdropFilter: 'blur(20px)',
+        WebkitBackdropFilter: 'blur(20px)',
+        borderBottom: '0.5px solid rgba(255,255,255,0.06)',
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         padding: '0 24px',
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <div style={{
-            width: 28, height: 28, background: '#0f172a', borderRadius: 6,
+            width: 28, height: 28, borderRadius: 6,
+            background: 'rgba(255,255,255,0.08)',
+            border: '0.5px solid rgba(255,255,255,0.1)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             color: '#fff', fontSize: 14, fontWeight: 800,
           }}>M</div>
-          <span style={{ fontSize: 18, fontWeight: 700, color: '#1e293b' }}>Mini-Drop</span>
+          <span style={{ fontSize: 18, fontWeight: 700, color: '#fff' }}>Mini-Drop</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           <span style={{
-            background: '#eff6ff', color: '#2563eb',
+            background: 'rgba(255,255,255,0.06)',
+            border: '0.5px solid rgba(255,255,255,0.08)',
+            color: 'rgba(255,255,255,0.7)',
             padding: '4px 12px', borderRadius: 20, fontSize: 13, fontWeight: 500,
           }}>
             {userName || '用户'}
           </span>
           <div style={{
-            width: 28, height: 28, background: '#e2e8f0', borderRadius: '50%',
+            width: 28, height: 28,
+            background: 'rgba(255,255,255,0.08)',
+            border: '0.5px solid rgba(255,255,255,0.1)',
+            borderRadius: '50%',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 12, color: '#64748b',
+            fontSize: 12, color: 'rgba(255,255,255,0.6)',
           }}>
             {(userName || '?')[0].toUpperCase()}
           </div>
           <button
             onClick={() => useAuth.getState().logout()}
             style={{
-              background: 'none', border: '1px solid #e2e8f0', borderRadius: 8,
-              padding: '6px 14px', fontSize: 13, color: '#64748b', cursor: 'pointer',
+              background: 'rgba(255,255,255,0.04)',
+              border: '0.5px solid rgba(255,255,255,0.1)',
+              borderRadius: 8,
+              padding: '6px 14px', fontSize: 13, color: 'rgba(255,255,255,0.5)', cursor: 'pointer',
               transition: 'all 0.15s',
             }}
-            onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#dc2626'; e.currentTarget.style.color = '#dc2626'; }}
-            onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#e2e8f0'; e.currentTarget.style.color = '#64748b'; }}
+            onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'rgba(220,38,38,0.5)'; e.currentTarget.style.color = '#f87171'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)'; e.currentTarget.style.color = 'rgba(255,255,255,0.5)'; }}
           >
             退出
           </button>
@@ -83,7 +106,10 @@ export default function AppLayout() {
       <aside style={{
         position: 'fixed', top: 56, left: 0, bottom: 0,
         width: collapsed ? 60 : 220, zIndex: 90,
-        background: '#fff', borderRight: '1px solid #e2e8f0',
+        background: 'transparent',
+        backdropFilter: 'blur(20px)',
+        WebkitBackdropFilter: 'blur(20px)',
+        borderRight: '0.5px solid rgba(255,255,255,0.06)',
         padding: '16px 0', overflow: 'hidden', transition: 'width 0.2s',
       }}>
         {/* Collapse Toggle */}
@@ -91,7 +117,7 @@ export default function AppLayout() {
           onClick={() => setCollapsed(!collapsed)}
           style={{
             display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
-            padding: '0 16px 12px', cursor: 'pointer', color: '#94a3b8', fontSize: 12,
+            padding: '0 16px 12px', cursor: 'pointer', color: 'rgba(255,255,255,0.3)', fontSize: 12,
           }}
         >
           {collapsed ? '→' : '← 收起'}
@@ -111,12 +137,12 @@ export default function AppLayout() {
                   margin: '2px 8px', borderRadius: 8,
                   fontSize: 14, cursor: 'pointer', transition: 'all 0.15s',
                   justifyContent: collapsed ? 'center' : 'flex-start',
-                  background: active ? '#eff6ff' : 'transparent',
-                  color: active ? '#2563eb' : '#64748b',
+                  background: active ? 'rgba(255,255,255,0.07)' : 'transparent',
+                  color: active ? '#fff' : 'rgba(255,255,255,0.5)',
                   fontWeight: active ? 500 : 400,
                 }}
                 onMouseEnter={(e) => {
-                  if (!active) e.currentTarget.style.background = '#f1f5f9';
+                  if (!active) e.currentTarget.style.background = 'rgba(255,255,255,0.04)';
                 }}
                 onMouseLeave={(e) => {
                   if (!active) e.currentTarget.style.background = 'transparent';
@@ -134,10 +160,10 @@ export default function AppLayout() {
         {/* Sidebar Footer */}
         <div style={{
           position: 'absolute', bottom: 0, left: 0, right: 0,
-          padding: 16, borderTop: '1px solid #e2e8f0',
+          padding: 16, borderTop: '0.5px solid rgba(255,255,255,0.06)',
         }}>
           {!collapsed && (
-            <p style={{ fontSize: 12, color: '#94a3b8', margin: '0 0 8px' }}>
+            <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.25)', margin: 0 }}>
               性能采集与分析平台
             </p>
           )}
@@ -149,6 +175,7 @@ export default function AppLayout() {
         marginLeft: collapsed ? 60 : 220, marginTop: 56,
         padding: 32, minHeight: 'calc(100vh - 56px)',
         transition: 'margin-left 0.2s',
+        position: 'relative', zIndex: 1,
       }}>
         <div className="main-content" key={location.pathname}>
           <Outlet />
