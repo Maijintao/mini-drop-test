@@ -6,6 +6,7 @@ import { createTask, deleteTask, getAgents, getTasks, retryTask } from '@/api';
 import type { AgentInfo, CreateTaskParams, HotmethodTask } from '@/domain';
 import { analysisMap, formatDate, formatDuration, statusMap } from '@/domain';
 import { waitForTaskResult } from '@/taskPolling';
+import CreateTaskModal from '@/components/CreateTaskModal';
 
 gsap.registerPlugin(useGSAP);
 
@@ -266,67 +267,14 @@ export default function TaskList() {
       </div>
 
       {showCreate && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(8px)' }} onClick={(e) => { if (e.target === e.currentTarget) setShowCreate(false); }}>
-          <div style={{ ...glassCard, padding: 28, width: '90%', maxWidth: 560 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-              <h3 style={{ fontSize: 18, fontWeight: 600, color: '#fff', margin: 0 }}>新建采集任务</h3>
-              <button onClick={() => setShowCreate(false)} style={{ background: 'none', border: 'none', fontSize: 20, color: 'rgba(255,255,255,0.4)', cursor: 'pointer' }}>×</button>
-            </div>
-            <div style={{ display: 'grid', gap: 16, marginBottom: 24 }}>
-              <div>
-                <label style={{ display: 'block', fontSize: 13, fontWeight: 500, color: 'rgba(255,255,255,0.5)', marginBottom: 6 }}>任务名称</label>
-                <input value={form.name} onChange={(e) => setForm(prev => ({ ...prev, name: e.target.value }))} type="text" placeholder="例: CPU 采样 - nginx" style={inputStyle} />
-              </div>
-              <div>
-                <label style={{ display: 'block', fontSize: 13, fontWeight: 500, color: 'rgba(255,255,255,0.5)', marginBottom: 6 }}>目标 Agent</label>
-                <select value={form.target_ip} onChange={(e) => setForm(prev => ({ ...prev, target_ip: e.target.value }))} style={inputStyle}>
-                  {agents.map(agent => (
-                    <option key={agent.id || agent.ip_addr} value={agent.ip_addr} disabled={!agent.online} style={{ background: '#1a1e2e' }}>
-                      {agent.hostname} ({agent.ip_addr}) {agent.online ? '' : '- 离线'}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: 13, fontWeight: 500, color: 'rgba(255,255,255,0.5)', marginBottom: 6 }}>采集类型</label>
-                  <select value={form.type} onChange={(e) => setForm(prev => ({ ...prev, type: Number(e.target.value), profiler_type: Number(e.target.value) === 1 ? 1 : 0 }))} style={inputStyle}>
-                    <option value={0} style={{ background: '#1a1e2e' }}>CPU / perf</option>
-                    <option value={1} style={{ background: '#1a1e2e' }}>Java / async-profiler</option>
-                    <option value={4} style={{ background: '#1a1e2e' }}>MemCheck</option>
-                    <option value={6} style={{ background: '#1a1e2e' }}>Java Heap</option>
-                  </select>
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: 13, fontWeight: 500, color: 'rgba(255,255,255,0.5)', marginBottom: 6 }}>目标 PID</label>
-                  <input type="number" value={form.pid || ''} onChange={(e) => setForm(prev => ({ ...prev, pid: Number(e.target.value) }))} style={inputStyle} />
-                </div>
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: 13, fontWeight: 500, color: 'rgba(255,255,255,0.5)', marginBottom: 6 }}>时长</label>
-                  <input type="number" value={form.duration} onChange={(e) => setForm(prev => ({ ...prev, duration: Number(e.target.value) }))} style={inputStyle} />
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: 13, fontWeight: 500, color: 'rgba(255,255,255,0.5)', marginBottom: 6 }}>频率 Hz</label>
-                  <input type="number" value={form.hz} onChange={(e) => setForm(prev => ({ ...prev, hz: Number(e.target.value) }))} style={inputStyle} />
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: 13, fontWeight: 500, color: 'rgba(255,255,255,0.5)', marginBottom: 6 }}>Callgraph</label>
-                  <select value={form.callgraph} onChange={(e) => setForm(prev => ({ ...prev, callgraph: e.target.value }))} style={inputStyle}>
-                    <option value="dwarf" style={{ background: '#1a1e2e' }}>dwarf</option>
-                    <option value="fp" style={{ background: '#1a1e2e' }}>fp</option>
-                    <option value="lbr" style={{ background: '#1a1e2e' }}>lbr</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-            <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
-              <button onClick={() => setShowCreate(false)} style={{ padding: '10px 20px', background: 'rgba(255,255,255,0.04)', border: '0.5px solid rgba(255,255,255,0.1)', borderRadius: 10, color: 'rgba(255,255,255,0.6)', cursor: 'pointer' }}>取消</button>
-              <button disabled={submitting || !form.target_ip || !form.pid} onClick={submitCreate} style={{ padding: '10px 20px', background: 'rgba(255,255,255,0.1)', border: '0.5px solid rgba(255,255,255,0.15)', borderRadius: 10, color: '#fff', cursor: submitting || !form.target_ip || !form.pid ? 'not-allowed' : 'pointer' }}>{submitting ? '创建中...' : '创建任务'}</button>
-            </div>
-          </div>
-        </div>
+        <CreateTaskModal
+          agents={agents}
+          form={form}
+          submitting={submitting}
+          onChange={(patch) => setForm(prev => ({ ...prev, ...patch }))}
+          onCancel={() => setShowCreate(false)}
+          onSubmit={submitCreate}
+        />
       )}
     </div>
   );
