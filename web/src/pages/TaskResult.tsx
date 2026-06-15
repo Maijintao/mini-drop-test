@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useGSAP } from '@gsap/react';
 import gsap from 'gsap';
-import { fetchSignedJson, getFlameData, getSuggestions, getTaskDetail, triggerAnalysis } from '@/api';
-import type { AnalysisSuggestion, HotmethodTask, TopFunction } from '@/domain';
+import { fetchSignedJson, getCosFiles, getFlameData, getSuggestions, getTaskDetail, triggerAnalysis } from '@/api';
+import type { AnalysisSuggestion, CosFile, HotmethodTask, TopFunction } from '@/domain';
 import { analysisMap, basename, formatDate, formatDuration, parseTaskParams, profilerTypeMap, statusMap, taskTypeMap } from '@/domain';
 
 gsap.registerPlugin(useGSAP);
@@ -31,6 +31,7 @@ export default function TaskResult() {
   const [flameLoading, setFlameLoading] = useState(false);
   const [flameError, setFlameError] = useState('');
   const [topn, setTopn] = useState<TopFunction[]>([]);
+  const [cosFiles, setCosFiles] = useState<CosFile[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [analysisMessage, setAnalysisMessage] = useState('');
@@ -56,6 +57,7 @@ export default function TaskResult() {
       if (detailRes.code === 0 && detailRes.data?.task) {
         setTask(detailRes.data.task);
         setSuggestions(detailRes.data.suggestions || []);
+        setCosFiles(Array.isArray(detailRes.data.cos_files) ? detailRes.data.cos_files : []);
       } else {
         throw new Error(detailRes.message || '任务不存在');
       }
@@ -92,6 +94,15 @@ export default function TaskResult() {
           setTopn(Array.isArray(data) ? data : []);
         } catch {
           setTopn([]);
+        }
+      }
+
+      if (files.length === 0) {
+        try {
+          const fileRes = await getCosFiles(tid);
+          setCosFiles(Array.isArray(fileRes.data) ? fileRes.data : []);
+        } catch {
+          setCosFiles([]);
         }
       }
     } catch (e: any) {
@@ -179,6 +190,7 @@ export default function TaskResult() {
                 { key: 'flame', label: '火焰图' },
                 { key: 'topn', label: '热点函数' },
                 { key: 'suggestions', label: '优化建议' },
+                { key: 'files', label: '文件下载' },
               ].map(tab => (
                 <button key={tab.key} onClick={() => setActiveTab(tab.key)} style={{ padding: '8px 20px', borderRadius: 10, fontSize: 14, fontWeight: 500, cursor: 'pointer', border: 'none', background: activeTab === tab.key ? 'rgba(255,255,255,0.1)' : 'transparent', color: activeTab === tab.key ? '#fff' : 'rgba(255,255,255,0.45)' }}>{tab.label}</button>
               ))}
@@ -278,6 +290,49 @@ export default function TaskResult() {
                       {item.ai_suggestion && <div style={{ marginTop: 8, fontSize: 13, color: 'rgba(255,255,255,0.5)', lineHeight: 1.7 }}>{item.ai_suggestion}</div>}
                     </div>
                   ))}
+                </div>
+              )}
+
+              {activeTab === 'files' && (
+                <div style={{ border: '0.5px solid rgba(255,255,255,0.06)', borderRadius: 12, overflow: 'hidden' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '0.5px solid rgba(255,255,255,0.06)' }}>
+                        {['文件名', '对象 Key', '大小', '操作'].map(h => (
+                          <th key={h} style={{ padding: '12px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'rgba(255,255,255,0.3)', letterSpacing: 0 }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {cosFiles.length === 0 && (
+                        <tr><td colSpan={4} style={{ padding: 24, color: 'rgba(255,255,255,0.45)' }}>暂无 COS 文件</td></tr>
+                      )}
+                      {cosFiles.map((file, i) => {
+                        const key = file.key || file.name || '';
+                        const name = basename(key);
+                        const isPerfData = name === 'perf.data';
+                        return (
+                          <tr key={`${key || file.url}-${i}`} style={{ borderBottom: i < cosFiles.length - 1 ? '0.5px solid rgba(255,255,255,0.04)' : 'none' }}>
+                            <td style={{ padding: '14px 16px', fontSize: 13, color: isPerfData ? '#fbbf24' : 'rgba(255,255,255,0.85)', fontWeight: isPerfData ? 700 : 500 }}>
+                              {name || '-'}
+                            </td>
+                            <td style={{ padding: '14px 16px', fontSize: 12, fontFamily: 'monospace', color: 'rgba(255,255,255,0.45)' }}>{key || '-'}</td>
+                            <td style={{ padding: '14px 16px', fontSize: 13, color: 'rgba(255,255,255,0.45)' }}>{file.size ? `${(file.size / 1024).toFixed(1)} KB` : '-'}</td>
+                            <td style={{ padding: '14px 16px' }}>
+                              <a
+                                href={file.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                style={{ color: 'rgba(96,165,250,0.9)', textDecoration: 'none', fontSize: 13, fontWeight: 600 }}
+                              >
+                                下载
+                              </a>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
               )}
 
