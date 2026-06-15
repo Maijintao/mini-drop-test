@@ -40,16 +40,16 @@ export default function Login() {
       padding: 20,
       position: 'relative',
       overflow: 'hidden',
-      background: '#1a1e2e',
+      background: '#0a0a0c',
     }}>
       {/* 背景装饰 */}
       <div style={{
         position: 'fixed', inset: 0,
         background:
-          'radial-gradient(ellipse at 30% 40%, rgba(45, 55, 80, 0.8) 0%, transparent 60%), ' +
-          'radial-gradient(ellipse at 70% 30%, rgba(35, 45, 65, 0.6) 0%, transparent 50%), ' +
-          'radial-gradient(ellipse at 50% 80%, rgba(25, 30, 50, 0.9) 0%, transparent 60%), ' +
-          'linear-gradient(180deg, #151928 0%, #1a2035 40%, #1e2540 100%)',
+          'radial-gradient(ellipse at 28% 18%, rgba(255,255,255,0.045) 0%, transparent 42%), ' +
+          'radial-gradient(ellipse at 78% 12%, rgba(135,125,110,0.05) 0%, transparent 38%), ' +
+          'radial-gradient(ellipse at 52% 92%, rgba(80,75,68,0.075) 0%, transparent 56%), ' +
+          'linear-gradient(180deg, #0a0a0c 0%, #0d0d10 46%, #08080a 100%)',
         pointerEvents: 'none',
       }} />
 

@@ -25,6 +25,7 @@ export interface TaskParams {
   callgraph?: string;
   subprocess?: boolean;
   event?: string;
+  cron_expr?: string;
 }
 
 export interface CreateTaskParams {
@@ -83,6 +84,31 @@ export interface AnalysisSuggestion {
   status: number;
   created_at: string;
   updated_at: string;
+}
+
+export interface GroupInfo {
+  gid: number;
+  name: string;
+  owner_id: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GroupMemberInfo {
+  gid: number;
+  uid: string;
+}
+
+export interface CreateScheduleTaskParams {
+  task_name: string;
+  type?: number;
+  profiler_type?: number;
+  target_ip: string;
+  pid: number;
+  duration: number;
+  hz?: number;
+  callgraph?: string;
+  cron_expr: string;
 }
 
 export interface TaskDetailData {

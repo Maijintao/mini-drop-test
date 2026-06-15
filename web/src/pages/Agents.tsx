@@ -99,15 +99,12 @@ export default function Agents() {
       {/* Stats Row */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 24 }}>
         {[
-          { label: '在线 Agent', value: String(onlineCount), icon: '🟢', color: '#4ade80' },
-          { label: '离线 Agent', value: String(offlineCount), icon: '⚪', color: 'rgba(255,255,255,0.4)' },
-          { label: '总 Agent', value: String(agents.length), icon: '📊', color: '#60a5fa' },
+          { label: '在线 Agent', value: String(onlineCount), color: '#4ade80' },
+          { label: '离线 Agent', value: String(offlineCount), color: 'rgba(255,255,255,0.4)' },
+          { label: '总 Agent', value: String(agents.length), color: '#60a5fa' },
         ].map((s, i) => (
           <div key={i} style={{ ...glassCard, padding: '20px 16px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-              <span style={{ fontSize: 13, color: 'rgba(255,255,255,0.45)' }}>{s.label}</span>
-              <span style={{ fontSize: 16 }}>{s.icon}</span>
-            </div>
+            <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.45)', marginBottom: 12 }}>{s.label}</div>
             <div style={{ fontSize: 28, fontWeight: 700, color: s.color }}>{s.value}</div>
           </div>
         ))}
@@ -169,12 +166,6 @@ export default function Agents() {
             >
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <div style={{
-                    width: 36, height: 36, borderRadius: 10,
-                    background: online ? 'rgba(74,222,128,0.1)' : 'rgba(255,255,255,0.04)',
-                    border: '0.5px solid rgba(255,255,255,0.06)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18,
-                  }}>🖥️</div>
                   <div>
                     <div style={{ fontSize: 15, fontWeight: 600, color: 'rgba(255,255,255,0.85)' }}>{agent.hostname || '-'}</div>
                     <code style={{

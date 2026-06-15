@@ -15,7 +15,7 @@ const panelStyle: React.CSSProperties = {
   maxHeight: 'calc(100vh - 56px)',
   overflow: 'auto',
   borderRadius: 16,
-  background: 'rgba(24, 29, 44, 0.92)',
+  background: 'rgba(10, 10, 12, 0.88)',
   border: '0.5px solid rgba(255,255,255,0.08)',
   boxShadow:
     'inset 0 1px 0 rgba(255,255,255,0.06), ' +
@@ -89,7 +89,7 @@ export default function CreateTaskModal({
         alignItems: 'center',
         justifyContent: 'center',
         padding: 20,
-        background: 'rgba(4, 7, 15, 0.68)',
+        background: 'rgba(0, 0, 0, 0.68)',
         backdropFilter: 'blur(10px)',
         WebkitBackdropFilter: 'blur(10px)',
       }}
@@ -147,9 +147,9 @@ export default function CreateTaskModal({
                   onChange={(event) => onChange({ target_ip: event.target.value })}
                   style={selectStyle}
                 >
-                  <option value="" style={{ background: '#1a1e2e' }}>选择在线 Agent</option>
+                  <option value="" style={{ background: '#0a0a0c' }}>选择在线 Agent</option>
                   {agents.map(agent => (
-                    <option key={agent.id || agent.ip_addr} value={agent.ip_addr} disabled={!agent.online} style={{ background: '#1a1e2e' }}>
+                    <option key={agent.id || agent.ip_addr} value={agent.ip_addr} disabled={!agent.online} style={{ background: '#0a0a0c' }}>
                       {agent.hostname || agent.ip_addr} ({agent.ip_addr}) {agent.online ? '' : '- 离线'}
                     </option>
                   ))}
@@ -182,10 +182,10 @@ export default function CreateTaskModal({
                   }}
                   style={selectStyle}
                 >
-                  <option value={0} style={{ background: '#1a1e2e' }}>CPU / perf</option>
-                  <option value={1} style={{ background: '#1a1e2e' }}>Java / async-profiler</option>
-                  <option value={4} style={{ background: '#1a1e2e' }}>MemCheck</option>
-                  <option value={6} style={{ background: '#1a1e2e' }}>Java Heap</option>
+                  <option value={0} style={{ background: '#0a0a0c' }}>CPU / perf</option>
+                  <option value={1} style={{ background: '#0a0a0c' }}>Java / async-profiler</option>
+                  <option value={4} style={{ background: '#0a0a0c' }}>MemCheck</option>
+                  <option value={6} style={{ background: '#0a0a0c' }}>Java Heap</option>
                 </select>
               </Field>
               <Field label="目标 PID">
@@ -232,9 +232,9 @@ export default function CreateTaskModal({
                   onChange={(event) => onChange({ callgraph: event.target.value })}
                   style={selectStyle}
                 >
-                  <option value="dwarf" style={{ background: '#1a1e2e' }}>dwarf</option>
-                  <option value="fp" style={{ background: '#1a1e2e' }}>fp</option>
-                  <option value="lbr" style={{ background: '#1a1e2e' }}>lbr</option>
+                  <option value="dwarf" style={{ background: '#0a0a0c' }}>dwarf</option>
+                  <option value="fp" style={{ background: '#0a0a0c' }}>fp</option>
+                  <option value="lbr" style={{ background: '#0a0a0c' }}>lbr</option>
                 </select>
               </Field>
             </div>

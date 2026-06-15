@@ -155,9 +155,9 @@ export default function Home() {
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {[
-            { icon: '🔥', title: '火焰图分析', desc: '直观展示调用栈热点' },
-            { icon: '📊', title: 'Top-N 热点函数', desc: '自动排序 CPU 消耗最高的函数' },
-            { icon: '💡', title: 'AI 优化建议', desc: '基于分析结果给出优化方向' },
+            { title: '火焰图分析', desc: '直观展示调用栈热点' },
+            { title: 'Top-N 热点函数', desc: '自动排序 CPU 消耗最高的函数' },
+            { title: 'AI 优化建议', desc: '基于分析结果给出优化方向' },
           ].map((f, i) => (
             <div key={i} style={{
               display: 'flex', alignItems: 'center', gap: 12,
@@ -166,7 +166,6 @@ export default function Home() {
               border: '0.5px solid rgba(255,255,255,0.06)',
               borderRadius: 10,
             }}>
-              <span style={{ fontSize: 20 }}>{f.icon}</span>
               <div>
                 <div style={{ fontSize: 14, fontWeight: 600, color: 'rgba(255,255,255,0.85)' }}>{f.title}</div>
                 <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.35)' }}>{f.desc}</div>
@@ -181,16 +180,7 @@ export default function Home() {
         {/* My Agents */}
         <div className="section-card" style={{ ...glassCard, padding: 24 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <div style={{
-                width: 32, height: 32,
-                background: 'rgba(255,255,255,0.06)',
-                border: '0.5px solid rgba(255,255,255,0.08)',
-                borderRadius: 8,
-                display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15,
-              }}>A</div>
-              <h3 style={{ fontSize: 16, fontWeight: 600, color: '#fff', margin: 0 }}>我的 Agent</h3>
-            </div>
+            <h3 style={{ fontSize: 16, fontWeight: 600, color: '#fff', margin: 0 }}>我的 Agent</h3>
             <button
               onClick={() => navigate('/agents')}
               style={{
@@ -270,16 +260,7 @@ export default function Home() {
         {/* Recent Tasks */}
         <div className="section-card" style={{ ...glassCard, padding: 24 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <div style={{
-                width: 32, height: 32,
-                background: 'rgba(255,255,255,0.06)',
-                border: '0.5px solid rgba(255,255,255,0.08)',
-                borderRadius: 8,
-                display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15,
-              }}>📋</div>
-              <h3 style={{ fontSize: 16, fontWeight: 600, color: '#fff', margin: 0 }}>最近任务</h3>
-            </div>
+            <h3 style={{ fontSize: 16, fontWeight: 600, color: '#fff', margin: 0 }}>最近任务</h3>
             <button
               onClick={() => navigate('/tasks')}
               style={{

@@ -9,6 +9,8 @@ const routes = [
   "tasks",
   "task/result",
   "agents",
+  "groups",
+  "schedules",
   "settings",
 ];
 

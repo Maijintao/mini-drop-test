@@ -12,6 +12,7 @@ const tests = [
   '04-task-result-smoke.mjs',
   '05-login-settings-agents-smoke.mjs',
   '06-task-polling-smoke.mjs',
+  '07-groups-schedules-smoke.mjs',
 ];
 
 let failed = false;

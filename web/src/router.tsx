@@ -6,6 +6,8 @@ import TaskList from '@/pages/TaskList';
 import TaskResult from '@/pages/TaskResult';
 import Agents from '@/pages/Agents';
 import Settings from '@/pages/Settings';
+import Groups from '@/pages/Groups';
+import Schedules from '@/pages/Schedules';
 
 const router = createBrowserRouter([
   {
@@ -21,6 +23,8 @@ const router = createBrowserRouter([
       { path: 'tasks', element: <TaskList /> },
       { path: 'task/result', element: <TaskResult /> },
       { path: 'agents', element: <Agents /> },
+      { path: 'groups', element: <Groups /> },
+      { path: 'schedules', element: <Schedules /> },
       { path: 'settings', element: <Settings /> },
     ],
   },

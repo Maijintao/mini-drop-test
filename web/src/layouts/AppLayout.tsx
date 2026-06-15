@@ -7,10 +7,12 @@ import useAuth from '@/store/useAuth';
 gsap.registerPlugin(useGSAP);
 
 const NAV_ITEMS = [
-  { path: '/index', icon: '📊', label: '概览' },
-  { path: '/tasks', icon: '📋', label: '任务列表' },
-  { path: '/agents', icon: '🖥️', label: 'Agent 管理' },
-  { path: '/settings', icon: '⚙️', label: '设置' },
+  { path: '/index', label: '概览' },
+  { path: '/tasks', label: '任务列表' },
+  { path: '/agents', label: 'Agent 管理' },
+  { path: '/groups', label: '用户组' },
+  { path: '/schedules', label: '定时任务' },
+  { path: '/settings', label: '设置' },
 ];
 
 export default function AppLayout() {
@@ -40,15 +42,15 @@ export default function AppLayout() {
   if (!isAuth) return <Navigate to="/login" replace />;
 
   return (
-    <div style={{ minHeight: '100vh', background: '#1a1e2e' }}>
+    <div style={{ minHeight: '100vh', background: '#0a0a0c' }}>
       {/* 背景 */}
       <div style={{
         position: 'fixed', inset: 0, zIndex: 0,
         background:
-          'radial-gradient(ellipse at 30% 40%, rgba(45,55,80,0.8) 0%, transparent 60%), ' +
-          'radial-gradient(ellipse at 70% 30%, rgba(35,45,65,0.6) 0%, transparent 50%), ' +
-          'radial-gradient(ellipse at 50% 80%, rgba(25,30,50,0.9) 0%, transparent 60%), ' +
-          'linear-gradient(180deg, #151928 0%, #1a2035 40%, #1e2540 100%)',
+          'radial-gradient(ellipse at 28% 18%, rgba(255,255,255,0.045) 0%, transparent 42%), ' +
+          'radial-gradient(ellipse at 78% 12%, rgba(135,125,110,0.05) 0%, transparent 38%), ' +
+          'radial-gradient(ellipse at 52% 92%, rgba(80,75,68,0.075) 0%, transparent 56%), ' +
+          'linear-gradient(180deg, #0a0a0c 0%, #0d0d10 46%, #08080a 100%)',
         pointerEvents: 'none',
       }} />
 
@@ -144,19 +146,22 @@ export default function AppLayout() {
                   fontSize: 14, cursor: 'pointer', transition: 'all 0.15s',
                   justifyContent: collapsed ? 'center' : 'flex-start',
                   background: active ? 'rgba(255,255,255,0.07)' : 'transparent',
-                  color: active ? '#fff' : 'rgba(255,255,255,0.5)',
+                  color: active ? '#fff' : 'rgba(255,255,255,0.64)',
                   fontWeight: active ? 500 : 400,
                 }}
                 onMouseEnter={(e) => {
-                  if (!active) e.currentTarget.style.background = 'rgba(255,255,255,0.04)';
+                  if (!active) {
+                    e.currentTarget.style.background = 'rgba(255,255,255,0.04)';
+                    e.currentTarget.style.color = 'rgba(255,255,255,0.76)';
+                  }
                 }}
                 onMouseLeave={(e) => {
-                  if (!active) e.currentTarget.style.background = 'transparent';
+                  if (!active) {
+                    e.currentTarget.style.background = 'transparent';
+                    e.currentTarget.style.color = 'rgba(255,255,255,0.64)';
+                  }
                 }}
               >
-                <span style={{ width: 18, textAlign: 'center', fontSize: 15, flexShrink: 0 }}>
-                  {item.icon}
-                </span>
                 {!collapsed && <span>{item.label}</span>}
               </div>
             );

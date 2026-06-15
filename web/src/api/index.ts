@@ -5,7 +5,11 @@ import type {
   AnalysisSuggestion,
   ApiResponse,
   CosFile,
+  CreateScheduleTaskParams,
   CreateTaskParams,
+  GroupInfo,
+  GroupMemberInfo,
+  HotmethodTask,
   TaskDetailData,
   TaskListData,
 } from '@/domain';
@@ -79,16 +83,25 @@ export const fetchSignedJson = async <T>(url: string): Promise<T> => {
 };
 
 // Group
-export const createGroup = (data: { name: string }) => api.post('/group', data);
-export const getGroups = () => api.get('/groups');
-export const deleteGroup = (gid: number) => api.delete(`/group/${gid}`);
-export const addMember = (gid: number, uid: string) => api.post(`/group/${gid}/members`, { uid });
-export const removeMember = (gid: number, uid: string) => api.delete(`/group/${gid}/members/${uid}`);
-export const getGroupMembers = (gid: number) => api.get(`/group/${gid}/members`);
+export const createGroup = (data: { name: string }): Promise<ApiResponse<GroupInfo>> =>
+  api.post('/group', data) as unknown as Promise<ApiResponse<GroupInfo>>;
+export const getGroups = (): Promise<ApiResponse<GroupInfo[]>> =>
+  api.get('/groups') as unknown as Promise<ApiResponse<GroupInfo[]>>;
+export const deleteGroup = (gid: number): Promise<ApiResponse<unknown>> =>
+  api.delete(`/group/${gid}`) as unknown as Promise<ApiResponse<unknown>>;
+export const addMember = (gid: number, uid: string): Promise<ApiResponse<unknown>> =>
+  api.post(`/group/${gid}/members`, { uid }) as unknown as Promise<ApiResponse<unknown>>;
+export const removeMember = (gid: number, uid: string): Promise<ApiResponse<unknown>> =>
+  api.delete(`/group/${gid}/members/${uid}`) as unknown as Promise<ApiResponse<unknown>>;
+export const getGroupMembers = (gid: number): Promise<ApiResponse<GroupMemberInfo[]>> =>
+  api.get(`/group/${gid}/members`) as unknown as Promise<ApiResponse<GroupMemberInfo[]>>;
 
 // Schedule
-export const createScheduleTask = (data: { tid: string; cron: string }) => api.post('/schedule/task', data);
-export const getScheduleTasks = () => api.get('/schedule/tasks');
-export const deleteScheduleTask = (tid: string) => api.delete(`/schedule/task/${tid}`);
+export const createScheduleTask = (data: CreateScheduleTaskParams): Promise<ApiResponse<{ tid: string; cron_expr: string; message: string }>> =>
+  api.post('/schedule/task', data) as unknown as Promise<ApiResponse<{ tid: string; cron_expr: string; message: string }>>;
+export const getScheduleTasks = (): Promise<ApiResponse<HotmethodTask[]>> =>
+  api.get('/schedule/tasks') as unknown as Promise<ApiResponse<HotmethodTask[]>>;
+export const deleteScheduleTask = (tid: string): Promise<ApiResponse<unknown>> =>
+  api.delete(`/schedule/task/${tid}`) as unknown as Promise<ApiResponse<unknown>>;
 
 export default api;
