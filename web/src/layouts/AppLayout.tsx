@@ -2,17 +2,23 @@ import { useState, useEffect } from 'react';
 import { Outlet, useNavigate, useLocation, Navigate } from 'react-router-dom';
 import { useGSAP } from '@gsap/react';
 import gsap from 'gsap';
+import {
+  AppstoreOutlined,
+  ClusterOutlined,
+  ControlOutlined,
+  DeploymentUnitOutlined,
+  UnorderedListOutlined,
+} from '@ant-design/icons';
 import useAuth from '@/store/useAuth';
 
 gsap.registerPlugin(useGSAP);
 
 const NAV_ITEMS = [
-  { path: '/index', label: '概览' },
-  { path: '/tasks', label: '任务列表' },
-  { path: '/agents', label: 'Agent 管理' },
-  { path: '/groups', label: '用户组' },
-  { path: '/schedules', label: '定时任务' },
-  { path: '/settings', label: '设置' },
+  { path: '/index', label: '概览', icon: AppstoreOutlined },
+  { path: '/tasks', label: '任务列表', icon: UnorderedListOutlined },
+  { path: '/agents', label: 'Agent 管理', icon: DeploymentUnitOutlined },
+  { path: '/groups', label: '用户组', icon: ClusterOutlined },
+  { path: '/settings', label: '设置', icon: ControlOutlined },
 ];
 
 export default function AppLayout() {
@@ -42,15 +48,15 @@ export default function AppLayout() {
   if (!isAuth) return <Navigate to="/login" replace />;
 
   return (
-    <div style={{ minHeight: '100vh', background: '#0a0a0c' }}>
+    <div style={{ minHeight: '100vh', background: '#151515' }}>
       {/* 背景 */}
       <div style={{
         position: 'fixed', inset: 0, zIndex: 0,
         background:
-          'radial-gradient(ellipse at 28% 18%, rgba(255,255,255,0.045) 0%, transparent 42%), ' +
-          'radial-gradient(ellipse at 78% 12%, rgba(135,125,110,0.05) 0%, transparent 38%), ' +
-          'radial-gradient(ellipse at 52% 92%, rgba(80,75,68,0.075) 0%, transparent 56%), ' +
-          'linear-gradient(180deg, #0a0a0c 0%, #0d0d10 46%, #08080a 100%)',
+          'radial-gradient(ellipse at 28% 18%, rgba(255,255,255,0.035) 0%, transparent 42%), ' +
+          'radial-gradient(ellipse at 78% 12%, rgba(150,145,135,0.04) 0%, transparent 38%), ' +
+          'radial-gradient(ellipse at 52% 92%, rgba(95,92,86,0.055) 0%, transparent 56%), ' +
+          'linear-gradient(180deg, #151515 0%, #151515 48%, #121212 100%)',
         pointerEvents: 'none',
       }} />
 
@@ -60,39 +66,22 @@ export default function AppLayout() {
         background: 'transparent',
         backdropFilter: 'blur(20px)',
         WebkitBackdropFilter: 'blur(20px)',
-        borderBottom: '0.5px solid rgba(255,255,255,0.06)',
+        borderBottom: '0.5px solid rgba(255,255,255,0.085)',
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         padding: '0 24px',
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div style={{
-            width: 28, height: 28, borderRadius: 6,
-            background: 'rgba(255,255,255,0.08)',
-            border: '0.5px solid rgba(255,255,255,0.1)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            color: '#fff', fontSize: 14, fontWeight: 800,
-          }}>M</div>
+        <div style={{ display: 'flex', alignItems: 'center' }}>
           <span style={{ fontSize: 18, fontWeight: 700, color: '#fff' }}>Mini-Drop</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           <span style={{
-            background: 'rgba(255,255,255,0.06)',
+            background: 'rgba(255,255,255,0.085)',
             border: '0.5px solid rgba(255,255,255,0.08)',
             color: 'rgba(255,255,255,0.7)',
             padding: '4px 12px', borderRadius: 20, fontSize: 13, fontWeight: 500,
           }}>
             {userName || '用户'}
           </span>
-          <div style={{
-            width: 28, height: 28,
-            background: 'rgba(255,255,255,0.08)',
-            border: '0.5px solid rgba(255,255,255,0.1)',
-            borderRadius: '50%',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 12, color: 'rgba(255,255,255,0.6)',
-          }}>
-            {(userName || '?')[0].toUpperCase()}
-          </div>
           <button
             onClick={() => useAuth.getState().logout()}
             style={{
@@ -117,7 +106,7 @@ export default function AppLayout() {
         background: 'transparent',
         backdropFilter: 'blur(20px)',
         WebkitBackdropFilter: 'blur(20px)',
-        borderRight: '0.5px solid rgba(255,255,255,0.06)',
+        borderRight: '0.5px solid rgba(255,255,255,0.085)',
         padding: '16px 0', overflow: 'hidden', transition: 'width 0.2s',
       }}>
         {/* Collapse Toggle */}
@@ -135,6 +124,7 @@ export default function AppLayout() {
         <nav style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
           {NAV_ITEMS.map(item => {
             const active = location.pathname === item.path;
+            const Icon = item.icon;
             return (
               <div
                 key={item.path}
@@ -162,6 +152,7 @@ export default function AppLayout() {
                   }
                 }}
               >
+                <Icon style={{ fontSize: 15, color: active ? 'rgba(255,255,255,0.86)' : 'rgba(255,255,255,0.42)', flexShrink: 0 }} />
                 {!collapsed && <span>{item.label}</span>}
               </div>
             );
@@ -171,7 +162,7 @@ export default function AppLayout() {
         {/* Sidebar Footer */}
         <div style={{
           position: 'absolute', bottom: 0, left: 0, right: 0,
-          padding: 16, borderTop: '0.5px solid rgba(255,255,255,0.06)',
+          padding: 16, borderTop: '0.5px solid rgba(255,255,255,0.085)',
         }}>
           {!collapsed && (
             <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.25)', margin: 0 }}>

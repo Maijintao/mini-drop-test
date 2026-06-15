@@ -9,6 +9,7 @@ const routes = [
   "tasks",
   "task/result",
   "agents",
+  "agents/:ip",
   "groups",
   "schedules",
   "settings",

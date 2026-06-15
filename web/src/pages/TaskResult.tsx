@@ -12,7 +12,7 @@ const glassCard: React.CSSProperties = {
   background: 'rgba(255,255,255,0.04)',
   backdropFilter: 'blur(25px)',
   WebkitBackdropFilter: 'blur(25px)',
-  border: '0.5px solid rgba(255,255,255,0.06)',
+  border: '0.5px solid rgba(255,255,255,0.085)',
   boxShadow:
     'inset 0 0 0 0.5px rgba(255,255,255,0.1), ' +
     'inset 0 1px 0 rgba(255,255,255,0.08), ' +
@@ -154,7 +154,7 @@ export default function TaskResult() {
               <h1 style={{ fontSize: 24, fontWeight: 700, color: '#fff', margin: 0 }}>任务详情</h1>
             </div>
             <p style={{ fontSize: 14, color: 'rgba(255,255,255,0.4)', margin: 0, paddingLeft: 36 }}>
-              任务 ID: <code style={{ background: 'rgba(255,255,255,0.05)', border: '0.5px solid rgba(255,255,255,0.06)', padding: '2px 8px', borderRadius: 4, fontSize: 13, color: 'rgba(255,255,255,0.55)' }}>{tid || '-'}</code>
+              任务 ID: <code style={{ background: 'rgba(255,255,255,0.05)', border: '0.5px solid rgba(255,255,255,0.085)', padding: '2px 8px', borderRadius: 4, fontSize: 13, color: 'rgba(255,255,255,0.55)' }}>{tid || '-'}</code>
             </p>
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -261,9 +261,9 @@ export default function TaskResult() {
               )}
 
               {activeTab === 'topn' && (
-                <div style={{ border: '0.5px solid rgba(255,255,255,0.06)', borderRadius: 12, overflow: 'hidden' }}>
+                <div style={{ border: '0.5px solid rgba(255,255,255,0.085)', borderRadius: 12, overflow: 'hidden' }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                    <thead><tr style={{ borderBottom: '0.5px solid rgba(255,255,255,0.06)' }}>{['排名', '函数名', 'Self', 'Inclusive', 'Self %'].map(h => <th key={h} style={{ padding: '12px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'rgba(255,255,255,0.3)', letterSpacing: 0 }}>{h}</th>)}</tr></thead>
+                    <thead><tr style={{ borderBottom: '0.5px solid rgba(255,255,255,0.085)' }}>{['排名', '函数名', 'Self', 'Inclusive', 'Self %'].map(h => <th key={h} style={{ padding: '12px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'rgba(255,255,255,0.3)', letterSpacing: 0 }}>{h}</th>)}</tr></thead>
                     <tbody>
                       {topn.length === 0 && <tr><td colSpan={5} style={{ padding: 24, color: 'rgba(255,255,255,0.45)' }}>暂无 TopN 数据</td></tr>}
                       {topn.map((fn, i) => (
@@ -284,7 +284,7 @@ export default function TaskResult() {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                   {suggestions.length === 0 && <div style={{ padding: 24, color: 'rgba(255,255,255,0.45)' }}>暂无优化建议</div>}
                   {suggestions.map((item) => (
-                    <div key={item.id || item.func} style={{ padding: '16px 20px', background: 'rgba(255,255,255,0.02)', border: '0.5px solid rgba(255,255,255,0.06)', borderLeft: '3px solid rgba(96,165,250,0.65)', borderRadius: 12 }}>
+                    <div key={item.id || item.func} style={{ padding: '16px 20px', background: 'rgba(255,255,255,0.02)', border: '0.5px solid rgba(255,255,255,0.085)', borderLeft: '3px solid rgba(96,165,250,0.65)', borderRadius: 12 }}>
                       <div style={{ fontSize: 15, fontWeight: 600, color: 'rgba(255,255,255,0.85)', marginBottom: 6 }}>{item.func || '建议'}</div>
                       <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.5)', lineHeight: 1.7 }}>{item.suggestion || item.ai_suggestion || '-'}</div>
                       {item.ai_suggestion && <div style={{ marginTop: 8, fontSize: 13, color: 'rgba(255,255,255,0.5)', lineHeight: 1.7 }}>{item.ai_suggestion}</div>}
@@ -294,10 +294,10 @@ export default function TaskResult() {
               )}
 
               {activeTab === 'files' && (
-                <div style={{ border: '0.5px solid rgba(255,255,255,0.06)', borderRadius: 12, overflow: 'hidden' }}>
+                <div style={{ border: '0.5px solid rgba(255,255,255,0.085)', borderRadius: 12, overflow: 'hidden' }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                     <thead>
-                      <tr style={{ borderBottom: '0.5px solid rgba(255,255,255,0.06)' }}>
+                      <tr style={{ borderBottom: '0.5px solid rgba(255,255,255,0.085)' }}>
                         {['文件名', '对象 Key', '大小', '操作'].map(h => (
                           <th key={h} style={{ padding: '12px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'rgba(255,255,255,0.3)', letterSpacing: 0 }}>{h}</th>
                         ))}

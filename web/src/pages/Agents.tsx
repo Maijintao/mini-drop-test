@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useGSAP } from '@gsap/react';
 import gsap from 'gsap';
 import { getAgents, statAgent } from '@/api';
@@ -11,7 +12,7 @@ const glassCard: React.CSSProperties = {
   background: 'rgba(255,255,255,0.04)',
   backdropFilter: 'blur(25px)',
   WebkitBackdropFilter: 'blur(25px)',
-  border: '0.5px solid rgba(255,255,255,0.06)',
+  border: '0.5px solid rgba(255,255,255,0.085)',
   boxShadow:
     'inset 0 0 0 0.5px rgba(255,255,255,0.1), ' +
     'inset 0 1px 0 rgba(255,255,255,0.08), ' +
@@ -22,6 +23,7 @@ const glassCard: React.CSSProperties = {
 
 export default function Agents() {
   const containerRef = useRef<HTMLDivElement>(null);
+  const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [stats, setStats] = useState<Record<string, AgentStatData>>({});
@@ -129,7 +131,7 @@ export default function Agents() {
             onClick={loadAgents}
             style={{
               padding: '10px 16px',
-              background: 'rgba(255,255,255,0.06)',
+              background: 'rgba(255,255,255,0.085)',
               border: '0.5px solid rgba(255,255,255,0.1)',
               borderRadius: 10,
               color: 'rgba(255,255,255,0.7)',
@@ -159,10 +161,11 @@ export default function Agents() {
           const rssKb = stat?.self_pstats?.rss_kb;
           return (
             <div key={agent.id || agent.ip_addr} className="agent-card" style={{
-              ...glassCard, padding: 24, transition: 'all 0.15s',
+              ...glassCard, padding: 24, transition: 'all 0.15s', cursor: 'pointer',
             }}
+              onClick={() => navigate(`/agents/${encodeURIComponent(agent.ip_addr)}`)}
               onMouseEnter={(e) => e.currentTarget.style.borderColor = 'rgba(255,255,255,0.12)'}
-              onMouseLeave={(e) => e.currentTarget.style.borderColor = 'rgba(255,255,255,0.06)'}
+              onMouseLeave={(e) => e.currentTarget.style.borderColor = 'rgba(255,255,255,0.085)'}
             >
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>

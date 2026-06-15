@@ -8,6 +8,7 @@ import Agents from '@/pages/Agents';
 import Settings from '@/pages/Settings';
 import Groups from '@/pages/Groups';
 import Schedules from '@/pages/Schedules';
+import AgentDetail from '@/pages/AgentDetail';
 
 const router = createBrowserRouter([
   {
@@ -23,6 +24,7 @@ const router = createBrowserRouter([
       { path: 'tasks', element: <TaskList /> },
       { path: 'task/result', element: <TaskResult /> },
       { path: 'agents', element: <Agents /> },
+      { path: 'agents/:ip', element: <AgentDetail /> },
       { path: 'groups', element: <Groups /> },
       { path: 'schedules', element: <Schedules /> },
       { path: 'settings', element: <Settings /> },

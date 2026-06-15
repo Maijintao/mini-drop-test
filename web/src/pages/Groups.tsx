@@ -11,7 +11,7 @@ const glassCard: React.CSSProperties = {
   background: 'rgba(255,255,255,0.04)',
   backdropFilter: 'blur(25px)',
   WebkitBackdropFilter: 'blur(25px)',
-  border: '0.5px solid rgba(255,255,255,0.06)',
+  border: '0.5px solid rgba(255,255,255,0.085)',
   boxShadow:
     'inset 0 0 0 0.5px rgba(255,255,255,0.1), ' +
     'inset 0 1px 0 rgba(255,255,255,0.08), ' +
@@ -222,7 +222,7 @@ export default function Groups() {
                     textAlign: 'left',
                     padding: '12px 14px',
                     borderRadius: 10,
-                    border: '0.5px solid rgba(255,255,255,0.06)',
+                    border: '0.5px solid rgba(255,255,255,0.085)',
                     background: active ? 'rgba(255,255,255,0.075)' : 'rgba(255,255,255,0.025)',
                     color: active ? '#fff' : 'rgba(255,255,255,0.68)',
                     cursor: 'pointer',
@@ -262,10 +262,10 @@ export default function Groups() {
                 </button>
               </div>
 
-              <div style={{ border: '0.5px solid rgba(255,255,255,0.06)', borderRadius: 12, overflow: 'hidden' }}>
+              <div style={{ border: '0.5px solid rgba(255,255,255,0.085)', borderRadius: 12, overflow: 'hidden' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
-                    <tr style={{ borderBottom: '0.5px solid rgba(255,255,255,0.06)' }}>
+                    <tr style={{ borderBottom: '0.5px solid rgba(255,255,255,0.085)' }}>
                       {['GID', 'UID', '操作'].map(h => (
                         <th key={h} style={{ padding: '12px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'rgba(255,255,255,0.3)' }}>{h}</th>
                       ))}

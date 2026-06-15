@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useGSAP } from '@gsap/react';
 import gsap from 'gsap';
 import { createTask, deleteTask, getAgents, getTasks, retryTask } from '@/api';
@@ -7,6 +7,7 @@ import type { AgentInfo, CreateTaskParams, HotmethodTask } from '@/domain';
 import { analysisMap, formatDate, formatDuration, statusMap } from '@/domain';
 import { waitForTaskResult } from '@/taskPolling';
 import CreateTaskModal from '@/components/CreateTaskModal';
+import ScheduleTasksPanel from '@/components/ScheduleTasksPanel';
 
 gsap.registerPlugin(useGSAP);
 
@@ -14,7 +15,7 @@ const glassCard: React.CSSProperties = {
   background: 'rgba(255,255,255,0.04)',
   backdropFilter: 'blur(25px)',
   WebkitBackdropFilter: 'blur(25px)',
-  border: '0.5px solid rgba(255,255,255,0.06)',
+  border: '0.5px solid rgba(255,255,255,0.085)',
   boxShadow:
     'inset 0 0 0 0.5px rgba(255,255,255,0.1), ' +
     'inset 0 1px 0 rgba(255,255,255,0.08), ' +
@@ -51,6 +52,8 @@ const defaultForm: CreateTaskParams = {
 export default function TaskList() {
   const containerRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const viewParam = searchParams.get('view');
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize] = useState(20);
@@ -62,6 +65,7 @@ export default function TaskList() {
   const [showCreate, setShowCreate] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState<CreateTaskParams>(defaultForm);
+  const [activeView, setActiveView] = useState<'tasks' | 'schedules'>('tasks');
 
   useGSAP(() => {
     gsap.fromTo('.task-header', { y: -10, autoAlpha: 0 }, { y: 0, autoAlpha: 1, duration: 0.35, clearProps: 'transform,opacity,visibility' });
@@ -98,6 +102,10 @@ export default function TaskList() {
       setAgents([]);
     }
   };
+
+  useEffect(() => {
+    setActiveView(viewParam === 'schedules' ? 'schedules' : 'tasks');
+  }, [viewParam]);
 
   useEffect(() => {
     loadTasks(1);
@@ -173,108 +181,138 @@ export default function TaskList() {
         ))}
       </div>
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <div style={{ display: 'flex', gap: 10 }}>
-          <input
-            type="text"
-            placeholder="搜索任务名称或 IP..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && loadTasks(1)}
-            style={{ ...inputStyle, width: 300, fontSize: 13 }}
-          />
-          <button onClick={() => loadTasks(1)} style={{
-            padding: '10px 16px',
-            background: 'rgba(255,255,255,0.06)',
-            border: '0.5px solid rgba(255,255,255,0.1)',
-            borderRadius: 10,
-            color: 'rgba(255,255,255,0.7)',
-            cursor: 'pointer',
-          }}>搜索</button>
-        </div>
-        <button
-          onClick={() => setShowCreate(true)}
-          style={{
-            padding: '10px 20px',
-            background: 'rgba(255,255,255,0.1)',
-            border: '0.5px solid rgba(255,255,255,0.15)',
-            borderRadius: 10, color: '#fff', fontSize: 13, fontWeight: 500, cursor: 'pointer',
-          }}
-        >
-          + 新建任务
-        </button>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+        {[
+          { key: 'tasks', label: '采集任务' },
+          { key: 'schedules', label: '定时任务' },
+        ].map(tab => (
+          <button
+            key={tab.key}
+            onClick={() => setActiveView(tab.key as 'tasks' | 'schedules')}
+            style={{
+              padding: '8px 14px',
+              borderRadius: 8,
+              border: '0.5px solid rgba(255,255,255,0.08)',
+              background: activeView === tab.key ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.03)',
+              color: activeView === tab.key ? '#fff' : 'rgba(255,255,255,0.5)',
+              cursor: 'pointer',
+            }}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
 
-      <div className="task-table-wrap" style={{ ...glassCard, overflow: 'hidden' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead>
-            <tr style={{ borderBottom: '0.5px solid rgba(255,255,255,0.06)' }}>
-              {['任务ID', '任务名称', '目标 IP', '状态', '分析状态', '时长', '创建时间', '操作'].map(h => (
-                <th key={h} style={{
-                  padding: '12px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600,
-                  color: 'rgba(255,255,255,0.3)', textTransform: 'uppercase', letterSpacing: 0,
-                }}>
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {loading && (
-              <tr><td colSpan={8} style={{ padding: 24, color: 'rgba(255,255,255,0.45)' }}>加载任务中...</td></tr>
-            )}
-            {!loading && error && (
-              <tr><td colSpan={8} style={{ padding: 24, color: '#f87171' }}>{error}</td></tr>
-            )}
-            {!loading && !error && tasks.length === 0 && (
-              <tr><td colSpan={8} style={{ padding: 24, color: 'rgba(255,255,255,0.45)' }}>暂无任务</td></tr>
-            )}
-            {!loading && tasks.map((task, i) => {
-              const s = statusMap[task.status] || statusMap[0];
-              const a = analysisMap[task.analysis_status] || analysisMap[0];
-              return (
-                <tr key={task.tid} style={{ borderBottom: i < tasks.length - 1 ? '0.5px solid rgba(255,255,255,0.04)' : 'none' }}>
-                  <td style={{ padding: '14px 16px', fontSize: 13 }}>
-                    <code style={{ background: 'rgba(255,255,255,0.05)', padding: '2px 8px', borderRadius: 4, color: 'rgba(255,255,255,0.55)' }}>{task.tid}</code>
-                  </td>
-                  <td style={{ padding: '14px 16px', fontSize: 14, color: 'rgba(255,255,255,0.85)', fontWeight: 500 }}>{task.name || '-'}</td>
-                  <td style={{ padding: '14px 16px', fontSize: 13, color: 'rgba(255,255,255,0.5)' }}>{task.target_ip}</td>
-                  <td style={{ padding: '14px 16px' }}><span style={{ padding: '3px 10px', borderRadius: 6, fontSize: 12, fontWeight: 600, background: 'rgba(255,255,255,0.05)', color: s.color }}>{s.label}</span></td>
-                  <td style={{ padding: '14px 16px' }}><span style={{ padding: '3px 10px', borderRadius: 6, fontSize: 12, fontWeight: 600, background: 'rgba(255,255,255,0.05)', color: a.color }}>{a.label}</span></td>
-                  <td style={{ padding: '14px 16px', fontSize: 13, color: 'rgba(255,255,255,0.45)' }}>{formatDuration(task)}</td>
-                  <td style={{ padding: '14px 16px', fontSize: 13, color: 'rgba(255,255,255,0.45)' }}>{formatDate(task.create_time)}</td>
-                  <td style={{ padding: '14px 16px' }}>
-                    <div style={{ display: 'flex', gap: 8 }}>
-                      <button onClick={() => navigate(`/task/result?tid=${task.tid}`)} style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.55)', cursor: 'pointer' }}>详情</button>
-                      <button onClick={() => retry(task.tid)} style={{ background: 'none', border: 'none', color: 'rgba(96,165,250,0.9)', cursor: 'pointer' }}>重试</button>
-                      <button onClick={() => removeTask(task.tid)} style={{ background: 'none', border: 'none', color: 'rgba(248,113,113,0.85)', cursor: 'pointer' }}>删除</button>
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', borderTop: '0.5px solid rgba(255,255,255,0.06)' }}>
-          <span style={{ fontSize: 13, color: 'rgba(255,255,255,0.35)' }}>共 {total} 条</span>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <button disabled={page <= 1} onClick={() => loadTasks(page - 1)} style={{ width: 32, height: 32, background: 'rgba(255,255,255,0.03)', border: '0.5px solid rgba(255,255,255,0.08)', borderRadius: 6, color: 'rgba(255,255,255,0.6)', cursor: page <= 1 ? 'not-allowed' : 'pointer' }}>{'<'}</button>
-            <span style={{ fontSize: 13, color: 'rgba(255,255,255,0.45)' }}>{page} / {totalPages}</span>
-            <button disabled={page >= totalPages} onClick={() => loadTasks(page + 1)} style={{ width: 32, height: 32, background: 'rgba(255,255,255,0.03)', border: '0.5px solid rgba(255,255,255,0.08)', borderRadius: 6, color: 'rgba(255,255,255,0.6)', cursor: page >= totalPages ? 'not-allowed' : 'pointer' }}>{'>'}</button>
+      {activeView === 'tasks' && (
+        <>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <input
+                type="text"
+                placeholder="搜索任务名称或 IP..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && loadTasks(1)}
+                style={{ ...inputStyle, width: 300, fontSize: 13 }}
+              />
+              <button onClick={() => loadTasks(1)} style={{
+                padding: '10px 16px',
+                background: 'rgba(255,255,255,0.085)',
+                border: '0.5px solid rgba(255,255,255,0.1)',
+                borderRadius: 10,
+                color: 'rgba(255,255,255,0.7)',
+                cursor: 'pointer',
+              }}>搜索</button>
+            </div>
+            <button
+              onClick={() => setShowCreate(true)}
+              style={{
+                padding: '10px 20px',
+                background: 'rgba(255,255,255,0.1)',
+                border: '0.5px solid rgba(255,255,255,0.15)',
+                borderRadius: 10, color: '#fff', fontSize: 13, fontWeight: 500, cursor: 'pointer',
+              }}
+            >
+              + 新建任务
+            </button>
           </div>
-        </div>
-      </div>
 
-      {showCreate && (
-        <CreateTaskModal
-          agents={agents}
-          form={form}
-          submitting={submitting}
-          onChange={(patch) => setForm(prev => ({ ...prev, ...patch }))}
-          onCancel={() => setShowCreate(false)}
-          onSubmit={submitCreate}
-        />
+          <div className="task-table-wrap" style={{ ...glassCard, overflow: 'hidden' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ borderBottom: '0.5px solid rgba(255,255,255,0.085)' }}>
+                  {['任务ID', '任务名称', '目标 IP', '状态', '分析状态', '时长', '创建时间', '操作'].map(h => (
+                    <th key={h} style={{
+                      padding: '12px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600,
+                      color: 'rgba(255,255,255,0.3)', textTransform: 'uppercase', letterSpacing: 0,
+                    }}>
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {loading && (
+                  <tr><td colSpan={8} style={{ padding: 24, color: 'rgba(255,255,255,0.45)' }}>加载任务中...</td></tr>
+                )}
+                {!loading && error && (
+                  <tr><td colSpan={8} style={{ padding: 24, color: '#f87171' }}>{error}</td></tr>
+                )}
+                {!loading && !error && tasks.length === 0 && (
+                  <tr><td colSpan={8} style={{ padding: 24, color: 'rgba(255,255,255,0.45)' }}>暂无任务</td></tr>
+                )}
+                {!loading && tasks.map((task, i) => {
+                  const s = statusMap[task.status] || statusMap[0];
+                  const a = analysisMap[task.analysis_status] || analysisMap[0];
+                  return (
+                    <tr key={task.tid} style={{ borderBottom: i < tasks.length - 1 ? '0.5px solid rgba(255,255,255,0.04)' : 'none' }}>
+                      <td style={{ padding: '14px 16px', fontSize: 13 }}>
+                        <code style={{ background: 'rgba(255,255,255,0.05)', padding: '2px 8px', borderRadius: 4, color: 'rgba(255,255,255,0.55)' }}>{task.tid}</code>
+                      </td>
+                      <td style={{ padding: '14px 16px', fontSize: 14, color: 'rgba(255,255,255,0.85)', fontWeight: 500 }}>{task.name || '-'}</td>
+                      <td style={{ padding: '14px 16px', fontSize: 13, color: 'rgba(255,255,255,0.5)' }}>{task.target_ip}</td>
+                      <td style={{ padding: '14px 16px' }}><span style={{ padding: '3px 10px', borderRadius: 6, fontSize: 12, fontWeight: 600, background: 'rgba(255,255,255,0.05)', color: s.color }}>{s.label}</span></td>
+                      <td style={{ padding: '14px 16px' }}><span style={{ padding: '3px 10px', borderRadius: 6, fontSize: 12, fontWeight: 600, background: 'rgba(255,255,255,0.05)', color: a.color }}>{a.label}</span></td>
+                      <td style={{ padding: '14px 16px', fontSize: 13, color: 'rgba(255,255,255,0.45)' }}>{formatDuration(task)}</td>
+                      <td style={{ padding: '14px 16px', fontSize: 13, color: 'rgba(255,255,255,0.45)' }}>{formatDate(task.create_time)}</td>
+                      <td style={{ padding: '14px 16px' }}>
+                        <div style={{ display: 'flex', gap: 8 }}>
+                          <button onClick={() => navigate(`/task/result?tid=${task.tid}`)} style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.55)', cursor: 'pointer' }}>详情</button>
+                          <button onClick={() => retry(task.tid)} style={{ background: 'none', border: 'none', color: 'rgba(96,165,250,0.9)', cursor: 'pointer' }}>重试</button>
+                          <button onClick={() => removeTask(task.tid)} style={{ background: 'none', border: 'none', color: 'rgba(248,113,113,0.85)', cursor: 'pointer' }}>删除</button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', borderTop: '0.5px solid rgba(255,255,255,0.085)' }}>
+              <span style={{ fontSize: 13, color: 'rgba(255,255,255,0.35)' }}>共 {total} 条</span>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <button disabled={page <= 1} onClick={() => loadTasks(page - 1)} style={{ width: 32, height: 32, background: 'rgba(255,255,255,0.03)', border: '0.5px solid rgba(255,255,255,0.08)', borderRadius: 6, color: 'rgba(255,255,255,0.6)', cursor: page <= 1 ? 'not-allowed' : 'pointer' }}>{'<'}</button>
+                <span style={{ fontSize: 13, color: 'rgba(255,255,255,0.45)' }}>{page} / {totalPages}</span>
+                <button disabled={page >= totalPages} onClick={() => loadTasks(page + 1)} style={{ width: 32, height: 32, background: 'rgba(255,255,255,0.03)', border: '0.5px solid rgba(255,255,255,0.08)', borderRadius: 6, color: 'rgba(255,255,255,0.6)', cursor: page >= totalPages ? 'not-allowed' : 'pointer' }}>{'>'}</button>
+              </div>
+            </div>
+          </div>
+
+          {showCreate && (
+            <CreateTaskModal
+              agents={agents}
+              form={form}
+              submitting={submitting}
+              onChange={(patch) => setForm(prev => ({ ...prev, ...patch }))}
+              onCancel={() => setShowCreate(false)}
+              onSubmit={submitCreate}
+            />
+          )}
+        </>
+      )}
+
+      {activeView === 'schedules' && (
+        <ScheduleTasksPanel agents={agents} />
       )}
     </div>
   );
