@@ -28,6 +28,8 @@ export default function TaskResult() {
   const [task, setTask] = useState<HotmethodTask | null>(null);
   const [suggestions, setSuggestions] = useState<AnalysisSuggestion[]>([]);
   const [flameUrl, setFlameUrl] = useState('');
+  const [flameLoading, setFlameLoading] = useState(false);
+  const [flameError, setFlameError] = useState('');
   const [topn, setTopn] = useState<TopFunction[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -42,13 +44,20 @@ export default function TaskResult() {
   }, { scope: containerRef });
 
   const loadTask = useCallback(async () => {
-    if (!tid) return;
+    if (!tid) {
+      setError('缺少任务 ID');
+      setLoading(false);
+      return;
+    }
     setError('');
+
     try {
       const detailRes = await getTaskDetail(tid);
       if (detailRes.code === 0 && detailRes.data?.task) {
         setTask(detailRes.data.task);
         setSuggestions(detailRes.data.suggestions || []);
+      } else {
+        throw new Error(detailRes.message || '任务不存在');
       }
 
       try {
@@ -60,16 +69,19 @@ export default function TaskResult() {
 
       try {
         const flameRes = await getFlameData(tid);
+        setFlameError('');
         if (flameRes.code === 0 && flameRes.data?.url) {
           if (flameRes.data.type === 'svg') {
             setFlameUrl(flameRes.data.url);
           } else if (flameRes.data.type === 'json') {
             const data = await fetchSignedJson<TopFunction[]>(flameRes.data.url);
             setTopn(Array.isArray(data) ? data : []);
+            setFlameUrl('');
           }
         }
       } catch {
         setFlameUrl('');
+        setFlameError('暂无可渲染的 flamegraph.svg');
       }
 
       const files = Array.isArray(detailRes.data?.cos_files) ? detailRes.data.cos_files : [];
@@ -99,6 +111,10 @@ export default function TaskResult() {
     const id = window.setInterval(loadTask, 3000);
     return () => window.clearInterval(id);
   }, [task, loadTask]);
+
+  useEffect(() => {
+    if (flameUrl) setFlameLoading(true);
+  }, [flameUrl]);
 
   const runAnalysis = async () => {
     if (!tid) return;
@@ -171,12 +187,63 @@ export default function TaskResult() {
             <div className="result-content" style={{ padding: '20px 24px 24px' }}>
               {activeTab === 'flame' && (
                 flameUrl ? (
-                  <iframe title="flamegraph" src={flameUrl} style={{ width: '100%', height: 520, border: '0.5px solid rgba(255,255,255,0.08)', borderRadius: 12, background: '#fff' }} />
+                  <div style={{ border: '0.5px solid rgba(255,255,255,0.08)', borderRadius: 12, overflow: 'hidden', background: '#fff' }}>
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: 12,
+                      padding: '10px 12px',
+                      background: '#f8fafc',
+                      borderBottom: '1px solid #e5e7eb',
+                    }}>
+                      <div style={{ color: '#111827', fontSize: 13, fontWeight: 700 }}>
+                        flamegraph.svg
+                        {flameLoading && <span style={{ marginLeft: 8, color: '#64748b', fontWeight: 500 }}>加载中...</span>}
+                      </div>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button
+                          onClick={() => setFlameUrl((url) => `${url}${url.includes('?') ? '&' : '?'}_reload=${Date.now()}`)}
+                          style={{ padding: '6px 10px', border: '1px solid #d1d5db', borderRadius: 6, background: '#fff', color: '#374151', cursor: 'pointer', fontSize: 12 }}
+                        >
+                          刷新
+                        </button>
+                        <button
+                          onClick={() => window.open(flameUrl, '_blank', 'noopener,noreferrer')}
+                          style={{ padding: '6px 10px', border: '1px solid #d1d5db', borderRadius: 6, background: '#fff', color: '#374151', cursor: 'pointer', fontSize: 12 }}
+                        >
+                          新窗口打开
+                        </button>
+                      </div>
+                    </div>
+                    {flameError && (
+                      <div style={{ padding: '8px 12px', color: '#b91c1c', background: '#fee2e2', fontSize: 12 }}>
+                        {flameError}
+                      </div>
+                    )}
+                    <iframe
+                      title={`flamegraph-${tid}`}
+                      src={flameUrl}
+                      onLoad={() => {
+                        setFlameLoading(false);
+                        setFlameError('');
+                      }}
+                      onError={() => {
+                        setFlameLoading(false);
+                        setFlameError('火焰图加载失败，签名 URL 可能已过期');
+                      }}
+                      style={{ width: '100%', height: 560, border: 0, display: 'block', background: '#fff' }}
+                    />
+                  </div>
                 ) : (
-                  <div style={{ height: 420, background: 'rgba(255,255,255,0.02)', border: '1px dashed rgba(255,255,255,0.08)', borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 12 }}>
-                    <div style={{ fontSize: 16, fontWeight: 600, color: 'rgba(255,255,255,0.6)' }}>暂无火焰图</div>
-                    <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.3)' }}>任务完成并分析后会显示 flamegraph.svg</div>
-                    <button onClick={runAnalysis} disabled={task.status !== 2} style={{ marginTop: 8, padding: '10px 24px', background: 'rgba(255,255,255,0.1)', border: '0.5px solid rgba(255,255,255,0.15)', borderRadius: 10, color: '#fff', fontSize: 14, fontWeight: 500, cursor: task.status !== 2 ? 'not-allowed' : 'pointer' }}>触发分析</button>
+                  <div style={{
+                    padding: 24,
+                    border: '0.5px solid rgba(255,255,255,0.08)',
+                    borderRadius: 12,
+                    color: 'rgba(255,255,255,0.45)',
+                    background: 'rgba(255,255,255,0.02)',
+                  }}>
+                    {flameError || '暂无可渲染的 flamegraph.svg'}
                   </div>
                 )
               )}
