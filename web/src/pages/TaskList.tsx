@@ -5,6 +5,7 @@ import gsap from 'gsap';
 import { createTask, deleteTask, getAgents, getTasks, retryTask } from '@/api';
 import type { AgentInfo, CreateTaskParams, HotmethodTask } from '@/domain';
 import { analysisMap, formatDate, formatDuration, statusMap } from '@/domain';
+import { waitForTaskResult } from '@/taskPolling';
 
 gsap.registerPlugin(useGSAP);
 
@@ -113,16 +114,25 @@ export default function TaskList() {
     if (!form.target_ip || !form.pid || !form.duration) return;
     setSubmitting(true);
     try {
-      await createTask({
+      const res = await createTask({
         ...form,
         name: form.name || `CPU 采样 - ${form.target_ip}`,
         pid: Number(form.pid),
         duration: Number(form.duration),
         hz: Number(form.hz || 99),
       });
+      const tid = res.data?.tid;
       setShowCreate(false);
       setForm(prev => ({ ...defaultForm, target_ip: prev.target_ip }));
       await loadTasks(1);
+      if (tid) {
+        navigate(`/task/result?tid=${tid}`);
+        void waitForTaskResult(tid).then(() => {
+          navigate(`/task/result?tid=${tid}`, { replace: true });
+        }).catch((e: any) => {
+          console.error('task polling failed:', e);
+        });
+      }
     } finally {
       setSubmitting(false);
     }

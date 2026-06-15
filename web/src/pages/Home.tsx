@@ -5,6 +5,7 @@ import gsap from 'gsap';
 import { createTask, getAgents, getTasks } from '@/api';
 import type { AgentInfo, CreateTaskParams, HotmethodTask } from '@/domain';
 import { formatDate, formatRelativeTime, statusMap } from '@/domain';
+import { waitForTaskResult } from '@/taskPolling';
 
 gsap.registerPlugin(useGSAP);
 
@@ -87,10 +88,19 @@ export default function Home() {
         duration: Number(form.duration),
         hz: Number(form.hz || 99),
       };
-      await createTask(payload);
+      const res = await createTask(payload);
+      const tid = res.data?.tid;
       setShowCreate(false);
       const taskRes = await getTasks({ page: 1, size: 100 });
       if (taskRes.code === 0) setTasks(taskRes.data?.list || []);
+      if (tid) {
+        navigate(`/task/result?tid=${tid}`);
+        void waitForTaskResult(tid).then(() => {
+          navigate(`/task/result?tid=${tid}`, { replace: true });
+        }).catch((e: any) => {
+          console.error('task polling failed:', e);
+        });
+      }
     } finally {
       setSubmitting(false);
     }
@@ -453,8 +463,7 @@ export default function Home() {
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, marginTop: 24 }}>
               <button
-                onClick={submitTask}
-                disabled={submitting || !form.target_ip || !form.pid}
+                onClick={() => setShowCreate(false)}
                 style={{
                   padding: '10px 18px',
                   background: 'rgba(255,255,255,0.04)',
@@ -467,7 +476,8 @@ export default function Home() {
                 取消
               </button>
               <button
-                onClick={() => setShowCreate(false)}
+                onClick={submitTask}
+                disabled={submitting || !form.target_ip || !form.pid}
                 style={{
                   padding: '10px 20px',
                   background: 'rgba(255,255,255,0.12)',
