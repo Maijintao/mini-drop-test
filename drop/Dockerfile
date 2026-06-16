@@ -33,11 +33,11 @@ FROM ubuntu:22.04
 RUN apt-get update && apt-get install -y \
     libgrpc++1 \
     libprotobuf23 \
-    nlohmann-json3 \
     linux-tools-common \
     linux-tools-generic \
     bpftrace \
     curl \
+    wget \
     && wget -qO /usr/local/bin/mc https://dl.min.io/client/mc/release/linux-amd64/mc \
     && chmod +x /usr/local/bin/mc \
     && rm -rf /var/lib/apt/lists/*

@@ -48,6 +48,11 @@ grpc::Status ControlService::FetchData(grpc::ServerContext* context,
 
   TaskResult result;
   if (hotmethod_service_->GetResult(request->task_id(), &result)) {
+    if (!result.error_message().empty()) {
+      response->set_code(-1);
+      response->set_message(result.error_message());
+      return grpc::Status::OK;
+    }
     response->set_code(0);
     response->set_message("OK");
     if (result.has_file()) {

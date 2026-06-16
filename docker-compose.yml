@@ -11,7 +11,7 @@ services:
       - "50051:50051"
     volumes:
       - ./drop/etc:/etc/drop
-    command: ["drop_server", "--port", "50051"]
+    command: ["--port", "50051"]
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "timeout 2 bash -c '</dev/tcp/127.0.0.1/50051'"]
@@ -98,6 +98,7 @@ services:
     volumes:
       - ./analysis:/app/analysis
     entrypoint: ["python3", "hotmethod_analyzer.py"]
+    command: ["--config", "/app/analysis/config.ini"]
     # 不设 command，由 apiserver 通过 docker exec 传参触发
     profiles:
       - analysis

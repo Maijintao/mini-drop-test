@@ -118,6 +118,7 @@ func (s *APIServer) CreateTask(c *gin.Context) {
 		})
 		return
 	}
+	go s.waitTaskResult(tid, req.Duration+60)
 
 	c.JSON(http.StatusOK, gin.H{
 		"code": CodeSuccess,
@@ -380,11 +381,75 @@ func (s *APIServer) RetryTask(c *gin.Context) {
 		})
 		return
 	}
+	go s.waitTaskResult(newTID, duration+60)
 
 	c.JSON(http.StatusOK, gin.H{
 		"code": CodeSuccess,
 		"data": gin.H{"tid": newTID},
 	})
+}
+
+func (s *APIServer) waitTaskResult(tid string, timeoutSec uint64) {
+	if s.GRPC == nil {
+		return
+	}
+	if timeoutSec == 0 {
+		timeoutSec = 120
+	}
+
+	deadline := time.Now().Add(time.Duration(timeoutSec) * time.Second)
+	ticker := time.NewTicker(3 * time.Second)
+	defer ticker.Stop()
+
+	s.Db.Model(&model.HotmethodTask{}).
+		Where("tid = ?", tid).
+		Updates(map[string]interface{}{
+			"status":      TaskStatusRunning,
+			"status_info": "dispatched to drop_server",
+			"begin_time":   time.Now(),
+		})
+
+	for {
+		if time.Now().After(deadline) {
+			now := time.Now()
+			s.Db.Model(&model.HotmethodTask{}).
+				Where("tid = ?", tid).
+				Updates(map[string]interface{}{
+					"status":      TaskStatusFailed,
+					"status_info": "timeout waiting for drop_server result",
+					"end_time":    &now,
+				})
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		resp, err := s.GRPC.FetchData(ctx, &pb.FetchDataRequest{TaskId: tid})
+		cancel()
+		if err == nil && resp.GetCode() == 0 {
+			now := time.Now()
+			s.Db.Model(&model.HotmethodTask{}).
+				Where("tid = ?", tid).
+				Updates(map[string]interface{}{
+					"status":      TaskStatusSuccess,
+					"status_info": "collector result ready: " + resp.GetCosKey(),
+					"end_time":    &now,
+				})
+			return
+		}
+		if err == nil && resp.GetMessage() != "" && resp.GetMessage() != "Result not found" {
+			now := time.Now()
+			s.Db.Model(&model.HotmethodTask{}).
+				Where("tid = ?", tid).
+				Updates(map[string]interface{}{
+					"status":      TaskStatusFailed,
+					"status_info": resp.GetMessage(),
+					"end_time":    &now,
+				})
+			return
+		}
+
+		<-ticker.C
+	}
 }
 
 // GetCOSFiles 列任务产出文件并签名 — GET /api/v1/cosfiles?tid=xxx

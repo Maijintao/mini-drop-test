@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -19,6 +21,8 @@ import (
 	pb "mini-drop/apiserver/proto"
 	"mini-drop/apiserver/server"
 )
+
+var testDBSeq uint64
 
 // MockStorage mock 对象存储
 type MockStorage struct {
@@ -93,10 +97,17 @@ func (m *MockGRPCClient) Close() error { return nil }
 
 // SetupTestDB 创建内存 SQLite 测试数据库
 func SetupTestDB() *gorm.DB {
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	seq := atomic.AddUint64(&testDBSeq, 1)
+	dsn := "file:testdb_" + time.Now().Format("20060102150405") + "_" + strconv.FormatUint(seq, 10) + "?mode=memory&cache=shared"
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	if err != nil {
 		panic("failed to connect test db: " + err.Error())
 	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		panic("failed to get sql db: " + err.Error())
+	}
+	sqlDB.SetMaxOpenConns(1)
 	model.AutoMigrate(db)
 	return db
 }
