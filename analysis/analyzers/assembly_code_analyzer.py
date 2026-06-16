@@ -127,7 +127,7 @@ def parse_objdump(text: str) -> AssemblyStats:
                 opcode=opcode,
                 operands=operands,
                 raw_line=line,
-                is_call=opcode in ("call", "bl", "blr"),
+                is_call=opcode in ("call", "callq", "bl", "blr"),
                 is_jump=opcode in X86_BRANCH_OPCODES or opcode.startswith("b"),
                 is_memory=_is_memory_access(opcode, operands, arch),
             )
