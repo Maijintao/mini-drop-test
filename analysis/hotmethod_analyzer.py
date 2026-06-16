@@ -113,53 +113,84 @@ def main():
     work_dir = tempfile.mkdtemp(prefix=f"analysis_{tid}_")
 
     try:
-        # 6. 下载原始数据（优先 perf.data，fallback 到 collapsed.txt）
-        raw_key = f"{tid}/perf.data"
-        collapsed_key = f"{tid}/collapsed.txt"
-        raw_path = os.path.join(work_dir, "perf.data")
-        pre_collapsed_path = os.path.join(work_dir, "pre_collapsed.txt")
+        # 6. 按 task_type 下载对应的原始数据
+        # 不同任务类型的输入文件不同
+        FILE_MAP = {
+            0:  ["perf.data", "collapsed.txt"],           # CPU 火焰图
+            1:  ["heap.hprof", "perf.data"],              # Java Heap / Profiling
+            2:  ["tracing.json", "tracing.csv"],          # Tracing
+            4:  ["perf.data"],                            # MemCheck
+            5:  ["pidstat.csv", "pidstat.json"],          # Resource Analysis
+            6:  ["biosnoop.csv", "biosnoop.json"],        # eBPF Biosnoop
+            7:  ["bw_sync.json", "bw_sync.csv"],          # BW Sync
+            8:  ["namespace.txt"],                        # Namespace
+            9:  ["assembly.txt", "objdump.txt"],          # Assembly
+            10: ["pprof.cpu", "pprof.pb.gz"],             # pprof CPU
+            11: ["pprof.heap", "pprof_heap.pb.gz"],       # pprof Heap
+        }
 
-        has_perf_data = store.exists(raw_key)
-        has_collapsed = store.exists(collapsed_key)
-        log.info("data check: perf.data=%s, collapsed=%s", has_perf_data, has_collapsed)
+        candidate_files = FILE_MAP.get(task_type, ["perf.data", "collapsed.txt"])
+        raw_path = None
+        pre_collapsed_path = None
+        has_collapsed = False
 
-        if not has_perf_data and not has_collapsed:
-            error_exit(f"no data found: {raw_key} or {collapsed_key}", ERR_NOT_FOUND)
+        for fname in candidate_files:
+            key = f"{tid}/{fname}"
+            local_path = os.path.join(work_dir, fname)
+            if store.exists(key):
+                store.download(key, local_path)
+                log.info("downloaded %s", key)
+                if fname == "collapsed.txt":
+                    pre_collapsed_path = local_path
+                    has_collapsed = True
+                elif raw_path is None:
+                    raw_path = local_path
 
-        if has_perf_data:
-            store.download(raw_key, raw_path)
-            log.info("downloaded %s", raw_key)
-
-        if has_collapsed:
-            store.download(collapsed_key, pre_collapsed_path)
-            log.info("downloaded pre-processed %s -> %s (exists=%s)",
-                     collapsed_key, pre_collapsed_path, os.path.exists(pre_collapsed_path))
+        if raw_path is None and pre_collapsed_path is None:
+            error_exit(f"no data found for task_type={task_type}, tried: {candidate_files}", ERR_NOT_FOUND)
 
         # 7. 按 task_type 分发到具体 analyzer
         if task_type == 0:
             result = run_cpu_flamegraph(raw_path, work_dir, tid,
                                         pre_collapsed_path if has_collapsed else None)
         elif task_type == 1:
+            if raw_path is None:
+                error_exit("no hprof/perf data found for Java task", ERR_NOT_FOUND)
             result = run_java_heap(raw_path, work_dir, tid)
         elif task_type == 2:
+            if raw_path is None:
+                error_exit("no tracing data found", ERR_NOT_FOUND)
             result = run_tracing(raw_path, work_dir, tid)
         elif task_type == 4:
-            # 内存泄漏需要专用工具，当前不支持
             err = validate_task_type(task_type)
             error_exit(err, ERR_UNSUPPORTED)
         elif task_type == 5:
+            if raw_path is None:
+                error_exit("no pidstat data found for resource analysis", ERR_NOT_FOUND)
             result = run_resource_analysis(raw_path, work_dir, tid)
         elif task_type == 6:
+            if raw_path is None:
+                error_exit("no biosnoop data found for eBPF analysis", ERR_NOT_FOUND)
             result = run_biosnoop(raw_path, work_dir, tid)
         elif task_type == 7:
+            if raw_path is None:
+                error_exit("no bw_sync data found", ERR_NOT_FOUND)
             result = run_bw_sync(raw_path, work_dir, tid)
         elif task_type == 8:
+            if raw_path is None:
+                error_exit("no namespace data found", ERR_NOT_FOUND)
             result = run_namespace(raw_path, work_dir, tid)
         elif task_type == 9:
+            if raw_path is None:
+                error_exit("no assembly data found", ERR_NOT_FOUND)
             result = run_assembly(raw_path, work_dir, tid)
         elif task_type == 10:
+            if raw_path is None:
+                error_exit("no pprof cpu data found", ERR_NOT_FOUND)
             result = run_pprof_cpu(raw_path, work_dir, tid)
         elif task_type == 11:
+            if raw_path is None:
+                error_exit("no pprof heap data found", ERR_NOT_FOUND)
             result = run_pprof_heap(raw_path, work_dir, tid)
         else:
             error_exit(f"unsupported task_type={task_type}", ERR_UNSUPPORTED)

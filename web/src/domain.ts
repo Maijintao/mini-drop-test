@@ -164,7 +164,13 @@ export const taskTypeMap: Record<number, string> = {
   1: 'Java Profiling',
   2: 'Tracing',
   4: 'MemCheck',
-  6: 'Java Heap',
+  5: 'Resource Analysis',
+  6: 'Biosnoop (eBPF)',
+  7: 'BW Sync',
+  8: 'Namespace',
+  9: 'Assembly',
+  10: 'pprof CPU',
+  11: 'pprof Heap',
 };
 
 export function parseTaskParams(params: HotmethodTask['request_params']): TaskParams {

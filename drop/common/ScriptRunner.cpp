@@ -6,48 +6,43 @@
 
 namespace drop {
 
-class ScriptRunner {
-public:
-  // 执行脚本，返回退出码
-  // 安全实现：直接 execvp 脚本路径，不走 shell 解释器
-  static int Execute(const std::string& script_path,
-                     const std::vector<std::string>& args) {
-    std::vector<char*> c_args;
-    c_args.push_back(const_cast<char*>(script_path.c_str()));
-    for (const auto& arg : args) {
-      c_args.push_back(const_cast<char*>(arg.c_str()));
-    }
-    c_args.push_back(nullptr);
+int ScriptRunner::Execute(const std::string& script_path,
+                          const std::vector<std::string>& args) {
+  std::vector<char*> c_args;
+  c_args.push_back(const_cast<char*>(script_path.c_str()));
+  for (const auto& arg : args) {
+    c_args.push_back(const_cast<char*>(arg.c_str()));
+  }
+  c_args.push_back(nullptr);
 
-    pid_t pid = fork();
-    if (pid == -1) {
-      LOG_ERROR("fork failed: " + std::string(strerror(errno)));
-      return -1;
-    }
-
-    if (pid == 0) {
-      // 子进程：创建独立进程组
-      setpgid(0, 0);
-
-      // 关闭多余 fd
-      for (int fd = 3; fd < 1024; fd++) {
-        close(fd);
-      }
-
-      execvp(c_args[0], c_args.data());
-      const char* err = "execvp failed\n";
-      write(STDERR_FILENO, err, strlen(err));
-      _exit(127);
-    }
-
-    int status;
-    waitpid(pid, &status, 0);
-
-    if (WIFEXITED(status)) {
-      return WEXITSTATUS(status);
-    }
+  pid_t pid = fork();
+  if (pid == -1) {
+    LOG_ERROR("fork failed: " + std::string(strerror(errno)));
     return -1;
   }
-};
+
+  if (pid == 0) {
+    // 子进程：创建独立进程组
+    setpgid(0, 0);
+
+    // 关闭多余 fd
+    for (int fd = 3; fd < 1024; fd++) {
+      close(fd);
+    }
+
+    execvp(c_args[0], c_args.data());
+    const char* err = "execvp failed\n";
+    write(STDERR_FILENO, err, strlen(err));
+    _exit(127);
+  }
+
+  int status;
+  waitpid(pid, &status, 0);
+
+  if (WIFEXITED(status)) {
+    return WEXITSTATUS(status);
+  }
+  return -1;
+}
 
 }  // namespace drop

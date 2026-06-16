@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useGSAP } from '@gsap/react';
 import gsap from 'gsap';
-import { Button, Card, Table, Tabs, Typography, Space, message, Spin, Empty } from 'antd';
+import { Button, Card, Table, Tabs, Typography, Space, message, Spin, Empty, Statistic, Row, Col } from 'antd';
 import { ReloadOutlined, PlayCircleOutlined, ArrowLeftOutlined } from '@ant-design/icons';
 import { fetchSignedJson, getCosFiles, getFlameData, getSuggestions, getTaskDetail, triggerAnalysis } from '@/api';
 import type { AnalysisSuggestion, CosFile, HotmethodTask, TopFunction } from '@/domain';
@@ -39,6 +39,8 @@ export default function TaskResult() {
   const [cosFiles, setCosFiles] = useState<CosFile[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [eBpfData, setEBpfData] = useState<any>(null);
+  const [eBpfLoading, setEBpfLoading] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
 
@@ -107,6 +109,24 @@ export default function TaskResult() {
           setCosFiles(Array.isArray(fileRes.data) ? fileRes.data : []);
         } catch {
           setCosFiles([]);
+        }
+      }
+
+      // 加载 eBPF 分析数据（biosnoop_stats.json 等）
+      const allFiles = files.length > 0 ? files : cosFiles;
+      const eBpfFile = allFiles.find(f => {
+        const name = basename(f.key || f.name || '').toLowerCase();
+        return name === 'biosnoop_stats.json' || name === 'resource_stats.json';
+      });
+      if (eBpfFile?.url) {
+        setEBpfLoading(true);
+        try {
+          const data = await fetchSignedJson<any>(eBpfFile.url);
+          setEBpfData(data);
+        } catch {
+          setEBpfData(null);
+        } finally {
+          setEBpfLoading(false);
         }
       }
     } catch (e: any) {
@@ -399,6 +419,89 @@ export default function TaskResult() {
                           </Card>
                         ))}
                       </div>
+                    )
+                  ),
+                },
+                {
+                  key: 'ebpf',
+                  label: 'eBPF 分析',
+                  children: (
+                    eBpfLoading ? (
+                      <Spin tip="加载 eBPF 数据中..." />
+                    ) : eBpfData ? (
+                      <div>
+                        <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
+                          {eBpfData.total_events !== undefined && (
+                            <Col span={6}>
+                              <Statistic title="总事件数" value={eBpfData.total_events} />
+                            </Col>
+                          )}
+                          {eBpfData.total_reads !== undefined && (
+                            <Col span={6}>
+                              <Statistic title="读操作" value={eBpfData.total_reads} />
+                            </Col>
+                          )}
+                          {eBpfData.total_writes !== undefined && (
+                            <Col span={6}>
+                              <Statistic title="写操作" value={eBpfData.total_writes} />
+                            </Col>
+                          )}
+                          {eBpfData.avg_latency_ms !== undefined && (
+                            <Col span={6}>
+                              <Statistic title="平均延迟" value={eBpfData.avg_latency_ms} suffix="ms" precision={2} />
+                            </Col>
+                          )}
+                          {eBpfData.max_latency_ms !== undefined && (
+                            <Col span={6}>
+                              <Statistic title="最大延迟" value={eBpfData.max_latency_ms} suffix="ms" precision={2} />
+                            </Col>
+                          )}
+                          {eBpfData.total_bytes !== undefined && (
+                            <Col span={6}>
+                              <Statistic title="总字节数" value={eBpfData.total_bytes} />
+                            </Col>
+                          )}
+                        </Row>
+                        {eBpfData.top_devices && eBpfData.top_devices.length > 0 && (
+                          <>
+                            <Typography.Text strong style={{ display: 'block', marginBottom: 12 }}>热点设备</Typography.Text>
+                            <Table
+                              dataSource={eBpfData.top_devices}
+                              columns={[
+                                { title: '设备', dataIndex: 'device', key: 'device' },
+                                { title: '操作数', dataIndex: 'count', key: 'count' },
+                                { title: '字节数', dataIndex: 'bytes', key: 'bytes' },
+                              ]}
+                              rowKey="device"
+                              pagination={false}
+                              size="small"
+                            />
+                          </>
+                        )}
+                        {eBpfData.top_processes && eBpfData.top_processes.length > 0 && (
+                          <>
+                            <Typography.Text strong style={{ display: 'block', marginTop: 24, marginBottom: 12 }}>热点进程</Typography.Text>
+                            <Table
+                              dataSource={eBpfData.top_processes}
+                              columns={[
+                                { title: '进程', dataIndex: 'process', key: 'process' },
+                                { title: 'PID', dataIndex: 'pid', key: 'pid' },
+                                { title: '操作数', dataIndex: 'count', key: 'count' },
+                              ]}
+                              rowKey="pid"
+                              pagination={false}
+                              size="small"
+                            />
+                          </>
+                        )}
+                        {eBpfData.summary && (
+                          <Card size="small" style={{ marginTop: 24, background: 'rgba(255,255,255,0.02)', border: '0.5px solid rgba(255,255,255,0.085)' }}>
+                            <Typography.Text style={{ color: 'rgba(255,255,255,0.65)' }}>{eBpfData.summary}</Typography.Text>
+                          </Card>
+                        )}
+                      </div>
+                    ) : (
+                      <Empty description="暂无 eBPF 分析数据（需先触发分析）" />
                     )
                   ),
                 },
