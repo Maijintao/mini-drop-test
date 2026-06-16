@@ -14,7 +14,7 @@ services:
     command: ["drop_server", "--port", "50051"]
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "grpc_health_probe", "-addr=:50051"]
+      test: ["CMD-SHELL", "timeout 2 bash -c '</dev/tcp/127.0.0.1/50051'"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -32,7 +32,8 @@ services:
       - /proc:/host/proc:ro
       - /sys:/host/sys:ro
     privileged: true  # perf/bpftrace 需要
-    command: ["drop_agent"]
+    entrypoint: ["drop_agent"]
+    command: ["--config", "/etc/drop/config.json"]
     restart: unless-stopped
     environment:
       - SERVER_ADDR=drop-server:50051
@@ -80,6 +81,8 @@ services:
       - "8191:8191"
     volumes:
       - ./apiserver/config:/etc/apiserver
+    environment:
+      - GIN_MODE=debug
     command: ["./apiserver", "-c", "/etc/apiserver/apiserver.yaml"]
     restart: unless-stopped
 

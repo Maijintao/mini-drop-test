@@ -50,6 +50,7 @@ bool HotmethodService::GetResult(const std::string& task_id, TaskResult* result)
 
 void HotmethodService::UpdateAgentStatus(const std::string& ip_addr,
                                           const std::string& host_name,
+                                          const std::string& uid,
                                           const std::string& agent_version,
                                           const PidStats& self_pstats,
                                           const PidStats& children_pstats) {
@@ -60,6 +61,7 @@ void HotmethodService::UpdateAgentStatus(const std::string& ip_addr,
   auto& agent = agents_[ip_addr];
   agent.host_name = host_name;
   agent.ip_addr = ip_addr;
+  agent.uid = uid;
   agent.agent_version = agent_version;
   agent.self_pstats = self_pstats;
   agent.children_pstats = children_pstats;
@@ -90,6 +92,20 @@ bool HotmethodService::GetAgentStatus(const std::string& ip_addr, AgentStatus* s
   return true;
 }
 
+void HotmethodService::GetAllAgentStatus(std::vector<AgentStatus>* agents) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  auto now = std::chrono::steady_clock::now();
+
+  for (auto& [ip, agent] : agents_) {
+    // 检查是否离线（30s 无心跳）
+    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - agent.last_heartbeat).count();
+    if (elapsed > 30) {
+      agent.online = false;
+    }
+    agents->push_back(agent);
+  }
+}
+
 bool HotmethodService::IsAgentOnline(const std::string& ip_addr) {
   std::lock_guard<std::mutex> lock(mutex_);
   auto it = agents_.find(ip_addr);
@@ -112,7 +128,7 @@ bool HotmethodService::IsAgentOnline(const std::string& ip_addr) {
   return true;
 }
 
-bool HotmethodService::GetTaskStatus(const std::string& task_id, TaskState* state) {
+bool HotmethodService::GetTaskStatus(const std::string& task_id, TaskStateInfo* state) {
   std::lock_guard<std::mutex> lock(mutex_);
   auto it = tasks_state_.find(task_id);
   if (it == tasks_state_.end()) {

@@ -22,6 +22,10 @@ public:
                          const StatAgentRequest* request,
                          StatAgentResponse* response) override;
 
+  grpc::Status ListAgents(grpc::ServerContext* context,
+                          const ListAgentsRequest* request,
+                          ListAgentsResponse* response) override;
+
 private:
   HotmethodService* hotmethod_service_;
 };

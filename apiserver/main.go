@@ -63,11 +63,12 @@ func main() {
 	sqlDB.SetMaxIdleConns(10)
 	sqlDB.SetConnMaxLifetime(3600e9) // 1 hour
 
-	// 4. 自动建表
+	// 4. 自动建表（表已存在时跳过）
 	if err := model.AutoMigrate(db); err != nil {
-		logger.Fatal("auto migrate failed", zap.Error(err))
+		logger.Warn("auto migrate failed (tables may already exist)", zap.Error(err))
+	} else {
+		logger.Info("database migrated")
 	}
-	logger.Info("database migrated")
 
 	// 5. 初始化 MinIO 存储
 	store, err := minio.New(

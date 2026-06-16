@@ -5,6 +5,7 @@
 #include "healthcheck.grpc.pb.h"
 #include <map>
 #include <deque>
+#include <vector>
 #include <mutex>
 #include <chrono>
 
@@ -24,7 +25,7 @@ enum class TaskStatus {
 };
 
 // 任务状态记录（用于落库和审计）
-struct TaskState {
+struct TaskStateInfo {
   TaskStatus status = TaskStatus::PENDING;
   std::string reason;           // 状态迁移原因
   std::chrono::steady_clock::time_point timestamp;  // 状态更新时间
@@ -34,6 +35,7 @@ struct TaskState {
 struct AgentStatus {
   std::string host_name;
   std::string ip_addr;
+  std::string uid;
   std::string agent_version;
   PidStats self_pstats;
   PidStats children_pstats;
@@ -55,6 +57,7 @@ public:
   // 更新 Agent 心跳状态（心跳时调用）
   void UpdateAgentStatus(const std::string& ip_addr,
                          const std::string& host_name,
+                         const std::string& uid,
                          const std::string& agent_version,
                          const PidStats& self_pstats,
                          const PidStats& children_pstats);
@@ -62,11 +65,14 @@ public:
   // 查询 Agent 状态（StatAgent 时调用）
   bool GetAgentStatus(const std::string& ip_addr, AgentStatus* status);
 
+  // 获取所有 Agent 状态（ListAgents 时调用）
+  void GetAllAgentStatus(std::vector<AgentStatus>* agents);
+
   // 检查 Agent 是否在线（30s 无心跳判离线）
   bool IsAgentOnline(const std::string& ip_addr);
 
   // 获取任务状态
-  bool GetTaskStatus(const std::string& task_id, TaskState* state);
+  bool GetTaskStatus(const std::string& task_id, TaskStateInfo* state);
 
   // 更新任务状态（带 reason）
   void UpdateTaskStatus(const std::string& task_id, TaskStatus status, const std::string& reason);
@@ -86,7 +92,7 @@ private:
   std::map<std::string, std::deque<TaskDesc>> tasks_;
   std::map<std::string, TaskResult> results_;      // 缓存任务结果
   std::map<std::string, AgentStatus> agents_;      // Agent 心跳状态
-  std::map<std::string, TaskState> tasks_state_;   // 任务状态跟踪
+  std::map<std::string, TaskStateInfo> tasks_state_;   // 任务状态跟踪
   std::mutex mutex_;
 };
 

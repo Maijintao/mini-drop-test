@@ -2,10 +2,12 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 
 	"mini-drop/apiserver/middleware"
 	"mini-drop/apiserver/model"
@@ -15,6 +17,10 @@ import (
 // GetAgents Agent 列表（含组共享） — GET /api/v1/agents
 func (s *APIServer) GetAgents(c *gin.Context) {
 	uid := c.GetString(middleware.CtxUID)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_ = s.syncAgentsFromDrop(ctx, uid)
 
 	// 查自己所在组的 gid 列表
 	var user model.UserInfo
@@ -35,6 +41,72 @@ func (s *APIServer) GetAgents(c *gin.Context) {
 		"code": CodeSuccess,
 		"data": agents,
 	})
+}
+
+func (s *APIServer) syncAgentsFromDrop(ctx context.Context, ownerUID string) error {
+	if s.GRPC == nil {
+		return nil
+	}
+
+	resp, err := s.GRPC.ListAgents(ctx, &pb.ListAgentsRequest{})
+	if err != nil {
+		return err
+	}
+	if resp.GetCode() != 0 {
+		return fmt.Errorf("list agents failed: %s", resp.GetMessage())
+	}
+
+	now := time.Now()
+	for _, remote := range resp.GetAgents() {
+		ip := remote.GetIpAddr()
+		if ip == "" {
+			continue
+		}
+		hostname := remote.GetHostName()
+		if hostname == "" {
+			hostname = ip
+		}
+
+		updates := map[string]interface{}{
+			"hostname":       hostname,
+			"online":         remote.GetOnline(),
+			"version":        remote.GetAgentVersion(),
+			"last_heartbeat": now,
+		}
+		if remote.GetUid() != "" {
+			updates["uid"] = remote.GetUid()
+		}
+
+		var agent model.AgentInfo
+		err := s.Db.Where("ip_addr = ?", ip).First(&agent).Error
+		switch {
+		case err == nil:
+			if err := s.Db.Model(&agent).Updates(updates).Error; err != nil {
+				return err
+			}
+		case err == gorm.ErrRecordNotFound:
+			agentUID := ownerUID
+			if remote.GetUid() != "" {
+				agentUID = remote.GetUid()
+			}
+			agent = model.AgentInfo{
+				Hostname:      hostname,
+				IPAddr:        ip,
+				Online:        remote.GetOnline(),
+				UID:           agentUID,
+				Version:       remote.GetAgentVersion(),
+				Environment:   "default",
+				LastHeartbeat: now,
+			}
+			if err := s.Db.Create(&agent).Error; err != nil {
+				return err
+			}
+		default:
+			return err
+		}
+	}
+
+	return nil
 }
 
 // StatAgent 查询 Agent 当前资源占用 — GET /api/v1/agent/stat?ip=xxx

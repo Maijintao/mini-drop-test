@@ -61,6 +61,7 @@ func (m *MockStorage) IsExist(ctx context.Context, key string) (bool, error) {
 type MockGRPCClient struct {
 	CreateTaskFunc func(ctx context.Context, req *pb.CreateTaskRequest) (*pb.CreateTaskResponse, error)
 	StatAgentFunc  func(ctx context.Context, req *pb.StatAgentRequest) (*pb.StatAgentResponse, error)
+	ListAgentsFunc func(ctx context.Context, req *pb.ListAgentsRequest) (*pb.ListAgentsResponse, error)
 }
 
 func (m *MockGRPCClient) CreateTask(ctx context.Context, req *pb.CreateTaskRequest) (*pb.CreateTaskResponse, error) {
@@ -79,6 +80,13 @@ func (m *MockGRPCClient) StatAgent(ctx context.Context, req *pb.StatAgentRequest
 		return m.StatAgentFunc(ctx, req)
 	}
 	return &pb.StatAgentResponse{Code: 0, Message: "ok"}, nil
+}
+
+func (m *MockGRPCClient) ListAgents(ctx context.Context, req *pb.ListAgentsRequest) (*pb.ListAgentsResponse, error) {
+	if m.ListAgentsFunc != nil {
+		return m.ListAgentsFunc(ctx, req)
+	}
+	return &pb.ListAgentsResponse{Code: 0, Message: "ok"}, nil
 }
 
 func (m *MockGRPCClient) Close() error { return nil }

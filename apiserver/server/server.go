@@ -15,6 +15,7 @@ type GRPCClient interface {
 	CreateTask(ctx context.Context, req *pb.CreateTaskRequest) (*pb.CreateTaskResponse, error)
 	FetchData(ctx context.Context, req *pb.FetchDataRequest) (*pb.FetchDataResponse, error)
 	StatAgent(ctx context.Context, req *pb.StatAgentRequest) (*pb.StatAgentResponse, error)
+	ListAgents(ctx context.Context, req *pb.ListAgentsRequest) (*pb.ListAgentsResponse, error)
 	Close() error
 }
 

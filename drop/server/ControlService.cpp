@@ -84,4 +84,28 @@ grpc::Status ControlService::StatAgent(grpc::ServerContext* context,
   return grpc::Status::OK;
 }
 
+grpc::Status ControlService::ListAgents(grpc::ServerContext* context,
+                                         const ListAgentsRequest* request,
+                                         ListAgentsResponse* response) {
+  // 从 HotmethodService 获取所有 agent 状态
+  std::vector<AgentStatus> agents;
+  hotmethod_service_->GetAllAgentStatus(&agents);
+
+  response->set_code(0);
+  response->set_message("OK");
+
+  for (const auto& agent : agents) {
+    auto* agent_info = response->add_agents();
+    agent_info->set_host_name(agent.host_name);
+    agent_info->set_ip_addr(agent.ip_addr);
+    agent_info->set_agent_version(agent.agent_version);
+    agent_info->set_online(agent.online);
+    agent_info->set_uid(agent.uid);
+    *agent_info->mutable_self_pstats() = agent.self_pstats;
+    *agent_info->mutable_children_pstats() = agent.children_pstats;
+  }
+
+  return grpc::Status::OK;
+}
+
 }  // namespace drop

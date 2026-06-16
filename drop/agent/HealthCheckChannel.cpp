@@ -63,7 +63,7 @@ void HealthCheckChannel::HeartbeatLoop() {
           int child_pid = std::stoi(child_pid_str);
           PidStats child = Process::GetPidStats(child_pid);
           child.set_pid(child_pid);
-          *request.add_children_pstats() = child;
+          *request.mutable_children_pstats() = child;
         } catch (const std::exception& e) {
           // 跳过解析失败的 PID
         }

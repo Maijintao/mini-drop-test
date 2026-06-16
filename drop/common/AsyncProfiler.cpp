@@ -22,7 +22,7 @@ int AsyncProfiler::Record(int pid, int duration_sec, int freq,
     std::to_string(pid)
   };
 
-  LOG_INFO("Executing: " + PROFILER_PATH + " -d " + std::to_string(duration_sec) +
+  LOG_INFO("Executing: " + std::string(PROFILER_PATH) + " -d " + std::to_string(duration_sec) +
            " -f " + output_path + " -e cpu -i " + std::to_string(1000000 / freq) + "us" +
            " " + std::to_string(pid));
 

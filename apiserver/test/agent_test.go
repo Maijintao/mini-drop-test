@@ -30,6 +30,48 @@ func TestGetAgents_OK(t *testing.T) {
 	}
 }
 
+func TestGetAgents_SyncsFromDropServer(t *testing.T) {
+	db := SetupTestDB()
+	srv, mockGRPC, _ := CreateTestAPIServer(db)
+	r := SetupTestRouter(srv)
+
+	mockGRPC.ListAgentsFunc = func(ctx context.Context, req *pb.ListAgentsRequest) (*pb.ListAgentsResponse, error) {
+		return &pb.ListAgentsResponse{
+			Code:    0,
+			Message: "ok",
+			Agents: []*pb.AgentInfo{
+				{
+					HostName:     "drop-agent-1",
+					IpAddr:       "10.0.0.9",
+					AgentVersion: "0.1.0",
+					Online:       true,
+					Uid:          "test-user-1",
+				},
+			},
+		}, nil
+	}
+
+	w := DoAuthRequest(r, "GET", "/api/v1/agents", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	resp := ParseJSON(w)
+	agents := resp["data"].([]interface{})
+	if len(agents) != 1 {
+		t.Fatalf("expected 1 agent, got %d", len(agents))
+	}
+	first := agents[0].(map[string]interface{})
+	if first["ip_addr"] != "10.0.0.9" {
+		t.Fatalf("expected synced ip_addr=10.0.0.9, got %v", first["ip_addr"])
+	}
+	if first["online"] != true {
+		t.Fatalf("expected synced agent online")
+	}
+	if first["uid"] != "test-user-1" {
+		t.Fatalf("expected synced uid=test-user-1, got %v", first["uid"])
+	}
+}
+
 // 测试 StatAgent gRPC 透传
 func TestStatAgent_OK(t *testing.T) {
 	db := SetupTestDB()

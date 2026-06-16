@@ -45,6 +45,11 @@ func (c *ControlClient) StatAgent(ctx context.Context, req *pb.StatAgentRequest)
 	return c.client.StatAgent(ctx, req)
 }
 
+// ListAgents 查询全部 Agent 状态
+func (c *ControlClient) ListAgents(ctx context.Context, req *pb.ListAgentsRequest) (*pb.ListAgentsResponse, error) {
+	return c.client.ListAgents(ctx, req)
+}
+
 // Close 关闭连接
 func (c *ControlClient) Close() error {
 	if c.conn != nil {

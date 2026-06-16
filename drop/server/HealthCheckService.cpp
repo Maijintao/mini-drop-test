@@ -17,6 +17,7 @@ grpc::Status HealthCheckService::Do(grpc::ServerContext* context,
   hotmethod_service_->UpdateAgentStatus(
     request->ip_addr(),
     request->host_name(),
+    request->uid(),
     request->agent_version(),
     request->self_pstats(),
     request->children_pstats()

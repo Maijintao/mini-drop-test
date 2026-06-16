@@ -12,6 +12,7 @@ service Control {
   rpc CreateTask(CreateTaskRequest) returns (CreateTaskResponse);
   rpc FetchData(FetchDataRequest) returns (FetchDataResponse);
   rpc StatAgent(StatAgentRequest) returns (StatAgentResponse);
+  rpc ListAgents(ListAgentsRequest) returns (ListAgentsResponse);
 }
 
 message CreateTaskRequest {
@@ -45,4 +46,23 @@ message StatAgentResponse {
   string message = 2;
   PidStats self_pstats = 3;
   PidStats children_pstats = 4;
+}
+
+message ListAgentsRequest {
+}
+
+message AgentInfo {
+  string host_name = 1;
+  string ip_addr = 2;
+  string agent_version = 3;
+  bool online = 4;
+  PidStats self_pstats = 5;
+  PidStats children_pstats = 6;
+  string uid = 7;
+}
+
+message ListAgentsResponse {
+  int32 code = 1;
+  string message = 2;
+  repeated AgentInfo agents = 3;
 }
