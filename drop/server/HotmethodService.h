@@ -8,6 +8,7 @@
 #include <vector>
 #include <mutex>
 #include <chrono>
+#include <sqlite3.h>
 
 namespace drop {
 
@@ -45,6 +46,9 @@ struct AgentStatus {
 
 class HotmethodService final : public Hotmethod::Service {
 public:
+  HotmethodService();
+  ~HotmethodService();
+
   // 添加任务到队列
   bool PushTask(const std::string& target_ip, const TaskDesc& task);
 
@@ -89,6 +93,10 @@ public:
                                 google::protobuf::Empty* response) override;
 
 private:
+  void InitDB();
+  void PersistTaskStatus(const std::string& task_id, TaskStatus status, const std::string& reason);
+
+  sqlite3* db_ = nullptr;
   std::map<std::string, std::deque<TaskDesc>> tasks_;
   std::map<std::string, TaskResult> results_;      // 缓存任务结果
   std::map<std::string, AgentStatus> agents_;      // Agent 心跳状态

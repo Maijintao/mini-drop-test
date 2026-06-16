@@ -81,6 +81,7 @@ add_executable(drop_agent
 target_link_libraries(drop_agent PRIVATE drop_proto Threads::Threads)
 
 # Server binary
+find_package(SQLite3 REQUIRED)
 add_executable(drop_server
   server/main.cpp
   server/HealthCheckService.cpp
@@ -89,4 +90,4 @@ add_executable(drop_server
   server/InitAgentInfoService.cpp
   common/Log.cpp
 )
-target_link_libraries(drop_server PRIVATE drop_proto Threads::Threads)
+target_link_libraries(drop_server PRIVATE drop_proto Threads::Threads SQLite::SQLite3)

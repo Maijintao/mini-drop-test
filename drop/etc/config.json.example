@@ -9,5 +9,9 @@
     "secret_key": "minioadmin",
     "bucket": "drop-data",
     "use_ssl": false
+  },
+  "pprof": {
+    "host": "localhost",
+    "port": 6060
   }
 }

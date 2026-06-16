@@ -13,8 +13,17 @@ namespace drop {
 
 int BpftraceProfiler::Record(int pid, int duration_sec, int freq,
                               const std::string& output_path) {
-  // 生成 IO 探针脚本
-  std::string script = GenerateIOProbeScript(pid, duration_sec);
+  // 根据 event_ 选择探针类型：
+  //   "sched" / "schedule" → 调度延迟探针
+  //   其他（默认）         → IO 延迟探针
+  std::string script;
+  if (event_ == "sched" || event_ == "schedule") {
+    script = GenerateSchedProbeScript(pid, duration_sec);
+    LOG_INFO("Using sched probe for pid=" + std::to_string(pid));
+  } else {
+    script = GenerateIOProbeScript(pid, duration_sec);
+    LOG_INFO("Using IO probe for pid=" + std::to_string(pid));
+  }
 
   // 写入临时脚本文件
   std::string script_path = output_path + ".bt";

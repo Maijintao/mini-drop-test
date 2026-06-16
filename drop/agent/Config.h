@@ -19,6 +19,10 @@ struct Config {
   std::string storage_bucket;
   bool storage_use_ssl = false;
 
+  // pprof 配置
+  std::string pprof_host = "localhost";
+  int pprof_port = 6060;
+
   static Config LoadFromFile(const std::string& path);
 };
 

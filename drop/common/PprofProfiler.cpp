@@ -12,14 +12,7 @@ namespace drop {
 
 int PprofProfiler::Record(int pid, int duration_sec, int freq,
                            const std::string& output_path) {
-  // pprof 采集需要进程暴露 HTTP 端口
-  // 默认尝试 localhost:6060（Go 默认 pprof 端口）
-  // 实际项目中需要从配置读取端口
-
-  std::string host = "localhost";
-  int port = 6060;
-
-  return FetchFromHTTP(host, port, duration_sec, output_path);
+  return FetchFromHTTP(host_, port_, duration_sec, output_path);
 }
 
 int PprofProfiler::FetchFromHTTP(const std::string& host, int port,

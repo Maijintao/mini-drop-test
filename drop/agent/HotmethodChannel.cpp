@@ -4,6 +4,7 @@
 #include "BpftraceProfiler.h"
 #include "AsyncProfiler.h"
 #include "PprofProfiler.h"
+#include "ScriptRunner.h"
 #include "Log.h"
 #include <iostream>
 #include <chrono>
@@ -91,16 +92,17 @@ void HotmethodChannel::ReportStatus(const std::string& task_id, TaskState state,
 }
 
 // 根据 profiler_type 选择采集器
-static std::unique_ptr<IProfiler> CreateProfiler(int profiler_type) {
+static std::unique_ptr<IProfiler> CreateProfiler(int profiler_type, const Config& config,
+                                                  const std::string& event = "") {
   switch (profiler_type) {
     case PROFILER_PERF:
       return std::make_unique<Perf>();
     case PROFILER_ASYNC_PROFILER:
       return std::make_unique<AsyncProfiler>();
     case PROFILER_PPROF:
-      return std::make_unique<PprofProfiler>();
+      return std::make_unique<PprofProfiler>(config.pprof_host, config.pprof_port);
     case PROFILER_BPFTRACE:
-      return std::make_unique<BpftraceProfiler>();
+      return std::make_unique<BpftraceProfiler>(event);
     default:
       return nullptr;
   }
@@ -143,17 +145,29 @@ void HotmethodChannel::WorkerLoop() {
     std::string output_path = "/tmp/profiler_" + task.task_id() + ext;
     int ret = -1;
 
-    // 选择采集器执行（统一走 IProfiler 多态接口）
-    auto profiler = CreateProfiler(task.profiler_type());
-    if (profiler) {
-      ret = profiler->Record(
-        task.sample_argv().pid(),
-        task.sample_argv().duration(),
-        task.sample_argv().hz(),
-        output_path
-      );
+    // 脚本执行任务：有 script_content 时走 ScriptRunner
+    if (!task.script_content().empty()) {
+      std::string script_path = "/tmp/script_" + task.task_id() + ".sh";
+      {
+        std::ofstream sf(script_path);
+        sf << task.script_content();
+      }
+      LOG_INFO("Executing script task " + task.task_id() + ": " + script_path);
+      ret = ScriptRunner::Execute(script_path, {});
+      std::remove(script_path.c_str());
     } else {
-      LOG_ERROR("Unknown profiler type: " + std::to_string(task.profiler_type()));
+      // 选择采集器执行（统一走 IProfiler 多态接口）
+      auto profiler = CreateProfiler(task.profiler_type(), config_, task.sample_argv().event());
+      if (profiler) {
+        ret = profiler->Record(
+          task.sample_argv().pid(),
+          task.sample_argv().duration(),
+          task.sample_argv().hz(),
+          output_path
+        );
+      } else {
+        LOG_ERROR("Unknown profiler type: " + std::to_string(task.profiler_type()));
+      }
     }
 
     // 上报结果

@@ -50,11 +50,13 @@ services:
       - "50051:50051"
     volumes:
       - ./drop/etc:/etc/drop
+      - drop-db:/data
     environment:
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
       MINIO_BUCKET: drop-data
+      TASK_DB_PATH: /data/task_states.db
     command: ["--port", "50051"]
     restart: unless-stopped
     healthcheck:
@@ -140,3 +142,4 @@ services:
 volumes:
   minio-data:
   pg-data:
+  drop-db:

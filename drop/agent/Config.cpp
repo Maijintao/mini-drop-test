@@ -42,6 +42,12 @@ Config Config::LoadFromFile(const std::string& path) {
     config.storage_use_ssl = s.value("use_ssl", false);
   }
 
+  if (j.contains("pprof")) {
+    auto& p = j["pprof"];
+    config.pprof_host = p.value("host", "localhost");
+    config.pprof_port = p.value("port", 6060);
+  }
+
   return config;
 }
 

@@ -14,6 +14,7 @@ RUN apt-get update && apt-get install -y \
     libprotobuf-dev \
     protobuf-compiler-grpc \
     nlohmann-json3-dev \
+    libsqlite3-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
@@ -33,6 +34,7 @@ FROM ubuntu:22.04
 RUN apt-get update && apt-get install -y \
     libgrpc++1 \
     libprotobuf23 \
+    libsqlite3-0 \
     linux-tools-common \
     linux-tools-generic \
     bpftrace \

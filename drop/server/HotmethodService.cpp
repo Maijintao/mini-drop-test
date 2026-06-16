@@ -1,8 +1,74 @@
 #include "HotmethodService.h"
 #include "Log.h"
 #include <iostream>
+#include <ctime>
 
 namespace drop {
+
+HotmethodService::HotmethodService() {
+  InitDB();
+}
+
+HotmethodService::~HotmethodService() {
+  if (db_) {
+    sqlite3_close(db_);
+  }
+}
+
+void HotmethodService::InitDB() {
+  // 从环境变量读取 DB 路径，默认当前目录
+  const char* db_path = std::getenv("TASK_DB_PATH");
+  if (!db_path) db_path = "task_states.db";
+
+  int rc = sqlite3_open(db_path, &db_);
+  if (rc != SQLITE_OK) {
+    LOG_ERROR("Failed to open SQLite: " + std::string(sqlite3_errmsg(db_)));
+    db_ = nullptr;
+    return;
+  }
+
+  const char* create_table =
+    "CREATE TABLE IF NOT EXISTS task_states ("
+    "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+    "  task_id TEXT NOT NULL,"
+    "  status INTEGER NOT NULL,"
+    "  reason TEXT,"
+    "  updated_at TEXT NOT NULL DEFAULT (datetime('now'))"
+    ");"
+    "CREATE INDEX IF NOT EXISTS idx_task_id ON task_states(task_id);";
+
+  char* err = nullptr;
+  rc = sqlite3_exec(db_, create_table, nullptr, nullptr, &err);
+  if (rc != SQLITE_OK) {
+    LOG_ERROR("Failed to create table: " + std::string(err ? err : "unknown"));
+    sqlite3_free(err);
+  } else {
+    LOG_INFO("SQLite task_states DB initialized");
+  }
+}
+
+void HotmethodService::PersistTaskStatus(const std::string& task_id, TaskStatus status, const std::string& reason) {
+  if (!db_) return;
+
+  const char* sql = "INSERT INTO task_states (task_id, status, reason, updated_at) VALUES (?, ?, ?, datetime('now'))";
+  sqlite3_stmt* stmt = nullptr;
+  int rc = sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr);
+  if (rc != SQLITE_OK) {
+    LOG_ERROR("SQLite prepare failed: " + std::string(sqlite3_errmsg(db_)));
+    return;
+  }
+
+  sqlite3_bind_text(stmt, 1, task_id.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int(stmt, 2, static_cast<int>(status));
+  sqlite3_bind_text(stmt, 3, reason.c_str(), -1, SQLITE_TRANSIENT);
+
+  rc = sqlite3_step(stmt);
+  if (rc != SQLITE_DONE) {
+    LOG_ERROR("SQLite insert failed: " + std::string(sqlite3_errmsg(db_)));
+  }
+
+  sqlite3_finalize(stmt);
+}
 
 bool HotmethodService::PushTask(const std::string& target_ip, const TaskDesc& task) {
   std::lock_guard<std::mutex> lock(mutex_);
@@ -145,7 +211,9 @@ void HotmethodService::UpdateTaskStatus(const std::string& task_id, TaskStatus s
   state.reason = reason;
   state.timestamp = std::chrono::steady_clock::now();
 
-  // 状态迁移日志（模拟落库）
+  // 落库：写入 SQLite
+  PersistTaskStatus(task_id, status, reason);
+
   std::string status_str;
   switch (status) {
     case TaskStatus::PENDING:    status_str = "PENDING"; break;
@@ -156,7 +224,7 @@ void HotmethodService::UpdateTaskStatus(const std::string& task_id, TaskStatus s
     case TaskStatus::FAILED:     status_str = "FAILED"; break;
     case TaskStatus::TIMEOUT:    status_str = "TIMEOUT"; break;
   }
-  LOG_INFO("[STATE] Task " + task_id + " -> " + status_str + " (reason: " + reason + ")");
+  LOG_INFO("[STATE] Task " + task_id + " -> " + status_str + " (reason: " + reason + ") [persisted]");
 }
 
 grpc::Status HotmethodService::NotifyResult(grpc::ServerContext* context,

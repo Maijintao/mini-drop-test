@@ -11,7 +11,9 @@
 #include "Config.h"
 #include "HealthCheckChannel.h"
 #include "HotmethodChannel.h"
+#include "ContainerInfo.h"
 #include "Daemon.h"
+#include "StorageClient.h"
 #include "Log.h"
 #include "init.grpc.pb.h"
 
@@ -93,10 +95,18 @@ int main(int argc, char* argv[]) {
 
   LOG_INFO("drop_agent starting, connected to " + server_addr);
 
-  // Agent 注册
+  // 检测容器环境
+  drop::ContainerInfo container_info = drop::ContainerInfo::Detect();
+  if (container_info.is_container) {
+    LOG_INFO("Running in container: " + container_info.container_id);
+  }
+
+  // Agent 注册 + FetchConfig
   {
     auto channel = grpc::CreateChannel(server_addr, grpc::InsecureChannelCredentials());
     auto init_stub = drop::Init::NewStub(channel);
+
+    // 注册
     grpc::ClientContext ctx;
     ctx.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(5));
 
@@ -116,11 +126,30 @@ int main(int argc, char* argv[]) {
       LOG_ERROR("[Register] Agent registration failed: " +
                 (status.ok() ? resp.message() : status.error_message()));
     }
+
+    // 拉取服务端配置（存储配置等）
+    grpc::ClientContext cfg_ctx;
+    cfg_ctx.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(5));
+    drop::FetchConfigRequest cfg_req;
+    cfg_req.set_uid(config.uid);
+    drop::FetchConfigResponse cfg_resp;
+    auto cfg_status = init_stub->FetchConfig(&cfg_ctx, cfg_req, &cfg_resp);
+    if (cfg_status.ok() && cfg_resp.code() == 0 && cfg_resp.has_cos_config()) {
+      const auto& cos = cfg_resp.cos_config();
+      config.storage_endpoint = cos.endpoint();
+      config.storage_access_key = cos.access_key();
+      config.storage_secret_key = cos.secret_key();
+      config.storage_bucket = cos.bucket();
+      config.storage_use_ssl = cos.use_ssl();
+      LOG_INFO("[FetchConfig] Storage config updated from server: " + cos.endpoint());
+    } else {
+      LOG_WARN("[FetchConfig] Failed, using local config");
+    }
   }
 
   // 创建组件，共享退出标志
   drop::HotmethodChannel hotmethod_channel(server_addr, config, g_running);
-  drop::HealthCheckChannel health_channel(server_addr, config.uid, config.ip_addr, g_running);
+  drop::HealthCheckChannel health_channel(server_addr, server_addrs, config.uid, config.ip_addr, g_running);
 
   health_channel.SetTaskCallback([&hotmethod_channel](const drop::TaskDesc& task) {
     LOG_INFO("Received task " + task.task_id() + " from server.");
