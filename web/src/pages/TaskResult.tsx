@@ -2,9 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useGSAP } from '@gsap/react';
 import gsap from 'gsap';
+import { Button, Card, Table, Tabs, Typography, Space, message, Spin, Empty } from 'antd';
+import { ReloadOutlined, PlayCircleOutlined, ArrowLeftOutlined } from '@ant-design/icons';
 import { fetchSignedJson, getCosFiles, getFlameData, getSuggestions, getTaskDetail, triggerAnalysis } from '@/api';
 import type { AnalysisSuggestion, CosFile, HotmethodTask, TopFunction } from '@/domain';
 import { analysisMap, basename, formatDate, formatDuration, parseTaskParams, profilerTypeMap, statusMap, taskTypeMap } from '@/domain';
+import FlameGraph from '@/components/FlameGraph';
+
+const { Text, Title } = Typography;
 
 gsap.registerPlugin(useGSAP);
 
@@ -34,13 +39,12 @@ export default function TaskResult() {
   const [cosFiles, setCosFiles] = useState<CosFile[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [analysisMessage, setAnalysisMessage] = useState('');
   const containerRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
 
   useGSAP(() => {
     gsap.fromTo('.result-header', { y: -10, autoAlpha: 0 }, { y: 0, autoAlpha: 1, duration: 0.35, clearProps: 'transform,opacity,visibility' });
-    gsap.fromTo('.result-stats > div', { y: 10, autoAlpha: 0 }, { y: 0, autoAlpha: 1, stagger: 0.06, duration: 0.35, delay: 0.08, clearProps: 'transform,opacity,visibility' });
+    gsap.fromTo('.result-stats', { y: 10, autoAlpha: 0 }, { y: 0, autoAlpha: 1, stagger: 0.06, duration: 0.35, delay: 0.08, clearProps: 'transform,opacity,visibility' });
     gsap.fromTo('.result-content', { y: 14, autoAlpha: 0 }, { y: 0, autoAlpha: 1, duration: 0.35, delay: 0.15, clearProps: 'transform,opacity,visibility' });
   }, { scope: containerRef });
 
@@ -129,13 +133,12 @@ export default function TaskResult() {
 
   const runAnalysis = async () => {
     if (!tid) return;
-    setAnalysisMessage('');
     try {
       await triggerAnalysis(tid);
-      setAnalysisMessage('分析已触发');
+      message.success('分析已触发');
       await loadTask();
     } catch (e: any) {
-      setAnalysisMessage(e?.response?.data?.message || e?.message || '触发分析失败');
+      message.error(e?.response?.data?.message || e?.message || '触发分析失败');
     }
   };
 
@@ -144,226 +147,278 @@ export default function TaskResult() {
   const status = task ? (statusMap[task.status] || statusMap[0]) : statusMap[0];
   const analysis = task ? (analysisMap[task.analysis_status] || analysisMap[0]) : analysisMap[0];
 
+  // TopN 表格列定义
+  const topnColumns = [
+    {
+      title: '排名',
+      dataIndex: 'rank',
+      key: 'rank',
+      width: 60,
+      render: (_: any, __: any, index: number) => (
+        <span style={{
+          width: 24,
+          height: 24,
+          borderRadius: 6,
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontSize: 12,
+          fontWeight: 600,
+          background: index < 3 ? 'rgba(248,113,113,0.15)' : 'rgba(255,255,255,0.05)',
+          color: index < 3 ? '#f87171' : 'rgba(255,255,255,0.45)',
+        }}>
+          {index + 1}
+        </span>
+      ),
+    },
+    {
+      title: '函数名',
+      dataIndex: 'func',
+      key: 'func',
+      render: (text: string) => (
+        <Text code style={{ color: 'rgba(255,255,255,0.85)', fontSize: 13 }}>
+          {text}
+        </Text>
+      ),
+    },
+    {
+      title: 'Self',
+      dataIndex: 'self',
+      key: 'self',
+      width: 100,
+      render: (text: number) => <Text style={{ color: '#f87171', fontWeight: 600 }}>{text}</Text>,
+    },
+    {
+      title: 'Inclusive',
+      dataIndex: 'total',
+      key: 'total',
+      width: 100,
+      render: (text: number) => <Text style={{ color: 'rgba(255,255,255,0.85)' }}>{text}</Text>,
+    },
+    {
+      title: 'Self %',
+      key: 'self_pct',
+      width: 100,
+      render: (_: any, record: TopFunction) => (
+        <Text style={{ color: 'rgba(255,255,255,0.65)' }}>
+          {totalSamples ? `${((record.self / totalSamples) * 100).toFixed(2)}%` : '-'}
+        </Text>
+      ),
+    },
+  ];
+
+  // 文件表格列定义
+  const fileColumns = [
+    {
+      title: '文件名',
+      dataIndex: 'name',
+      key: 'name',
+      render: (_: any, record: CosFile) => {
+        const key = record.key || record.name || '';
+        const name = basename(key);
+        const isPerfData = name === 'perf.data';
+        return <Text style={{ color: isPerfData ? '#fbbf24' : 'rgba(255,255,255,0.85)', fontWeight: isPerfData ? 700 : 500 }}>{name || '-'}</Text>;
+      },
+    },
+    {
+      title: '对象 Key',
+      dataIndex: 'key',
+      key: 'key',
+      render: (text: string) => <Text code style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)' }}>{text || '-'}</Text>,
+    },
+    {
+      title: '大小',
+      dataIndex: 'size',
+      key: 'size',
+      width: 100,
+      render: (text: number) => <Text style={{ color: 'rgba(255,255,255,0.45)' }}>{text ? `${(text / 1024).toFixed(1)} KB` : '-'}</Text>,
+    },
+    {
+      title: '操作',
+      key: 'action',
+      width: 80,
+      render: (_: any, record: CosFile) => (
+        <Button type="link" href={record.url} target="_blank" rel="noopener noreferrer" style={{ padding: 0 }}>
+          下载
+        </Button>
+      ),
+    },
+  ];
+
+  // 任务信息项
+  const infoItems = [
+    { label: '任务ID', value: task?.tid },
+    { label: '任务名称', value: task?.name || '-' },
+    { label: '状态', value: status.label, color: status.color },
+    { label: '目标 IP', value: task?.target_ip },
+    { label: '采集类型', value: taskTypeMap[task?.type || 0] || String(task?.type || 0) },
+    { label: '采集器', value: profilerTypeMap[task?.profiler_type || 0] || String(task?.profiler_type || 0) },
+    { label: '目标 PID', value: String(params.pid || '-') },
+    { label: '采样频率', value: params.hz ? `${params.hz} Hz` : '-' },
+    { label: 'Callgraph', value: params.callgraph || '-' },
+    { label: '创建时间', value: formatDate(task?.create_time) },
+    { label: '开始时间', value: formatDate(task?.begin_time) },
+    { label: '结束时间', value: formatDate(task?.end_time) },
+    { label: '状态说明', value: task?.status_info || '-' },
+  ];
+
   return (
     <div ref={containerRef}>
       <div className="result-header" style={{ marginBottom: 24 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
-              <button onClick={() => navigate('/tasks')} style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.4)', cursor: 'pointer', fontSize: 18, padding: '2px 6px', borderRadius: 6 }}>←</button>
-              <h1 style={{ fontSize: 24, fontWeight: 700, color: '#fff', margin: 0 }}>任务详情</h1>
+              <Button type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate('/tasks')} style={{ color: 'rgba(255,255,255,0.4)' }} />
+              <Title level={4} style={{ margin: 0, color: '#fff' }}>任务详情</Title>
             </div>
-            <p style={{ fontSize: 14, color: 'rgba(255,255,255,0.4)', margin: 0, paddingLeft: 36 }}>
-              任务 ID: <code style={{ background: 'rgba(255,255,255,0.05)', border: '0.5px solid rgba(255,255,255,0.085)', padding: '2px 8px', borderRadius: 4, fontSize: 13, color: 'rgba(255,255,255,0.55)' }}>{tid || '-'}</code>
-            </p>
+            <Text style={{ fontSize: 14, color: 'rgba(255,255,255,0.4)', paddingLeft: 36 }}>
+              任务 ID: <Text code style={{ background: 'rgba(255,255,255,0.05)', border: '0.5px solid rgba(255,255,255,0.085)', padding: '2px 8px', borderRadius: 4, fontSize: 13, color: 'rgba(255,255,255,0.55)' }}>{tid || '-'}</Text>
+            </Text>
           </div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            {analysisMessage && <span style={{ color: analysisMessage.includes('失败') ? '#f87171' : '#4ade80', fontSize: 13 }}>{analysisMessage}</span>}
-            <button onClick={loadTask} style={{ padding: '8px 16px', background: 'rgba(255,255,255,0.04)', border: '0.5px solid rgba(255,255,255,0.1)', borderRadius: 10, color: 'rgba(255,255,255,0.6)', fontSize: 13, fontWeight: 500, cursor: 'pointer' }}>刷新</button>
-            <button onClick={runAnalysis} disabled={!task || task.status !== 2} style={{ padding: '8px 16px', background: 'rgba(255,255,255,0.1)', border: '0.5px solid rgba(255,255,255,0.15)', borderRadius: 10, color: '#fff', fontSize: 13, fontWeight: 500, cursor: !task || task.status !== 2 ? 'not-allowed' : 'pointer' }}>触发分析</button>
-          </div>
+          <Space>
+            <Button icon={<ReloadOutlined />} onClick={loadTask}>刷新</Button>
+            <Button type="primary" icon={<PlayCircleOutlined />} onClick={runAnalysis} disabled={!task || task.status !== 2}>触发分析</Button>
+          </Space>
         </div>
       </div>
 
-      {loading && <div style={{ ...glassCard, padding: 24, color: 'rgba(255,255,255,0.45)' }}>加载任务详情中...</div>}
-      {!loading && error && <div style={{ ...glassCard, padding: 24, color: '#f87171' }}>{error}</div>}
+      {loading && <Card style={glassCard}><Spin tip="加载任务详情中..." /></Card>}
+      {!loading && error && <Card style={glassCard}><Text type="danger">{error}</Text></Card>}
       {!loading && !error && task && (
         <>
-          <div className="result-stats" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 24 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 24 }} className="result-stats">
             {[
               { label: '采集时长', value: formatDuration(task), color: '#60a5fa' },
               { label: '采样数', value: String(totalSamples || '-'), color: '#4ade80' },
               { label: '任务状态', value: status.label, color: status.color },
               { label: '分析状态', value: analysis.label, color: analysis.color },
-            ].map((stat) => (
-              <div key={stat.label} style={{ ...glassCard, padding: '20px 16px' }}>
-                <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)', marginBottom: 8 }}>{stat.label}</div>
-                <div style={{ fontSize: 24, fontWeight: 700, color: stat.color }}>{stat.value}</div>
+            ].map((s) => (
+              <div key={s.label} style={{ ...glassCard, padding: '16px' }}>
+                <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', marginBottom: 6 }}>{s.label}</div>
+                <div style={{ fontSize: 24, fontWeight: 700, color: s.color }}>{s.value}</div>
               </div>
             ))}
           </div>
 
-          <div style={{ ...glassCard, overflow: 'hidden' }}>
-            <div style={{ display: 'flex', gap: 4, padding: '16px 16px 0' }}>
-              {[
-                { key: 'info', label: '基本信息' },
-                { key: 'flame', label: '火焰图' },
-                { key: 'topn', label: '热点函数' },
-                { key: 'suggestions', label: '优化建议' },
-                { key: 'files', label: '文件下载' },
-              ].map(tab => (
-                <button key={tab.key} onClick={() => setActiveTab(tab.key)} style={{ padding: '8px 20px', borderRadius: 10, fontSize: 14, fontWeight: 500, cursor: 'pointer', border: 'none', background: activeTab === tab.key ? 'rgba(255,255,255,0.1)' : 'transparent', color: activeTab === tab.key ? '#fff' : 'rgba(255,255,255,0.45)' }}>{tab.label}</button>
-              ))}
-            </div>
-
-            <div className="result-content" style={{ padding: '20px 24px 24px' }}>
-              {activeTab === 'flame' && (
-                flameUrl ? (
-                  <div style={{ border: '0.5px solid rgba(255,255,255,0.08)', borderRadius: 12, overflow: 'hidden', background: '#fff' }}>
-                    <div style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      gap: 12,
-                      padding: '10px 12px',
-                      background: '#f8fafc',
-                      borderBottom: '1px solid #e5e7eb',
-                    }}>
-                      <div style={{ color: '#111827', fontSize: 13, fontWeight: 700 }}>
-                        flamegraph.svg
-                        {flameLoading && <span style={{ marginLeft: 8, color: '#64748b', fontWeight: 500 }}>加载中...</span>}
-                      </div>
-                      <div style={{ display: 'flex', gap: 8 }}>
-                        <button
-                          onClick={() => setFlameUrl((url) => `${url}${url.includes('?') ? '&' : '?'}_reload=${Date.now()}`)}
-                          style={{ padding: '6px 10px', border: '1px solid #d1d5db', borderRadius: 6, background: '#fff', color: '#374151', cursor: 'pointer', fontSize: 12 }}
-                        >
-                          刷新
-                        </button>
-                        <button
-                          onClick={() => window.open(flameUrl, '_blank', 'noopener,noreferrer')}
-                          style={{ padding: '6px 10px', border: '1px solid #d1d5db', borderRadius: 6, background: '#fff', color: '#374151', cursor: 'pointer', fontSize: 12 }}
-                        >
-                          新窗口打开
-                        </button>
-                      </div>
-                    </div>
-                    {flameError && (
-                      <div style={{ padding: '8px 12px', color: '#b91c1c', background: '#fee2e2', fontSize: 12 }}>
-                        {flameError}
-                      </div>
-                    )}
-                    <iframe
-                      title={`flamegraph-${tid}`}
-                      src={flameUrl}
-                      onLoad={() => {
-                        setFlameLoading(false);
-                        setFlameError('');
-                      }}
-                      onError={() => {
-                        setFlameLoading(false);
-                        setFlameError('火焰图加载失败，签名 URL 可能已过期');
-                      }}
-                      style={{ width: '100%', height: 560, border: 0, display: 'block', background: '#fff' }}
-                    />
-                  </div>
-                ) : (
-                  <div style={{
-                    padding: 24,
-                    border: '0.5px solid rgba(255,255,255,0.08)',
-                    borderRadius: 12,
-                    color: 'rgba(255,255,255,0.45)',
-                    background: 'rgba(255,255,255,0.02)',
-                  }}>
-                    {flameError || '暂无可渲染的 flamegraph.svg'}
-                  </div>
-                )
-              )}
-
-              {activeTab === 'topn' && (
-                <div style={{ border: '0.5px solid rgba(255,255,255,0.085)', borderRadius: 12, overflow: 'hidden' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                    <thead><tr style={{ borderBottom: '0.5px solid rgba(255,255,255,0.085)' }}>{['排名', '函数名', 'Self', 'Inclusive', 'Self %'].map(h => <th key={h} style={{ padding: '12px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'rgba(255,255,255,0.3)', letterSpacing: 0 }}>{h}</th>)}</tr></thead>
-                    <tbody>
-                      {topn.length === 0 && <tr><td colSpan={5} style={{ padding: 24, color: 'rgba(255,255,255,0.45)' }}>暂无 TopN 数据</td></tr>}
-                      {topn.map((fn, i) => (
-                        <tr key={`${fn.func}-${i}`} style={{ borderBottom: i < topn.length - 1 ? '0.5px solid rgba(255,255,255,0.03)' : 'none' }}>
-                          <td style={{ padding: '14px 16px' }}><span style={{ width: 24, height: 24, borderRadius: 6, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, background: i < 3 ? 'rgba(248,113,113,0.15)' : 'rgba(255,255,255,0.05)', color: i < 3 ? '#f87171' : 'rgba(255,255,255,0.45)' }}>{i + 1}</span></td>
-                          <td style={{ padding: '14px 16px', fontSize: 13, fontFamily: 'monospace', color: 'rgba(255,255,255,0.85)' }}>{fn.func}</td>
-                          <td style={{ padding: '14px 16px', color: '#f87171', fontWeight: 600 }}>{fn.self}</td>
-                          <td style={{ padding: '14px 16px', color: 'rgba(255,255,255,0.85)' }}>{fn.total}</td>
-                          <td style={{ padding: '14px 16px', color: 'rgba(255,255,255,0.65)' }}>{totalSamples ? `${((fn.self / totalSamples) * 100).toFixed(2)}%` : '-'}</td>
-                        </tr>
+          <Card className="result-content" style={{ ...glassCard, overflow: 'hidden' }}>
+            <Tabs
+              activeKey={activeTab}
+              onChange={setActiveTab}
+              items={[
+                {
+                  key: 'info',
+                  label: '基本信息',
+                  children: (
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px 32px' }}>
+                      {infoItems.map((item) => (
+                        <div key={item.label} style={{ display: 'flex', justifyContent: 'space-between', gap: 16, padding: '12px 0', borderBottom: '0.5px solid rgba(255,255,255,0.04)' }}>
+                          <Text style={{ color: 'rgba(255,255,255,0.4)' }}>{item.label}</Text>
+                          <Text style={{ fontWeight: 500, color: item.color || 'rgba(255,255,255,0.85)', textAlign: 'right' }}>{item.value}</Text>
+                        </div>
                       ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-
-              {activeTab === 'suggestions' && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  {suggestions.length === 0 && <div style={{ padding: 24, color: 'rgba(255,255,255,0.45)' }}>暂无优化建议</div>}
-                  {suggestions.map((item) => (
-                    <div key={item.id || item.func} style={{ padding: '16px 20px', background: 'rgba(255,255,255,0.02)', border: '0.5px solid rgba(255,255,255,0.085)', borderLeft: '3px solid rgba(96,165,250,0.65)', borderRadius: 12 }}>
-                      <div style={{ fontSize: 15, fontWeight: 600, color: 'rgba(255,255,255,0.85)', marginBottom: 6 }}>{item.func || '建议'}</div>
-                      <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.5)', lineHeight: 1.7 }}>{item.suggestion || item.ai_suggestion || '-'}</div>
-                      {item.ai_suggestion && <div style={{ marginTop: 8, fontSize: 13, color: 'rgba(255,255,255,0.5)', lineHeight: 1.7 }}>{item.ai_suggestion}</div>}
                     </div>
-                  ))}
-                </div>
-              )}
-
-              {activeTab === 'files' && (
-                <div style={{ border: '0.5px solid rgba(255,255,255,0.085)', borderRadius: 12, overflow: 'hidden' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                    <thead>
-                      <tr style={{ borderBottom: '0.5px solid rgba(255,255,255,0.085)' }}>
-                        {['文件名', '对象 Key', '大小', '操作'].map(h => (
-                          <th key={h} style={{ padding: '12px 16px', textAlign: 'left', fontSize: 12, fontWeight: 600, color: 'rgba(255,255,255,0.3)', letterSpacing: 0 }}>{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {cosFiles.length === 0 && (
-                        <tr><td colSpan={4} style={{ padding: 24, color: 'rgba(255,255,255,0.45)' }}>暂无 COS 文件</td></tr>
-                      )}
-                      {cosFiles.map((file, i) => {
-                        const key = file.key || file.name || '';
-                        const name = basename(key);
-                        const isPerfData = name === 'perf.data';
-                        return (
-                          <tr key={`${key || file.url}-${i}`} style={{ borderBottom: i < cosFiles.length - 1 ? '0.5px solid rgba(255,255,255,0.04)' : 'none' }}>
-                            <td style={{ padding: '14px 16px', fontSize: 13, color: isPerfData ? '#fbbf24' : 'rgba(255,255,255,0.85)', fontWeight: isPerfData ? 700 : 500 }}>
-                              {name || '-'}
-                            </td>
-                            <td style={{ padding: '14px 16px', fontSize: 12, fontFamily: 'monospace', color: 'rgba(255,255,255,0.45)' }}>{key || '-'}</td>
-                            <td style={{ padding: '14px 16px', fontSize: 13, color: 'rgba(255,255,255,0.45)' }}>{file.size ? `${(file.size / 1024).toFixed(1)} KB` : '-'}</td>
-                            <td style={{ padding: '14px 16px' }}>
-                              <a
-                                href={file.url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                style={{ color: 'rgba(96,165,250,0.9)', textDecoration: 'none', fontSize: 13, fontWeight: 600 }}
-                              >
-                                下载
-                              </a>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-
-              {activeTab === 'info' && (
-                <div style={{ padding: 4 }}>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px 32px' }}>
-                    {[
-                      { label: '任务ID', value: task.tid },
-                      { label: '任务名称', value: task.name || '-' },
-                      { label: '状态', value: status.label, color: status.color },
-                      { label: '目标 IP', value: task.target_ip },
-                      { label: '采集类型', value: taskTypeMap[task.type] || String(task.type) },
-                      { label: '采集器', value: profilerTypeMap[task.profiler_type] || String(task.profiler_type) },
-                      { label: '目标 PID', value: String(params.pid || '-') },
-                      { label: '采样频率', value: params.hz ? `${params.hz} Hz` : '-' },
-                      { label: 'Callgraph', value: params.callgraph || '-' },
-                      { label: '创建时间', value: formatDate(task.create_time) },
-                      { label: '开始时间', value: formatDate(task.begin_time) },
-                      { label: '结束时间', value: formatDate(task.end_time) },
-                      { label: '状态说明', value: task.status_info || '-' },
-                    ].map((item) => (
-                      <div key={item.label} style={{ display: 'flex', justifyContent: 'space-between', gap: 16, padding: '12px 0', borderBottom: '0.5px solid rgba(255,255,255,0.04)' }}>
-                        <span style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)' }}>{item.label}</span>
-                        <span style={{ fontSize: 14, fontWeight: 500, color: item.color || 'rgba(255,255,255,0.85)', textAlign: 'right' }}>{item.value}</span>
+                  ),
+                },
+                {
+                  key: 'flame',
+                  label: '火焰图',
+                  children: (
+                    flameUrl ? (
+                      <div style={{ border: '0.5px solid rgba(255,255,255,0.08)', borderRadius: 12, overflow: 'hidden', background: '#fff' }}>
+                        <div style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: 12,
+                          padding: '10px 12px',
+                          background: '#f8fafc',
+                          borderBottom: '1px solid #e5e7eb',
+                        }}>
+                          <Text strong style={{ color: '#111827', fontSize: 13 }}>
+                            flamegraph.svg
+                            {flameLoading && <Text style={{ marginLeft: 8, color: '#64748b', fontWeight: 500 }}>加载中...</Text>}
+                          </Text>
+                          <Space>
+                            <Button size="small" onClick={() => setFlameUrl((url) => `${url}${url.includes('?') ? '&' : '?'}_reload=${Date.now()}`)}>刷新</Button>
+                            <Button size="small" onClick={() => window.open(flameUrl, '_blank', 'noopener,noreferrer')}>新窗口打开</Button>
+                          </Space>
+                        </div>
+                        {flameError && (
+                          <div style={{ padding: '8px 12px', color: '#b91c1c', background: '#fee2e2', fontSize: 12 }}>
+                            {flameError}
+                          </div>
+                        )}
+                        <iframe
+                          title={`flamegraph-${tid}`}
+                          src={flameUrl}
+                          onLoad={() => {
+                            setFlameLoading(false);
+                            setFlameError('');
+                          }}
+                          onError={() => {
+                            setFlameLoading(false);
+                            setFlameError('火焰图加载失败，签名 URL 可能已过期');
+                          }}
+                          style={{ width: '100%', height: 560, border: 0, display: 'block', background: '#fff' }}
+                        />
                       </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
+                    ) : topn.length > 0 ? (
+                      <FlameGraph data={topn} width={900} height={400} />
+                    ) : (
+                      <Empty description={flameError || '暂无可渲染的火焰图数据'} />
+                    )
+                  ),
+                },
+                {
+                  key: 'topn',
+                  label: '热点函数',
+                  children: (
+                    <Table
+                      dataSource={topn}
+                      columns={topnColumns}
+                      rowKey={(record) => `${record.func}-${record.self}`}
+                      pagination={false}
+                      size="small"
+                      style={{ background: 'transparent' }}
+                    />
+                  ),
+                },
+                {
+                  key: 'suggestions',
+                  label: '优化建议',
+                  children: (
+                    suggestions.length === 0 ? (
+                      <Empty description="暂无优化建议" />
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                        {suggestions.map((item) => (
+                          <Card key={item.id || item.func} size="small" style={{ background: 'rgba(255,255,255,0.02)', border: '0.5px solid rgba(255,255,255,0.085)', borderLeft: '3px solid rgba(96,165,250,0.65)' }}>
+                            <Text strong style={{ fontSize: 15, color: 'rgba(255,255,255,0.85)', display: 'block', marginBottom: 6 }}>{item.func || '建议'}</Text>
+                            <Text style={{ fontSize: 13, color: 'rgba(255,255,255,0.5)', lineHeight: 1.7 }}>{item.suggestion || item.ai_suggestion || '-'}</Text>
+                            {item.ai_suggestion && <Text style={{ marginTop: 8, fontSize: 13, color: 'rgba(255,255,255,0.5)', lineHeight: 1.7, display: 'block' }}>{item.ai_suggestion}</Text>}
+                          </Card>
+                        ))}
+                      </div>
+                    )
+                  ),
+                },
+                {
+                  key: 'files',
+                  label: '文件下载',
+                  children: (
+                    <Table
+                      dataSource={cosFiles}
+                      columns={fileColumns}
+                      rowKey={(record) => record.key || record.url || Math.random().toString()}
+                      pagination={false}
+                      size="small"
+                      style={{ background: 'transparent' }}
+                    />
+                  ),
+                },
+              ]}
+            />
+          </Card>
         </>
       )}
     </div>
