@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
+import axios from 'axios';
 import { useGSAP } from '@gsap/react';
 import gsap from 'gsap';
 import { Button, Card, Table, Tabs, Typography, Space, message, Spin, Empty, Statistic, Row, Col } from 'antd';
@@ -36,6 +37,7 @@ export default function TaskResult() {
   const [flameLoading, setFlameLoading] = useState(false);
   const [flameError, setFlameError] = useState('');
   const [topn, setTopn] = useState<TopFunction[]>([]);
+  const [collapsedText, setCollapsedText] = useState('');
   const [cosFiles, setCosFiles] = useState<CosFile[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -100,6 +102,19 @@ export default function TaskResult() {
           setTopn(Array.isArray(data) ? data : []);
         } catch {
           setTopn([]);
+        }
+      }
+
+      // 加载 collapsed.txt 用于层次火焰图渲染
+      const collapsedFile = files.find(file => basename(file.key || file.name).toLowerCase() === 'collapsed.txt');
+      if (collapsedFile?.url) {
+        try {
+          const res = await axios.get<string>(collapsedFile.url, { withCredentials: false, timeout: 30000, responseType: 'text' });
+          if (typeof res.data === 'string' && res.data.length > 0) {
+            setCollapsedText(res.data);
+          }
+        } catch {
+          setCollapsedText('');
         }
       }
 
@@ -382,8 +397,8 @@ export default function TaskResult() {
                           style={{ width: '100%', height: 560, border: 0, display: 'block', background: '#fff' }}
                         />
                       </div>
-                    ) : topn.length > 0 ? (
-                      <FlameGraph data={topn} width={900} height={400} />
+                    ) : (topn.length > 0 || collapsedText) ? (
+                      <FlameGraph data={topn} collapsedText={collapsedText} width={900} height={400} />
                     ) : (
                       <Empty description={flameError || '暂无可渲染的火焰图数据'} />
                     )

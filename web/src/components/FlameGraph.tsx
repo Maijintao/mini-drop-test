@@ -10,38 +10,92 @@ const flamegraphStyles = `
 .d3-flame-graph svg { font: 10px sans-serif; }
 `;
 
+interface FlameNode {
+  name: string;
+  value?: number;
+  children?: FlameNode[];
+}
+
 interface FlameGraphProps {
   data: { func: string; self: number; total?: number }[];
+  collapsedText?: string;
   width?: number;
   height?: number;
 }
 
-export default function FlameGraph({ data, width = 960, height = 400 }: FlameGraphProps) {
+/**
+ * 解析 collapsed 格式文本为 d3-flame-graph 树结构。
+ * 格式: "func1;func2;func3 count" 每行一条调用栈。
+ */
+function parseCollapsedToTree(text: string): FlameNode | null {
+  const root: FlameNode = { name: 'all', children: [] };
+
+  for (const rawLine of text.split('\n')) {
+    const line = rawLine.trim();
+    if (!line) continue;
+
+    const lastSpace = line.lastIndexOf(' ');
+    if (lastSpace <= 0) continue;
+
+    const stackStr = line.substring(0, lastSpace);
+    const count = parseInt(line.substring(lastSpace + 1), 10);
+    if (isNaN(count) || count <= 0) continue;
+
+    const frames = stackStr.split(';');
+    let current = root;
+
+    for (const frame of frames) {
+      if (!current.children) current.children = [];
+      let child = current.children.find(c => c.name === frame);
+      if (!child) {
+        child = { name: frame, value: 0 };
+        current.children.push(child);
+      }
+      current = child;
+    }
+    // 叶子节点累加采样数
+    current.value = (current.value || 0) + count;
+  }
+
+  return root.children && root.children.length > 0 ? root : null;
+}
+
+/**
+ * 从扁平 top.json 数据构建树（fallback，无层次信息）。
+ */
+function flatDataToTree(data: { func: string; self: number }[]): FlameNode {
+  const sorted = [...data].sort((a, b) => b.self - a.self).slice(0, 100);
+  const totalSamples = sorted.reduce((sum, item) => sum + item.self, 0);
+  return {
+    name: 'all',
+    value: totalSamples,
+    children: sorted.map(item => ({
+      name: item.func,
+      value: item.self,
+    })),
+  };
+}
+
+export default function FlameGraph({ data, collapsedText, width = 960, height = 400 }: FlameGraphProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<any>(null);
   const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
-    if (!containerRef.current || !data || data.length === 0) return;
+    if (!containerRef.current) return;
+
+    // 优先使用 collapsed 层次数据，fallback 到扁平 top.json
+    let root: FlameNode | null = null;
+    if (collapsedText) {
+      root = parseCollapsedToTree(collapsedText);
+    }
+    if (!root && data && data.length > 0) {
+      root = flatDataToTree(data);
+    }
+    if (!root) return;
 
     // 清空容器
     containerRef.current.innerHTML = '';
-
-    // 按 self 排序，取 top 100
-    const sorted = [...data].sort((a, b) => b.self - a.self).slice(0, 100);
-    const totalSamples = sorted.reduce((sum, item) => sum + item.self, 0);
-
-    // 构建火焰图树结构
-    // TopN 数据是扁平的，每个函数独立展示为一个子树
-    // 这样可以在火焰图中看到每个函数的占比
-    const root = {
-      name: 'all',
-      value: totalSamples,
-      children: sorted.map(item => ({
-        name: item.func,
-        value: item.self,
-      })),
-    };
 
     // 创建火焰图
     const chart = flamegraph()
@@ -63,7 +117,7 @@ export default function FlameGraph({ data, width = 960, height = 400 }: FlameGra
         containerRef.current.innerHTML = '';
       }
     };
-  }, [data, width, height]);
+  }, [data, collapsedText, width, height]);
 
   // 搜索高亮
   useEffect(() => {
@@ -75,7 +129,7 @@ export default function FlameGraph({ data, width = 960, height = 400 }: FlameGra
     }
   }, [searchTerm]);
 
-  if (!data || data.length === 0) {
+  if ((!data || data.length === 0) && !collapsedText) {
     return <div style={{ padding: 24, color: 'rgba(255,255,255,0.45)' }}>暂无火焰图数据</div>;
   }
 
