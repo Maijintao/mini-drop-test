@@ -1,20 +1,60 @@
-# mini-drop-test
-一站式性能分析平台：Agent采集 → Server调度 →             │   │              │ Analyzer分析 → Web可视化火焰图/热点/AI归因
+# Mini-Drop
 
+一站式性能分析平台：Agent 采集 → Server 调度 → Analyzer 分析 → Web 可视化火焰图/热点/AI 归因
 
+## 架构
 
+```
+Web Frontend (React + Ant Design)
+    ↓ REST API
+APIServer (Go + Gin)
+    ↓ gRPC
+drop_server (C++) ←→ drop_agent (C++)
+    ↓ subprocess
+analysis (Python)
+```
 
-q1:
-LTE 选 15kHz 子载波间隔是折中设计：
-既能对抗高速移动的多普勒频偏，又能控制循环前缀开销、兼顾频谱效率。减半至 7.5kHz：符号长度翻倍，抗多径能力变强，但多普勒频偏易破坏正交性，高速场景易串扰；
-加倍至 30kHz：抗多普勒性能提升，但符号变短、循环前缀占比激增，频谱利用率下降，覆盖能力变弱。
+## 快速启动
 
-q2:
-256-QAM 阶数高、对接收 SNR 要求极高，8×8 MIMO 侧重空间复用，只有近点高 SNR 环境才能稳定实现高速传输；
-小区边缘 SNR 极低，高阶调制极易出错，会链路自适应降为抗干扰更强的 QPSK，同时从空间复用切换为 2×2 的空间分集，靠分集增益保障通信可靠性，避免传输中断。
+```bash
+# 前置要求: Docker, Docker Compose, Linux (需要 perf 权限)
+docker compose up
+```
 
-q3:
-选Cat.1：
-Cat.1 模组约 25 元远低于 Cat.4 的 80 元，功耗更低、待机续航更长；
-连接速度虽弱于 Cat.4，但上报小数据包够用；
-Cat.4 高速能力冗余，高功耗高成本会大幅拉高运维开销，SIM 运营层面 Cat.1 资费也更适配物联网低流量模式。
+启动后访问 http://localhost 即可使用。
+
+## 技术栈
+
+| 模块 | 语言 | 框架 |
+|------|------|------|
+| apiserver | Go | Gin + GORM + gRPC |
+| drop (agent/server) | C++17 | gRPC + Protobuf |
+| analysis | Python 3.10+ | pytest |
+| web | TypeScript | React 19 + Ant Design 6 + d3-flame-graph |
+
+## 目录结构
+
+```
+├── apiserver/    # Go 后端编排层
+├── drop/         # C++ 采集层 (Agent + Server)
+├── analysis/     # Python 分析引擎
+├── web/          # React 前端
+└── docker-compose.yml
+```
+
+## 支持的采集器
+
+- perf (CPU Profiling)
+- async-profiler (Java Profiling)
+- pprof (Go/C++ pprof)
+- bpftrace (eBPF)
+
+## 支持的分析类型
+
+- CPU 火焰图
+- TopN 热点函数
+- 规则引擎优化建议
+- eBPF IO 分析 (biosnoop)
+- 资源分析 (pidstat)
+- 内存泄漏检测
+- 汇编代码分析
