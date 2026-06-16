@@ -74,14 +74,20 @@ func (s *APIServer) runAnalysis(tid string, taskType int) {
 	err := cmd.Run()
 
 	if err != nil {
-		s.Db.Model(&model.HotmethodTask{}).Where("tid = ?", tid).Updates(map[string]interface{}{
-			"analysis_status": AnalysisStatusFailed,
-			"status_info":     fmt.Sprintf("analysis failed: %v, stderr: %s", err, stderr.String()),
-		})
+		// 子进程崩溃时兜底：如果子进程已自行设置终态则不覆盖
+		var task model.HotmethodTask
+		if dbErr := s.Db.Where("tid = ?", tid).First(&task).Error; dbErr == nil {
+			if task.AnalysisStatus == AnalysisStatusRunning {
+				s.Db.Model(&model.HotmethodTask{}).Where("tid = ?", tid).Updates(map[string]interface{}{
+					"analysis_status": AnalysisStatusFailed,
+					"status_info":     fmt.Sprintf("analysis failed: %v, stderr: %s", err, stderr.String()),
+				})
+			}
+		}
 		logger.Error("analysis failed", zap.String("tid", tid), zap.Error(err), zap.String("stderr", stderr.String()))
 		return
 	}
 
-	s.Db.Model(&model.HotmethodTask{}).Where("tid = ?", tid).Update("analysis_status", AnalysisStatusSuccess)
-	logger.Info("analysis completed", zap.String("tid", tid))
+	// 子进程正常退出，状态由子进程自行设置，不重复写入
+	logger.Info("analysis process exited", zap.String("tid", tid))
 }

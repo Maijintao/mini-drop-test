@@ -50,7 +50,7 @@ from analyzers.biotrace import parse_biosnoop_csv, analyze_biosnoop, stats_to_js
 from analyzers.bw_sync_analyzer import analyze_bw_sync_csv, analyze_bw_sync_json
 from analyzers.namespace_parse import parse_pid_namespaces, namespaces_to_json
 from analyzers.assembly_code_analyzer import parse_objdump, stats_to_json as asm_to_json
-from analyzers.memleak_analyzer import validate_task_type
+from analyzers.memleak_analyzer import analyze_memleak
 
 
 def parse_args():
@@ -119,7 +119,7 @@ def main():
             0:  ["perf.data", "collapsed.txt"],           # CPU 火焰图
             1:  ["heap.hprof", "perf.data"],              # Java Heap / Profiling
             2:  ["tracing.json", "tracing.csv"],          # Tracing
-            4:  ["perf.data"],                            # MemCheck
+            4:  ["memleak.xml", "memleak.txt", "memleak.json"],  # MemCheck
             5:  ["pidstat.csv", "pidstat.json"],          # Resource Analysis
             6:  ["biosnoop.csv", "biosnoop.json"],        # eBPF Biosnoop
             7:  ["bw_sync.json", "bw_sync.csv"],          # BW Sync
@@ -162,8 +162,9 @@ def main():
                 error_exit("no tracing data found", ERR_NOT_FOUND)
             result = run_tracing(raw_path, work_dir, tid)
         elif task_type == 4:
-            err = validate_task_type(task_type)
-            error_exit(err, ERR_UNSUPPORTED)
+            if raw_path is None:
+                error_exit("no memleak data found", ERR_NOT_FOUND)
+            result = run_memleak(raw_path, work_dir, tid)
         elif task_type == 5:
             if raw_path is None:
                 error_exit("no pidstat data found for resource analysis", ERR_NOT_FOUND)
@@ -436,6 +437,46 @@ def run_pprof_heap(data_path: str, work_dir: str, tid: str) -> dict:
         } for s in samples], f, indent=2)
     log.info("pprof_heap -> %s", result_path)
     return {result_path: "pprof_heap.json"}
+
+
+def run_memleak(data_path: str, work_dir: str, tid: str) -> dict:
+    """内存泄漏分析"""
+    result_path = os.path.join(work_dir, "memleak.json")
+    result = analyze_memleak(data_path)
+
+    if not result.success:
+        error_exit(result.error, ERR_ANALYSIS)
+
+    output = {
+        "total_leaked_bytes": result.total_leaked_bytes,
+        "total_leaked_blocks": result.total_leaked_blocks,
+        "summary": result.summary,
+        "leaks": [
+            {
+                "leak_type": l.leak_type,
+                "size": l.size,
+                "count": l.count,
+                "stack": l.stack[:10],
+            }
+            for l in result.leaks[:100]
+        ],
+        "suggestions": result.suggestions,
+    }
+
+    with open(result_path, "w") as f:
+        json.dump(output, f, indent=2, ensure_ascii=False)
+
+    # 生成 suggestions.md
+    suggestions_path = os.path.join(work_dir, "suggestions.md")
+    with open(suggestions_path, "w") as f:
+        f.write(f"# 内存泄漏分析 - {tid}\n\n")
+        f.write(f"## {result.summary}\n\n")
+        for i, s in enumerate(result.suggestions[:20]):
+            f.write(f"### {i+1}. {s['func']} ({s['leak_type']}, {s['size']} bytes)\n")
+            f.write(f"**建议**: {s['suggestion']}\n\n")
+
+    log.info("memleak -> %s", result_path)
+    return {result_path: "memleak.json", suggestions_path: "suggestions.md"}
 
 
 def _write_suggestions_to_apiserver(api: APIServerClient, tid: str,

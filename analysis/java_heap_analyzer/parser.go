@@ -35,15 +35,14 @@ const (
 	SubPrimArrayDump     = 0x23
 )
 
-// 类型大小映射
+// 类型大小映射（不包含 object 引用，引用大小为 idSize）
 var primTypeSizes = map[byte]int{
-	2: 4,  // object
-	4: 1,  // boolean
-	5: 2,  // char
-	6: 4,  // float
-	7: 8,  // double
-	8: 1,  // byte
-	9: 2,  // short
+	4:  1, // boolean
+	5:  2, // char
+	6:  4, // float
+	7:  8, // double
+	8:  1, // byte
+	9:  2, // short
 	10: 4, // int
 	11: 8, // long
 }
@@ -250,13 +249,28 @@ func (p *HPROFParser) parseHeapDump(length uint32) error {
 		case SubRootJNIglobal, SubRootJNIlocal, SubRootJavaFrame,
 			SubRootNativeStack, SubRootStickyClass, SubRootThreadBlock, SubRootMonitorUsed:
 			p.gcRoots++
+			// 所有 GC Root 都有 object ID
 			if _, err := readID(p.reader, p.idSize); err != nil {
 				return err
 			}
-			if subTag == SubRootJNIglobal || subTag == SubRootJNIlocal {
+			// 按 HPROF 规范读取额外字段
+			switch subTag {
+			case SubRootJNIglobal:
+				// JNI global ref ID (idSize)
 				if _, err := readID(p.reader, p.idSize); err != nil {
 					return err
 				}
+			case SubRootJNIlocal, SubRootJavaFrame:
+				// thread serial (u4) + frame number (u4)
+				if _, err := readBytes(p.reader, 8); err != nil {
+					return err
+				}
+			case SubRootNativeStack, SubRootThreadBlock:
+				// thread serial (u4)
+				if _, err := readBytes(p.reader, 4); err != nil {
+					return err
+				}
+			// SubRootStickyClass, SubRootMonitorUsed: 无额外字段
 			}
 		case SubThreadObject:
 			p.gcRoots++
@@ -351,15 +365,17 @@ func (p *HPROFParser) parseClassDump() error {
 			return err
 		}
 		// skip field value based on type
-		size := primTypeSizes[fieldType]
-		if size > 0 {
-			if _, err := readBytes(p.reader, size); err != nil {
-				return err
-			}
-		} else if fieldType == 2 || fieldType == 4 {
-			// object reference
+		if fieldType == 2 {
+			// object reference: size = idSize
 			if _, err := readBytes(p.reader, p.idSize); err != nil {
 				return err
+			}
+		} else {
+			size := primTypeSizes[fieldType]
+			if size > 0 {
+				if _, err := readBytes(p.reader, size); err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -367,7 +383,11 @@ func (p *HPROFParser) parseClassDump() error {
 	// 计算实例大小
 	size := 0
 	for _, f := range class.Fields {
-		size += primTypeSizes[f.Type]
+		if f.Type == 2 {
+			size += p.idSize
+		} else {
+			size += primTypeSizes[f.Type]
+		}
 	}
 	class.InstanceSize = size
 
@@ -426,7 +446,9 @@ func (p *HPROFParser) parseObjArrayDump() error {
 		Size:   int(length)*p.idSize + 16,
 	})
 
-	readBytes(p.reader, int(length)*p.idSize)
+	if _, err := readBytes(p.reader, int(length)*p.idSize); err != nil {
+		return err
+	}
 	return nil
 }
 

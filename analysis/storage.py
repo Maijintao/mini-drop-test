@@ -23,6 +23,21 @@ class MinIOStorage:
         self.client.fget_object(self.bucket, key, local_path)
         return local_path
 
+    def download_stream(self, key: str):
+        """
+        流式下载对象，返回 Response 对象。
+
+        适用于大文件，避免一次性加载到内存。
+        使用完毕后需关闭返回的 response（或用 with 语句）。
+
+        Args:
+            key: 对象 key
+
+        Returns:
+            urllib3.HTTPResponse，支持 .read() 和 .stream() 方法
+        """
+        return self.client.get_object(self.bucket, key)
+
     def upload(self, local_path: str, key: str) -> str:
         """上传本地文件到 MinIO"""
         self.client.fput_object(self.bucket, key, local_path)
