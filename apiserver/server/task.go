@@ -118,7 +118,8 @@ func (s *APIServer) CreateTask(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if _, err := s.GRPC.CreateTask(ctx, pbReq); err != nil {
+	resp, err := s.GRPC.CreateTask(ctx, pbReq)
+	if err != nil {
 		// 下发失败，回滚状态
 		s.Db.Model(task).Updates(map[string]interface{}{
 			"status":      TaskStatusFailed,
@@ -127,6 +128,17 @@ func (s *APIServer) CreateTask(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    CodeGRPCError,
 			"message": "dispatch failed: " + err.Error(),
+		})
+		return
+	}
+	if resp.GetCode() != 0 {
+		s.Db.Model(task).Updates(map[string]interface{}{
+			"status":      TaskStatusFailed,
+			"status_info": "drop_server rejected: " + resp.GetMessage(),
+		})
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    CodeGRPCError,
+			"message": "drop_server rejected: " + resp.GetMessage(),
 		})
 		return
 	}
@@ -153,7 +165,7 @@ func (s *APIServer) GetTasks(c *gin.Context) {
 
 	query := s.Db.Where("uid = ?", uid)
 	if len(gids) > 0 {
-		query = s.Db.Where("uid = ? OR uid IN (SELECT uid FROM group_members WHERE gid IN ?)", uid, gids)
+		query = query.Or("uid IN (SELECT uid FROM group_members WHERE gid IN ?)", gids)
 	}
 
 	if status != "" {
@@ -432,6 +444,7 @@ func (s *APIServer) waitTaskResult(tid string, timeoutSec uint64) {
 			"status_info": "dispatched to drop_server",
 			"begin_time":   time.Now(),
 		})
+	s.recordStateChange(tid, TaskStatusNew, TaskStatusRunning, "dispatched to drop_server")
 
 	for {
 		if time.Now().After(deadline) {
@@ -443,6 +456,7 @@ func (s *APIServer) waitTaskResult(tid string, timeoutSec uint64) {
 					"status_info": "timeout waiting for drop_server result",
 					"end_time":    &now,
 				})
+			s.recordStateChange(tid, TaskStatusRunning, TaskStatusFailed, "timeout waiting for drop_server result")
 			return
 		}
 
@@ -458,6 +472,7 @@ func (s *APIServer) waitTaskResult(tid string, timeoutSec uint64) {
 					"status_info": "collector result ready: " + resp.GetCosKey(),
 					"end_time":    &now,
 				})
+			s.recordStateChange(tid, TaskStatusRunning, TaskStatusSuccess, "collector result ready: "+resp.GetCosKey())
 			return
 		}
 		if err == nil && resp.GetMessage() != "" && resp.GetMessage() != "Result not found" {
@@ -469,6 +484,7 @@ func (s *APIServer) waitTaskResult(tid string, timeoutSec uint64) {
 					"status_info": resp.GetMessage(),
 					"end_time":    &now,
 				})
+			s.recordStateChange(tid, TaskStatusRunning, TaskStatusFailed, resp.GetMessage())
 			return
 		}
 
@@ -485,6 +501,30 @@ func (s *APIServer) GetCOSFiles(c *gin.Context) {
 			"message": "tid is required",
 		})
 		return
+	}
+
+	// 权限校验：只有任务所有者或同组成员才能访问
+	uid := c.GetString(middleware.CtxUID)
+	var task model.HotmethodTask
+	if err := s.Db.Where("tid = ?", tid).First(&task).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": CodeNotFound, "message": "task not found"})
+		return
+	}
+	if task.UID != uid {
+		var gids []uint
+		s.Db.Model(&model.GroupMember{}).Where("uid = ?", uid).Pluck("gid", &gids)
+		allowed := false
+		if len(gids) > 0 {
+			var count int64
+			s.Db.Model(&model.GroupMember{}).Where("uid = ? AND gid IN ?", task.UID, gids).Count(&count)
+			if count > 0 {
+				allowed = true
+			}
+		}
+		if !allowed {
+			c.JSON(http.StatusNotFound, gin.H{"code": CodeNotFound, "message": "task not found"})
+			return
+		}
 	}
 
 	prefix := tid + "/"
@@ -529,4 +569,15 @@ func (s *APIServer) listStorageObjects(c context.Context, prefix string) []strin
 		}
 	}
 	return keys
+}
+
+// recordStateChange 记录状态迁移历史
+func (s *APIServer) recordStateChange(tid string, fromState, toState int, reason string) {
+	history := &model.TaskStateHistory{
+		TID:       tid,
+		FromState: fromState,
+		ToState:   toState,
+		Reason:    reason,
+	}
+	s.Db.Create(history)
 }

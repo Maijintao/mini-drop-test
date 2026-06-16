@@ -61,6 +61,16 @@ func (m *MockStorage) IsExist(ctx context.Context, key string) (bool, error) {
 	return ok, nil
 }
 
+func (m *MockStorage) List(ctx context.Context, prefix string) ([]string, error) {
+	var keys []string
+	for k := range m.objects {
+		if len(k) >= len(prefix) && k[:len(prefix)] == prefix {
+			keys = append(keys, k)
+		}
+	}
+	return keys, nil
+}
+
 // MockGRPCClient mock gRPC 客户端
 type MockGRPCClient struct {
 	CreateTaskFunc func(ctx context.Context, req *pb.CreateTaskRequest) (*pb.CreateTaskResponse, error)

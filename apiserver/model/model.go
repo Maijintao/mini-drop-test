@@ -108,6 +108,18 @@ type AnalysisSuggestion struct {
 
 func (AnalysisSuggestion) TableName() string { return "analysis_suggestion" }
 
+// 任务状态迁移历史
+type TaskStateHistory struct {
+	ID        uint      `gorm:"primaryKey;autoIncrement;column:id" json:"id"`
+	TID       string    `gorm:"type:varchar(64);index;column:tid" json:"tid"`
+	FromState int       `gorm:"column:from_state" json:"from_state"`
+	ToState   int       `gorm:"column:to_state" json:"to_state"`
+	Reason    string    `gorm:"type:text;column:reason" json:"reason"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+func (TaskStateHistory) TableName() string { return "task_state_history" }
+
 // AutoMigrate 自动建表
 func AutoMigrate(db *gorm.DB) error {
 	return db.AutoMigrate(
@@ -118,5 +130,6 @@ func AutoMigrate(db *gorm.DB) error {
 		&Group{},
 		&GroupMember{},
 		&AnalysisSuggestion{},
+		&TaskStateHistory{},
 	)
 }

@@ -4,8 +4,9 @@ package server
 const (
 	TaskStatusNew       = 0 // 新建
 	TaskStatusRunning   = 1 // 执行中
-	TaskStatusSuccess   = 2 // 成功
-	TaskStatusFailed    = 3 // 失败
+	TaskStatusUploading = 2 // 上传中
+	TaskStatusSuccess   = 3 // 成功
+	TaskStatusFailed    = 4 // 失败
 )
 
 // 分析状态

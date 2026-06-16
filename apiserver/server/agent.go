@@ -56,6 +56,13 @@ func (s *APIServer) syncAgentsFromDrop(ctx context.Context, ownerUID string) err
 		return fmt.Errorf("list agents failed: %s", resp.GetMessage())
 	}
 
+	// 查询 owner 所在的第一个组的 GID
+	var ownerGID uint
+	var member model.GroupMember
+	if err := s.Db.Where("uid = ?", ownerUID).First(&member).Error; err == nil {
+		ownerGID = member.GID
+	}
+
 	now := time.Now()
 	for _, remote := range resp.GetAgents() {
 		ip := remote.GetIpAddr()
@@ -67,14 +74,25 @@ func (s *APIServer) syncAgentsFromDrop(ctx context.Context, ownerUID string) err
 			hostname = ip
 		}
 
+		agentUID := ownerUID
+		if remote.GetUid() != "" {
+			agentUID = remote.GetUid()
+		}
+
+		// 查该 Agent 归属用户的 GID
+		agentGID := ownerGID
+		var agentMember model.GroupMember
+		if err := s.Db.Where("uid = ?", agentUID).First(&agentMember).Error; err == nil {
+			agentGID = agentMember.GID
+		}
+
 		updates := map[string]interface{}{
 			"hostname":       hostname,
 			"online":         remote.GetOnline(),
 			"version":        remote.GetAgentVersion(),
 			"last_heartbeat": now,
-		}
-		if remote.GetUid() != "" {
-			updates["uid"] = remote.GetUid()
+			"uid":            agentUID,
+			"gid":            agentGID,
 		}
 
 		var agent model.AgentInfo
@@ -85,15 +103,12 @@ func (s *APIServer) syncAgentsFromDrop(ctx context.Context, ownerUID string) err
 				return err
 			}
 		case err == gorm.ErrRecordNotFound:
-			agentUID := ownerUID
-			if remote.GetUid() != "" {
-				agentUID = remote.GetUid()
-			}
 			agent = model.AgentInfo{
 				Hostname:      hostname,
 				IPAddr:        ip,
 				Online:        remote.GetOnline(),
 				UID:           agentUID,
+				GID:           agentGID,
 				Version:       remote.GetAgentVersion(),
 				Environment:   "default",
 				LastHeartbeat: now,
