@@ -7,7 +7,6 @@ import TaskResult from '@/pages/TaskResult';
 import Agents from '@/pages/Agents';
 import Settings from '@/pages/Settings';
 import Groups from '@/pages/Groups';
-import Schedules from '@/pages/Schedules';
 import AgentDetail from '@/pages/AgentDetail';
 
 const router = createBrowserRouter([
@@ -26,7 +25,7 @@ const router = createBrowserRouter([
       { path: 'agents', element: <Agents /> },
       { path: 'agents/:ip', element: <AgentDetail /> },
       { path: 'groups', element: <Groups /> },
-      { path: 'schedules', element: <Schedules /> },
+      { path: 'schedules', element: <Navigate to="/tasks?view=schedules" replace /> },
       { path: 'settings', element: <Settings /> },
     ],
   },

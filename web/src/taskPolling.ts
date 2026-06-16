@@ -8,10 +8,21 @@ export type TaskPollPhase = 'collecting' | 'analyzing';
 
 interface WaitForTaskResultOptions {
   onUpdate?: (task: HotmethodTask, phase: TaskPollPhase) => void;
+  signal?: AbortSignal;
 }
 
-function wait(ms: number) {
-  return new Promise(resolve => window.setTimeout(resolve, ms));
+function wait(ms: number, signal?: AbortSignal) {
+  return new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException('Aborted', 'AbortError'));
+      return;
+    }
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener('abort', () => {
+      clearTimeout(timer);
+      reject(new DOMException('Aborted', 'AbortError'));
+    }, { once: true });
+  });
 }
 
 async function loadTask(tid: string): Promise<HotmethodTask> {
@@ -22,10 +33,15 @@ async function loadTask(tid: string): Promise<HotmethodTask> {
   return res.data.task;
 }
 
-export async function waitForTaskResult(tid: string, options: WaitForTaskResultOptions = {}) {
+export async function waitForTaskResult(tid: string, options: WaitForTaskResultOptions = {}): Promise<HotmethodTask> {
+  const { signal, onUpdate } = options;
   let analysisTriggered = false;
 
   for (let i = 0; i < MAX_POLL_COUNT; i += 1) {
+    if (signal?.aborted) {
+      throw new DOMException('Aborted', 'AbortError');
+    }
+
     const task = await loadTask(tid);
 
     if (task.status === 3) {
@@ -33,8 +49,8 @@ export async function waitForTaskResult(tid: string, options: WaitForTaskResultO
     }
 
     if (task.status < 2) {
-      options.onUpdate?.(task, 'collecting');
-      await wait(POLL_INTERVAL_MS);
+      onUpdate?.(task, 'collecting');
+      await wait(POLL_INTERVAL_MS, signal);
       continue;
     }
 
@@ -43,14 +59,20 @@ export async function waitForTaskResult(tid: string, options: WaitForTaskResultO
       await triggerAnalysis(tid);
     }
 
-    options.onUpdate?.(task, 'analyzing');
+    onUpdate?.(task, 'analyzing');
 
     if (task.analysis_status === 2 || task.analysis_status === 3) {
       return task;
     }
 
-    await wait(POLL_INTERVAL_MS);
+    await wait(POLL_INTERVAL_MS, signal);
   }
 
   throw new Error('任务轮询超时');
+}
+
+export function createTaskPoller(tid: string, options: WaitForTaskResultOptions = {}) {
+  const controller = new AbortController();
+  const promise = waitForTaskResult(tid, { ...options, signal: controller.signal });
+  return { promise, abort: () => controller.abort() };
 }

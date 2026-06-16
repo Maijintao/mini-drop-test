@@ -50,32 +50,45 @@ function getCookie(name: string): string | null {
   return match ? decodeURIComponent(match[2]) : null;
 }
 
+// ---------- 类型安全的请求封装 ----------
+
+function typedGet<T>(url: string, params?: Record<string, any>): Promise<ApiResponse<T>> {
+  return api.get(url, { params }) as unknown as Promise<ApiResponse<T>>;
+}
+
+function typedPost<T>(url: string, data?: any): Promise<ApiResponse<T>> {
+  return api.post(url, data) as unknown as Promise<ApiResponse<T>>;
+}
+
+function typedDelete<T>(url: string): Promise<ApiResponse<T>> {
+  return api.delete(url) as unknown as Promise<ApiResponse<T>>;
+}
+
 // ---------- API 函数 ----------
 
 // Auth
-export const authCheck = (): Promise<ApiResponse<{ uid: string; user_name: string }>> => api.get('/auth/check') as unknown as Promise<ApiResponse<{ uid: string; user_name: string }>>;
-export const getUsers = (): Promise<ApiResponse<any>> => api.get('/users') as unknown as Promise<ApiResponse<any>>;
+export const authCheck = () => typedGet<{ uid: string; user_name: string }>('/auth/check');
+export const getUsers = () => typedGet<any>('/users');
 
 // Agent
-export const getAgents = (): Promise<ApiResponse<AgentInfo[]>> => api.get('/agents') as unknown as Promise<ApiResponse<AgentInfo[]>>;
-export const statAgent = (ip: string): Promise<ApiResponse<AgentStatData>> =>
-  api.get('/agent/stat', { params: { ip } }) as unknown as Promise<ApiResponse<AgentStatData>>;
+export const getAgents = () => typedGet<AgentInfo[]>('/agents');
+export const statAgent = (ip: string) => typedGet<AgentStatData>('/agent/stat', { ip });
 
 // Task
-export const createTask = (data: CreateTaskParams): Promise<ApiResponse<{ tid: string }>> => api.post('/tasks', data) as unknown as Promise<ApiResponse<{ tid: string }>>;
+export const createTask = (data: CreateTaskParams) => typedPost<{ tid: string }>('/tasks', data);
 export const getTasks = (params?: { page?: number; size?: number; status?: string; keyword?: string }) =>
-  api.get('/tasks', { params }) as unknown as Promise<ApiResponse<TaskListData>>;
-export const getTaskDetail = (tid: string): Promise<ApiResponse<TaskDetailData>> => api.get(`/tasks/${tid}`) as unknown as Promise<ApiResponse<TaskDetailData>>;
-export const deleteTask = (tid: string): Promise<ApiResponse<unknown>> => api.delete(`/tasks/${tid}`) as unknown as Promise<ApiResponse<unknown>>;
-export const retryTask = (tid: string): Promise<ApiResponse<{ tid: string }>> => api.post(`/tasks/${tid}/retry`) as unknown as Promise<ApiResponse<{ tid: string }>>;
-export const getCosFiles = (tid: string): Promise<ApiResponse<CosFile[]>> => api.get('/cosfiles', { params: { tid } }) as unknown as Promise<ApiResponse<CosFile[]>>;
+  typedGet<TaskListData>('/tasks', params);
+export const getTaskDetail = (tid: string) => typedGet<TaskDetailData>(`/tasks/${tid}`);
+export const deleteTask = (tid: string) => typedDelete<unknown>(`/tasks/${tid}`);
+export const retryTask = (tid: string) => typedPost<{ tid: string }>(`/tasks/${tid}/retry`);
+export const getCosFiles = (tid: string) => typedGet<CosFile[]>('/cosfiles', { tid });
 
 // Suggestion & Analysis
-export const getSuggestions = (tid: string): Promise<ApiResponse<AnalysisSuggestion[]>> => api.get(`/tasks/${tid}/suggestions`) as unknown as Promise<ApiResponse<AnalysisSuggestion[]>>;
-export const triggerAnalysis = (tid: string): Promise<ApiResponse<unknown>> => api.post(`/tasks/${tid}/analyze`) as unknown as Promise<ApiResponse<unknown>>;
+export const getSuggestions = (tid: string) => typedGet<AnalysisSuggestion[]>(`/tasks/${tid}/suggestions`);
+export const triggerAnalysis = (tid: string) => typedPost<unknown>(`/tasks/${tid}/analyze`);
 
 // Flame
-export const getFlameData = (tid: string): Promise<ApiResponse<{ type: string; url: string }>> => api.get(`/tasks/${tid}/flame`) as unknown as Promise<ApiResponse<{ type: string; url: string }>>;
+export const getFlameData = (tid: string) => typedGet<{ type: string; url: string }>(`/tasks/${tid}/flame`);
 
 export const fetchSignedJson = async <T>(url: string): Promise<T> => {
   const res = await axios.get<T>(url, { withCredentials: false, timeout: 30000 });
@@ -83,25 +96,17 @@ export const fetchSignedJson = async <T>(url: string): Promise<T> => {
 };
 
 // Group
-export const createGroup = (data: { name: string }): Promise<ApiResponse<GroupInfo>> =>
-  api.post('/group', data) as unknown as Promise<ApiResponse<GroupInfo>>;
-export const getGroups = (): Promise<ApiResponse<GroupInfo[]>> =>
-  api.get('/groups') as unknown as Promise<ApiResponse<GroupInfo[]>>;
-export const deleteGroup = (gid: number): Promise<ApiResponse<unknown>> =>
-  api.delete(`/group/${gid}`) as unknown as Promise<ApiResponse<unknown>>;
-export const addMember = (gid: number, uid: string): Promise<ApiResponse<unknown>> =>
-  api.post(`/group/${gid}/members`, { uid }) as unknown as Promise<ApiResponse<unknown>>;
-export const removeMember = (gid: number, uid: string): Promise<ApiResponse<unknown>> =>
-  api.delete(`/group/${gid}/members/${uid}`) as unknown as Promise<ApiResponse<unknown>>;
-export const getGroupMembers = (gid: number): Promise<ApiResponse<GroupMemberInfo[]>> =>
-  api.get(`/group/${gid}/members`) as unknown as Promise<ApiResponse<GroupMemberInfo[]>>;
+export const createGroup = (data: { name: string }) => typedPost<GroupInfo>('/group', data);
+export const getGroups = () => typedGet<GroupInfo[]>('/groups');
+export const deleteGroup = (gid: number) => typedDelete<unknown>(`/group/${gid}`);
+export const addMember = (gid: number, uid: string) => typedPost<unknown>(`/group/${gid}/members`, { uid });
+export const removeMember = (gid: number, uid: string) => typedDelete<unknown>(`/group/${gid}/members/${uid}`);
+export const getGroupMembers = (gid: number) => typedGet<GroupMemberInfo[]>(`/group/${gid}/members`);
 
 // Schedule
-export const createScheduleTask = (data: CreateScheduleTaskParams): Promise<ApiResponse<{ tid: string; cron_expr: string; message: string }>> =>
-  api.post('/schedule/task', data) as unknown as Promise<ApiResponse<{ tid: string; cron_expr: string; message: string }>>;
-export const getScheduleTasks = (): Promise<ApiResponse<HotmethodTask[]>> =>
-  api.get('/schedule/tasks') as unknown as Promise<ApiResponse<HotmethodTask[]>>;
-export const deleteScheduleTask = (tid: string): Promise<ApiResponse<unknown>> =>
-  api.delete(`/schedule/task/${tid}`) as unknown as Promise<ApiResponse<unknown>>;
+export const createScheduleTask = (data: CreateScheduleTaskParams) =>
+  typedPost<{ tid: string; cron_expr: string; message: string }>('/schedule/task', data);
+export const getScheduleTasks = () => typedGet<HotmethodTask[]>('/schedule/tasks');
+export const deleteScheduleTask = (tid: string) => typedDelete<unknown>(`/schedule/task/${tid}`);
 
 export default api;
