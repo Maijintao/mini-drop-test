@@ -43,6 +43,14 @@ from data_parser.collapsed_parser import (
 from analyzers.flamegraph import perf_script_to_collapsed, collapsed_to_svg
 from analyzers.topn import analyze_topn, topn_to_json
 from analyzers.advisor import load_rules, match_rules, suggestions_to_markdown
+from analyzers.pprof_data_parser import parse_pprof_text, parse_pprof_csv
+from analyzers.pprof_heap_parser import parse_heap_text, parse_heap_csv
+from analyzers.resource_analyzer import parse_pidstat_csv, analyze_resources, samples_to_json
+from analyzers.biotrace import parse_biosnoop_csv, analyze_biosnoop, stats_to_json as biotrace_to_json
+from analyzers.bw_sync_analyzer import analyze_bw_sync_csv, analyze_bw_sync_json
+from analyzers.namespace_parse import parse_pid_namespaces, namespaces_to_json
+from analyzers.assembly_code_analyzer import parse_objdump, stats_to_json as asm_to_json
+from analyzers.memleak_analyzer import validate_task_type
 
 
 def parse_args():
@@ -131,8 +139,30 @@ def main():
         if task_type == 0:
             result = run_cpu_flamegraph(raw_path, work_dir, tid,
                                         pre_collapsed_path if has_collapsed else None)
+        elif task_type == 1:
+            result = run_java_heap(raw_path, work_dir, tid)
+        elif task_type == 2:
+            result = run_tracing(raw_path, work_dir, tid)
+        elif task_type == 4:
+            # 内存泄漏需要专用工具，当前不支持
+            err = validate_task_type(task_type)
+            error_exit(err, ERR_UNSUPPORTED)
+        elif task_type == 5:
+            result = run_resource_analysis(raw_path, work_dir, tid)
+        elif task_type == 6:
+            result = run_biosnoop(raw_path, work_dir, tid)
+        elif task_type == 7:
+            result = run_bw_sync(raw_path, work_dir, tid)
+        elif task_type == 8:
+            result = run_namespace(raw_path, work_dir, tid)
+        elif task_type == 9:
+            result = run_assembly(raw_path, work_dir, tid)
+        elif task_type == 10:
+            result = run_pprof_cpu(raw_path, work_dir, tid)
+        elif task_type == 11:
+            result = run_pprof_heap(raw_path, work_dir, tid)
         else:
-            error_exit(f"unsupported task_type={task_type}, only CPU (0) is supported", ERR_UNSUPPORTED)
+            error_exit(f"unsupported task_type={task_type}", ERR_UNSUPPORTED)
 
         # 8. 上传产物
         for local_path, key_name in result.items():
@@ -230,6 +260,151 @@ def run_cpu_flamegraph(perf_data_path: str, work_dir: str, tid: str,
         topn_path: "top.json",
         suggestions_path: "suggestions.md",
     }
+
+
+def run_java_heap(hprof_path: str, work_dir: str, tid: str) -> dict:
+    """Java HPROF 堆分析"""
+    result_path = os.path.join(work_dir, "heap_stats.json")
+    proc = subprocess.run(
+        ["go", "run", ".", hprof_path, "--output", result_path],
+        capture_output=True, text=True, timeout=600,
+        cwd=os.path.join(os.path.dirname(__file__), "java_heap_analyzer"),
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(f"java_heap_analyzer failed: {proc.stderr}")
+    log.info("java_heap -> %s", result_path)
+    return {result_path: "heap_stats.json"}
+
+
+def run_tracing(data_path: str, work_dir: str, tid: str) -> dict:
+    """Tracing 分析（时序异常检测）"""
+    result_path = os.path.join(work_dir, "bw_sync.json")
+    with open(data_path, "r") as f:
+        content = f.read()
+
+    # 根据文件扩展名选择解析器
+    if data_path.endswith(".json"):
+        result = analyze_bw_sync_json(content)
+    else:
+        result = analyze_bw_sync_csv(content)
+
+    import json
+    with open(result_path, "w") as f:
+        json.dump({
+            "total_events": result.total_events,
+            "sync_events": len(result.sync_events),
+            "sync_ratio": result.sync_ratio,
+            "avg_latency_ms": result.avg_latency_ms,
+            "max_latency_ms": result.max_latency_ms,
+            "summary": result.summary,
+        }, f, indent=2)
+    log.info("bw_sync -> %s", result_path)
+    return {result_path: "bw_sync.json"}
+
+
+def run_resource_analysis(data_path: str, work_dir: str, tid: str) -> dict:
+    """PidStats 资源曲线分析"""
+    result_path = os.path.join(work_dir, "resource_stats.json")
+    with open(data_path, "r") as f:
+        content = f.read()
+
+    samples = parse_pidstat_csv(content)
+    stats = analyze_resources(samples)
+
+    with open(result_path, "w") as f:
+        f.write(samples_to_json(stats))
+    log.info("resource -> %s", result_path)
+    return {result_path: "resource_stats.json"}
+
+
+def run_biosnoop(data_path: str, work_dir: str, tid: str) -> dict:
+    """eBPF biosnoop 分析"""
+    result_path = os.path.join(work_dir, "biosnoop_stats.json")
+    with open(data_path, "r") as f:
+        content = f.read()
+
+    events = parse_biosnoop_csv(content)
+    stats = analyze_biosnoop(events)
+
+    with open(result_path, "w") as f:
+        f.write(biotrace_to_json(stats))
+    log.info("biosnoop -> %s", result_path)
+    return {result_path: "biosnoop_stats.json"}
+
+
+def run_bw_sync(data_path: str, work_dir: str, tid: str) -> dict:
+    """带宽同步分析"""
+    return run_tracing(data_path, work_dir, tid)
+
+
+def run_namespace(data_path: str, work_dir: str, tid: str) -> dict:
+    """容器命名空间解析"""
+    result_path = os.path.join(work_dir, "namespace.json")
+    with open(data_path, "r") as f:
+        pid = int(f.read().strip())
+
+    info = parse_pid_namespaces(pid)
+    with open(result_path, "w") as f:
+        f.write(namespaces_to_json(info))
+    log.info("namespace -> %s", result_path)
+    return {result_path: "namespace.json"}
+
+
+def run_assembly(data_path: str, work_dir: str, tid: str) -> dict:
+    """汇编代码分析"""
+    result_path = os.path.join(work_dir, "assembly_stats.json")
+    with open(data_path, "r") as f:
+        content = f.read()
+
+    stats = parse_objdump(content)
+    with open(result_path, "w") as f:
+        f.write(asm_to_json(stats))
+    log.info("assembly -> %s", result_path)
+    return {result_path: "assembly_stats.json"}
+
+
+def run_pprof_cpu(data_path: str, work_dir: str, tid: str) -> dict:
+    """pprof CPU 分析"""
+    result_path = os.path.join(work_dir, "pprof_cpu.json")
+    with open(data_path, "r") as f:
+        content = f.read()
+
+    # 尝试 CSV 格式，fallback 到文本格式
+    try:
+        samples = parse_pprof_csv(content)
+    except Exception:
+        samples = parse_pprof_text(content)
+
+    import json
+    with open(result_path, "w") as f:
+        json.dump(samples, f, indent=2)
+    log.info("pprof_cpu -> %s", result_path)
+    return {result_path: "pprof_cpu.json"}
+
+
+def run_pprof_heap(data_path: str, work_dir: str, tid: str) -> dict:
+    """pprof Heap 分析"""
+    result_path = os.path.join(work_dir, "pprof_heap.json")
+    with open(data_path, "r") as f:
+        content = f.read()
+
+    # 尝试 CSV 格式，fallback 到文本格式
+    try:
+        samples = parse_heap_csv(content)
+    except Exception:
+        samples = parse_heap_text(content)
+
+    import json
+    with open(result_path, "w") as f:
+        json.dump([{
+            "func": s.func,
+            "flat_objects": s.flat_objects,
+            "flat_space": s.flat_space,
+            "cum_objects": s.cum_objects,
+            "cum_space": s.cum_space,
+        } for s in samples], f, indent=2)
+    log.info("pprof_heap -> %s", result_path)
+    return {result_path: "pprof_heap.json"}
 
 
 def _write_suggestions_to_apiserver(api: APIServerClient, tid: str,
