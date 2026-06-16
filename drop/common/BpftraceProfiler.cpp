@@ -100,15 +100,16 @@ int BpftraceProfiler::Record(int pid, int duration_sec, int freq,
 std::string BpftraceProfiler::GenerateIOProbeScript(int pid, int duration) {
   // bpftrace 脚本：追踪 IO 延迟
   // 使用 block:block_rq_issue 和 block:block_rq_complete 追踪块设备请求延迟
+  // 注意：block tracepoint 的 pid 是内核线程，需要用 curtask->tgid 过滤用户进程
   return R"(
 tracepoint:block:block_rq_issue
-/args->dev == 0 && pid == )" + std::to_string(pid) + R"( /
+/curtask->tgid == )" + std::to_string(pid) + R"( /
 {
   @start[args->sector] = nsecs;
 }
 
 tracepoint:block:block_rq_complete
-/args->dev == 0 && @start[args->sector]/
+/@start[args->sector]/
 {
   @usecs = hist((nsecs - @start[args->sector]) / 1000);
   delete(@start[args->sector]);
@@ -122,8 +123,9 @@ interval:s:)" + std::to_string(duration) + R"(
 }
 
 std::string BpftraceProfiler::GenerateSchedProbeScript(int pid, int duration) {
-  // bpftrace 脚本：追踪调度延迟
-  // 使用 sched:sched_wakeup 和 sched:sched_switch 追踪进程调度延迟
+  // bpftrace 脚本：追踪调度延迟（从 wakeup 到被调度上 CPU 的等待时间）
+  // sched_wakeup: 进程被唤醒，记录时间
+  // sched_switch: 目标进程被调度上 CPU（next_pid），计算延迟
   return R"(
 tracepoint:sched:sched_wakeup
 /args->pid == )" + std::to_string(pid) + R"( /
@@ -132,10 +134,10 @@ tracepoint:sched:sched_wakeup
 }
 
 tracepoint:sched:sched_switch
-/args->prev_pid == )" + std::to_string(pid) + R"( && @start[args->prev_pid]/
+/args->next_pid == )" + std::to_string(pid) + R"( && @start[args->next_pid]/
 {
-  @usecs = hist((nsecs - @start[args->prev_pid]) / 1000);
-  delete(@start[args->prev_pid]);
+  @usecs = hist((nsecs - @start[args->next_pid]) / 1000);
+  delete(@start[args->next_pid]);
 }
 
 interval:s:)" + std::to_string(duration) + R"(

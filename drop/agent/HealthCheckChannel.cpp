@@ -76,7 +76,13 @@ void HealthCheckChannel::HeartbeatLoop() {
     PidStats self_stats = Process::GetPidStats(getpid());
     *request.mutable_self_pstats() = self_stats;
 
-    // 采集子进程数据
+    // 采集子进程数据（聚合所有子进程的资源使用）
+    PidStats children_agg;
+    children_agg.set_cpu_percent(0.0);
+    children_agg.set_rss_kb(0);
+    children_agg.set_read_kb_per_sec(0.0);
+    children_agg.set_write_kb_per_sec(0.0);
+
     std::string children_path = "/proc/" + std::to_string(getpid()) + "/task/" +
                                 std::to_string(getpid()) + "/children";
     std::ifstream children_file(children_path);
@@ -87,12 +93,17 @@ void HealthCheckChannel::HeartbeatLoop() {
           int child_pid = std::stoi(child_pid_str);
           PidStats child = Process::GetPidStats(child_pid);
           child.set_pid(child_pid);
-          *request.mutable_children_pstats() = child;
+          // 累加子进程资源指标
+          children_agg.set_cpu_percent(children_agg.cpu_percent() + child.cpu_percent());
+          children_agg.set_rss_kb(children_agg.rss_kb() + child.rss_kb());
+          children_agg.set_read_kb_per_sec(children_agg.read_kb_per_sec() + child.read_kb_per_sec());
+          children_agg.set_write_kb_per_sec(children_agg.write_kb_per_sec() + child.write_kb_per_sec());
         } catch (const std::exception& e) {
           // 跳过解析失败的 PID
         }
       }
     }
+    *request.mutable_children_pstats() = children_agg;
 
     HealthCheckResponse response;
     grpc::ClientContext context;

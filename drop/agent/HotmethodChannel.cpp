@@ -191,9 +191,12 @@ void HotmethodChannel::WorkerLoop() {
           result.set_cos_key(remote_key);  // 设置 cos_key
           std::remove(output_path.c_str());
         } else {
-          LOG_ERROR("Task " + task.task_id() + " upload failed");
-          // 上传失败不影响任务成功状态，但 cos_key 为空
+          LOG_ERROR("Task " + task.task_id() + " upload failed, marking task as failed");
+          result.set_error_message("upload to storage failed with code " + std::to_string(upload_ret));
         }
+      } else {
+        LOG_ERROR("Task " + task.task_id() + " no storage configured");
+        result.set_error_message("no storage configured, cannot upload result");
       }
     } else {
       LOG_ERROR("Task " + task.task_id() + " failed with code " + std::to_string(ret));

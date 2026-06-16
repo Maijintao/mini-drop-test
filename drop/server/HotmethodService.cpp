@@ -284,7 +284,8 @@ void HotmethodService::CleanupTimeoutTasks(int timeout_sec) {
       state.status = TaskStatus::TIMEOUT;
       state.reason = "任务超时，Agent 可能已掉线";
       state.timestamp = now;
-      LOG_INFO("[STATE] Task " + task_id + " -> TIMEOUT (reason: 超时 " + std::to_string(elapsed) + "s)");
+      PersistTaskStatus(task_id, TaskStatus::TIMEOUT, state.reason);
+      LOG_INFO("[STATE] Task " + task_id + " -> TIMEOUT (reason: 超时 " + std::to_string(elapsed) + "s) [persisted]");
     }
   }
 
