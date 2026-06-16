@@ -3,7 +3,8 @@ server:
   mode: debug
 
 database:
-  host: localhost
+  driver: postgres
+  host: postgres
   port: 5432
   user: postgres
   password: dev
@@ -11,12 +12,15 @@ database:
   sslmode: disable
 
 grpc:
-  target: "localhost:50051"
+  target: "drop-server:50051"
+
+storage:
+  backend: "minio"
 
 minio:
-  endpoint: "localhost:9000"
-  access_key: drop
-  secret_key: dropdrop
+  endpoint: "minio:9000"
+  access_key: minioadmin
+  secret_key: minioadmin
   bucket: drop-data
   use_ssl: false
   region: ""
@@ -28,4 +32,4 @@ log:
 analysis:
   command: "python3"
   script_path: "/app/analysis/hotmethod_analyzer.py"
-  config_path: "/etc/analysis/config.ini"
+  config_path: "/app/analysis/config.ini"

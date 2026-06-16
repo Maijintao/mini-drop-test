@@ -1,14 +1,20 @@
 package server
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/robfig/cron/v3"
+	"gorm.io/datatypes"
 
 	"mini-drop/apiserver/middleware"
 	"mini-drop/apiserver/model"
+	pb "mini-drop/apiserver/proto"
 )
 
 // ScheduleManager 管理定时任务
@@ -106,8 +112,59 @@ func (s *APIServer) CreateScheduleTask(c *gin.Context) {
 		sm.mu.Lock()
 		entryID, err := sm.cron.AddFunc(req.CronExpr, func() {
 			// 定时触发时自动创建一次采集任务
-			// 实际实现中应调用 s.CreateTask 的内部版本
-			_ = s
+			newTid := uuid.New().String()[:12]
+
+			var params map[string]interface{}
+			_ = json.Unmarshal(task.RequestParams, &params)
+
+			pid, _ := params["pid"].(float64)
+			duration, _ := params["duration"].(float64)
+			hz, _ := params["hz"].(float64)
+			callgraph, _ := params["callgraph"].(string)
+
+			newTask := &model.HotmethodTask{
+				TID:          newTid,
+				Name:         "[定时触发] " + req.TaskName,
+				Type:         req.Type,
+				ProfilerType: req.ProfilerType,
+				TargetIP:     req.TargetIP,
+				RequestParams: datatypes.JSON(task.RequestParams),
+				Status:       TaskStatusNew,
+				UID:          uid,
+				UserName:     userName,
+				CreateTime:   time.Now(),
+			}
+			if err := s.Db.Create(newTask).Error; err != nil {
+				return
+			}
+
+			// 下发到 drop_server
+			pbReq := &pb.CreateTaskRequest{
+				TargetIp: req.TargetIP,
+				Service:  "hotmethod",
+				TaskDesc: &pb.TaskDesc{
+					TaskId:       newTid,
+					TaskType:     uint32(req.Type),
+					ProfilerType: uint32(req.ProfilerType),
+					TimeoutSec:   uint32(uint64(duration) + 30),
+					SampleArgv: &pb.RecordArgv{
+						Hz:        uint32(hz),
+						Duration:  uint64(duration),
+						Pid:       int32(pid),
+						Callgraph: callgraph,
+					},
+				},
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if _, err := s.GRPC.CreateTask(ctx, pbReq); err != nil {
+				s.Db.Model(newTask).Updates(map[string]interface{}{
+					"status":      TaskStatusFailed,
+					"status_info": "cron dispatch failed: " + err.Error(),
+				})
+				return
+			}
+			go s.waitTaskResult(newTid, uint64(duration)+60)
 		})
 		if err == nil {
 			sm.entries[tid] = entryID
