@@ -22,4 +22,7 @@ type Storage interface {
 
 	// IsExist 检查文件是否存在
 	IsExist(ctx context.Context, key string) (bool, error)
+
+	// List 列出 prefix 下的对象 key
+	List(ctx context.Context, prefix string) ([]string, error)
 }

@@ -139,6 +139,13 @@ func (s *APIServer) CreateScheduleTask(c *gin.Context) {
 			}
 
 			// 下发到 drop_server
+			if s.GRPC == nil {
+				s.Db.Model(newTask).Updates(map[string]interface{}{
+					"status":      TaskStatusFailed,
+					"status_info": "cron dispatch failed: drop_server unavailable",
+				})
+				return
+			}
 			pbReq := &pb.CreateTaskRequest{
 				TargetIp: req.TargetIP,
 				Service:  "hotmethod",

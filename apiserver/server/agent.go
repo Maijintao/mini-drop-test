@@ -120,6 +120,14 @@ func (s *APIServer) StatAgent(c *gin.Context) {
 		return
 	}
 
+	if s.GRPC == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"code":    CodeGRPCError,
+			"message": "drop_server unavailable",
+		})
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 

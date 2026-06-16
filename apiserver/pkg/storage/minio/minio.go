@@ -88,5 +88,19 @@ func (m *MinIOStorage) IsExist(ctx context.Context, key string) (bool, error) {
 	return true, nil
 }
 
+func (m *MinIOStorage) List(ctx context.Context, prefix string) ([]string, error) {
+	var result []string
+	for obj := range m.client.ListObjects(ctx, m.bucket, minio.ListObjectsOptions{
+		Prefix:    prefix,
+		Recursive: true,
+	}) {
+		if obj.Err != nil {
+			return nil, fmt.Errorf("minio list %s: %w", prefix, obj.Err)
+		}
+		result = append(result, obj.Key)
+	}
+	return result, nil
+}
+
 // 确保实现接口
 var _ storage.Storage = (*MinIOStorage)(nil)

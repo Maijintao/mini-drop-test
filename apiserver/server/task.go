@@ -103,6 +103,18 @@ func (s *APIServer) CreateTask(c *gin.Context) {
 		},
 	}
 
+	if s.GRPC == nil {
+		s.Db.Model(task).Updates(map[string]interface{}{
+			"status":      TaskStatusFailed,
+			"status_info": "drop_server unavailable (gRPC not connected)",
+		})
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"code":    CodeGRPCError,
+			"message": "drop_server unavailable",
+		})
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -367,6 +379,18 @@ func (s *APIServer) RetryTask(c *gin.Context) {
 			},
 		},
 	}
+	if s.GRPC == nil {
+		s.Db.Model(newTask).Updates(map[string]interface{}{
+			"status":      TaskStatusFailed,
+			"status_info": "drop_server unavailable (gRPC not connected)",
+		})
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"code":    CodeGRPCError,
+			"message": "drop_server unavailable",
+		})
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -487,21 +511,22 @@ func (s *APIServer) GetCOSFiles(c *gin.Context) {
 // ---------- 工具函数 ----------
 
 func (s *APIServer) listStorageObjects(c context.Context, prefix string) []string {
-	// MinIO 列出 prefix 下的对象
-	// 简单实现：通过 Get 检测常见文件名
-	known := []string{
-		prefix + "perf.data",
-		prefix + "flamegraph.svg",
-		prefix + "top.json",
-		prefix + "suggestions.md",
-		prefix + "collapsed.txt",
-	}
-	var result []string
-	for _, k := range known {
-		exists, _ := s.Storage.IsExist(c, k)
-		if exists {
-			result = append(result, k)
+	keys, err := s.Storage.List(c, prefix)
+	if err != nil {
+		// fallback: 探测常见文件名
+		known := []string{
+			prefix + "perf.data",
+			prefix + "flamegraph.svg",
+			prefix + "top.json",
+			prefix + "suggestions.md",
+			prefix + "collapsed.txt",
+		}
+		for _, k := range known {
+			exists, _ := s.Storage.IsExist(c, k)
+			if exists {
+				keys = append(keys, k)
+			}
 		}
 	}
-	return result
+	return keys
 }
