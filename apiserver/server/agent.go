@@ -33,7 +33,7 @@ func (s *APIServer) GetAgents(c *gin.Context) {
 	var agents []model.AgentInfo
 	query := s.Db.Where("uid = ?", uid)
 	if len(gids) > 0 {
-		query = s.Db.Where("uid = ? OR gid IN ?", uid, gids)
+		query = query.Or("uid IN (SELECT uid FROM group_members WHERE gid IN ?)", gids)
 	}
 	query.Order("online DESC, updated_at DESC").Find(&agents)
 

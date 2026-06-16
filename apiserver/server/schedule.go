@@ -24,6 +24,7 @@ type ScheduleManager struct {
 	entries map[string]cron.EntryID // tid -> cron entry
 	mu      sync.Mutex
 	db      *gorm.DB
+	api     *APIServer // 反向引用，用于执行定时任务
 }
 
 func NewScheduleManager(db *gorm.DB) *ScheduleManager {
@@ -110,72 +111,14 @@ func (s *APIServer) CreateScheduleTask(c *gin.Context) {
 		return
 	}
 
-	// 注册到 cron 调度器（MVP 阶段只记录，实际触发需集成 CreateTask 逻辑）
+	// 注册到 cron 调度器
 	sm := s.Schedule
 	if sm != nil {
 		sm.mu.Lock()
+		// 捕获 task 值供闭包使用
+		capturedTask := *task
 		entryID, err := sm.cron.AddFunc(req.CronExpr, func() {
-			// 定时触发时自动创建一次采集任务
-			newTid := uuid.New().String()[:12]
-
-			var params map[string]interface{}
-			_ = json.Unmarshal(task.RequestParams, &params)
-
-			pid, _ := params["pid"].(float64)
-			duration, _ := params["duration"].(float64)
-			hz, _ := params["hz"].(float64)
-			callgraph, _ := params["callgraph"].(string)
-
-			newTask := &model.HotmethodTask{
-				TID:          newTid,
-				Name:         "[定时触发] " + req.TaskName,
-				Type:         req.Type,
-				ProfilerType: req.ProfilerType,
-				TargetIP:     req.TargetIP,
-				RequestParams: datatypes.JSON(task.RequestParams),
-				Status:       TaskStatusNew,
-				UID:          uid,
-				UserName:     userName,
-				CreateTime:   time.Now(),
-			}
-			if err := s.Db.Create(newTask).Error; err != nil {
-				return
-			}
-
-			// 下发到 drop_server
-			if s.GRPC == nil {
-				s.Db.Model(newTask).Updates(map[string]interface{}{
-					"status":      TaskStatusFailed,
-					"status_info": "cron dispatch failed: drop_server unavailable",
-				})
-				return
-			}
-			pbReq := &pb.CreateTaskRequest{
-				TargetIp: req.TargetIP,
-				Service:  "hotmethod",
-				TaskDesc: &pb.TaskDesc{
-					TaskId:       newTid,
-					TaskType:     uint32(req.Type),
-					ProfilerType: uint32(req.ProfilerType),
-					TimeoutSec:   uint32(uint64(duration) + 30),
-					SampleArgv: &pb.RecordArgv{
-						Hz:        uint32(hz),
-						Duration:  uint64(duration),
-						Pid:       int32(pid),
-						Callgraph: callgraph,
-					},
-				},
-			}
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			if _, err := s.GRPC.CreateTask(ctx, pbReq); err != nil {
-				s.Db.Model(newTask).Updates(map[string]interface{}{
-					"status":      TaskStatusFailed,
-					"status_info": "cron dispatch failed: " + err.Error(),
-				})
-				return
-			}
-			go s.waitTaskResult(context.Background(), newTid, uint64(duration)+60)
+			sm.executeScheduledTask(capturedTask)
 		})
 		if err == nil {
 			sm.entries[tid] = entryID
@@ -246,6 +189,76 @@ func (s *APIServer) DeleteScheduleTask(c *gin.Context) {
 	})
 }
 
+// executeScheduledTask 定时任务触发时的通用逻辑
+func (sm *ScheduleManager) executeScheduledTask(task model.HotmethodTask) {
+	if sm.api == nil {
+		return
+	}
+	s := sm.api
+
+	var params map[string]interface{}
+	if task.RequestParams != nil {
+		json.Unmarshal(task.RequestParams, &params)
+	}
+
+	pid, _ := params["pid"].(float64)
+	duration, _ := params["duration"].(float64)
+	hz, _ := params["hz"].(float64)
+	callgraph, _ := params["callgraph"].(string)
+
+	newTid := uuid.New().String()[:12]
+	newTask := &model.HotmethodTask{
+		TID:          newTid,
+		Name:         "[定时触发] " + task.Name,
+		Type:         task.Type,
+		ProfilerType: task.ProfilerType,
+		TargetIP:     task.TargetIP,
+		RequestParams: datatypes.JSON(task.RequestParams),
+		Status:       TaskStatusNew,
+		UID:          task.UID,
+		UserName:     task.UserName,
+		CreateTime:   time.Now(),
+	}
+	if err := s.Db.Create(newTask).Error; err != nil {
+		return
+	}
+
+	if s.GRPC == nil {
+		s.Db.Model(newTask).Updates(map[string]interface{}{
+			"status":      TaskStatusFailed,
+			"status_info": "cron dispatch failed: drop_server unavailable",
+		})
+		return
+	}
+
+	pbReq := &pb.CreateTaskRequest{
+		TargetIp: task.TargetIP,
+		Service:  "hotmethod",
+		TaskDesc: &pb.TaskDesc{
+			TaskId:       newTid,
+			TaskType:     uint32(task.Type),
+			ProfilerType: uint32(task.ProfilerType),
+			TimeoutSec:   uint32(uint64(duration) + 30),
+			SampleArgv: &pb.RecordArgv{
+				Hz:        uint32(hz),
+				Duration:  uint64(duration),
+				Pid:       int32(pid),
+				Callgraph: callgraph,
+			},
+		},
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := s.GRPC.CreateTask(ctx, pbReq); err != nil {
+		s.Db.Model(newTask).Updates(map[string]interface{}{
+			"status":      TaskStatusFailed,
+			"status_info": "cron dispatch failed: " + err.Error(),
+		})
+		return
+	}
+	go s.waitTaskResult(context.Background(), newTid, uint64(duration)+60)
+}
+
 // loadFromDB 从数据库加载定时任务，重启后恢复
 func (sm *ScheduleManager) loadFromDB() {
 	if sm.db == nil {
@@ -266,9 +279,9 @@ func (sm *ScheduleManager) loadFromDB() {
 		}
 
 		sm.mu.Lock()
+		capturedTask := task
 		entryID, err := sm.cron.AddFunc(cronExpr, func() {
-			// 恢复的定时任务触发逻辑（简化版，实际需要完整实现）
-			// 这里只是保持条目存在，具体触发逻辑由 CreateScheduleTask 注册
+			sm.executeScheduledTask(capturedTask)
 		})
 		if err == nil {
 			sm.entries[task.TID] = entryID

@@ -293,6 +293,20 @@ func (s *APIServer) DeleteTask(c *gin.Context) {
 	// 级联删分析建议
 	s.Db.Where("tid = ?", tid).Delete(&model.AnalysisSuggestion{})
 
+	// 级联删状态历史
+	s.Db.Where("tid = ?", tid).Delete(&model.TaskStateHistory{})
+
+	// 级联删 MinIO 文件
+	if s.Storage != nil {
+		prefix := "profiler/" + tid + "/"
+		keys, err := s.Storage.List(c, prefix)
+		if err == nil {
+			for _, key := range keys {
+				s.Storage.Delete(c, key)
+			}
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"code":    CodeSuccess,
 		"message": "deleted",
@@ -480,6 +494,12 @@ func (s *APIServer) waitTaskResult(ctx context.Context, tid string, timeoutSec u
 					"end_time":    &now,
 				})
 			s.recordStateChange(tid, TaskStatusRunning, TaskStatusSuccess, "collector result ready: "+resp.GetCosKey())
+
+			// 自动触发分析
+			var task model.HotmethodTask
+			if err := s.Db.Where("tid = ?", tid).First(&task).Error; err == nil {
+				go s.runAnalysis(tid, task.Type)
+			}
 			return
 		}
 		if err == nil && resp.GetMessage() != "" && resp.GetMessage() != "Result not found" {

@@ -30,11 +30,13 @@ type APIServer struct {
 
 // New 创建 APIServer 实例
 func New(db *gorm.DB, grpcClient GRPCClient, store storage.Storage, analysisCfg config.AnalysisConfig) *APIServer {
-	return &APIServer{
+	s := &APIServer{
 		Db:          db,
 		GRPC:        grpcClient,
 		Storage:     store,
 		Schedule:    NewScheduleManager(db),
 		AnalysisCmd: analysisCfg,
 	}
+	s.Schedule.api = s
+	return s
 }
