@@ -34,7 +34,7 @@ func New(db *gorm.DB, grpcClient GRPCClient, store storage.Storage, analysisCfg 
 		Db:          db,
 		GRPC:        grpcClient,
 		Storage:     store,
-		Schedule:    NewScheduleManager(),
+		Schedule:    NewScheduleManager(db),
 		AnalysisCmd: analysisCfg,
 	}
 }

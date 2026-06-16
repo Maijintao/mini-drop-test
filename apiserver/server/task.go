@@ -142,7 +142,7 @@ func (s *APIServer) CreateTask(c *gin.Context) {
 		})
 		return
 	}
-	go s.waitTaskResult(tid, req.Duration+60)
+	go s.waitTaskResult(context.Background(), tid, req.Duration+60)
 
 	c.JSON(http.StatusOK, gin.H{
 		"code": CodeSuccess,
@@ -417,7 +417,7 @@ func (s *APIServer) RetryTask(c *gin.Context) {
 		})
 		return
 	}
-	go s.waitTaskResult(newTID, duration+60)
+	go s.waitTaskResult(context.Background(), newTID, duration+60)
 
 	c.JSON(http.StatusOK, gin.H{
 		"code": CodeSuccess,
@@ -425,7 +425,7 @@ func (s *APIServer) RetryTask(c *gin.Context) {
 	})
 }
 
-func (s *APIServer) waitTaskResult(tid string, timeoutSec uint64) {
+func (s *APIServer) waitTaskResult(ctx context.Context, tid string, timeoutSec uint64) {
 	if s.GRPC == nil {
 		return
 	}
@@ -447,6 +447,13 @@ func (s *APIServer) waitTaskResult(tid string, timeoutSec uint64) {
 	s.recordStateChange(tid, TaskStatusNew, TaskStatusRunning, "dispatched to drop_server")
 
 	for {
+		select {
+		case <-ctx.Done():
+			s.recordStateChange(tid, TaskStatusRunning, TaskStatusFailed, "cancelled: "+ctx.Err().Error())
+			return
+		default:
+		}
+
 		if time.Now().After(deadline) {
 			now := time.Now()
 			s.Db.Model(&model.HotmethodTask{}).
@@ -460,8 +467,8 @@ func (s *APIServer) waitTaskResult(tid string, timeoutSec uint64) {
 			return
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		resp, err := s.GRPC.FetchData(ctx, &pb.FetchDataRequest{TaskId: tid})
+		fetchCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		resp, err := s.GRPC.FetchData(fetchCtx, &pb.FetchDataRequest{TaskId: tid})
 		cancel()
 		if err == nil && resp.GetCode() == 0 {
 			now := time.Now()

@@ -171,7 +171,7 @@ def analyze_resources(samples: list[ResourceSample]) -> ResourceStats:
 
 
 def samples_to_json(stats: ResourceStats) -> str:
-    """将资源统计序列化为 JSON。"""
+    """将资源统计序列化为 JSON，包含时序数据用于绘图。"""
     data = {
         "cpu_avg": stats.cpu_avg,
         "cpu_max": stats.cpu_max,
@@ -182,6 +182,16 @@ def samples_to_json(stats: ResourceStats) -> str:
         "duration_sec": stats.duration_sec,
         "samples_count": len(stats.samples),
         "summary": stats.summary,
+        "timeseries": [
+            {
+                "timestamp": s.timestamp,
+                "cpu_pct": s.cpu_pct,
+                "mem_rss_kb": s.mem_rss_kb,
+                "io_read_bytes": s.io_read_bytes,
+                "io_write_bytes": s.io_write_bytes,
+            }
+            for s in stats.samples
+        ],
     }
     return json.dumps(data, indent=2, ensure_ascii=False)
 

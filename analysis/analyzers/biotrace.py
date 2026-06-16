@@ -218,7 +218,7 @@ def analyze_biosnoop(events: list[BioEvent], slow_threshold_us: float = 10000) -
 
 
 def stats_to_json(stats: BioStats) -> str:
-    """将统计结果序列化为 JSON。"""
+    """将统计结果序列化为 JSON，包含慢 IO 事件详情。"""
     data = {
         "total_events": stats.total_events,
         "read_count": stats.read_count,
@@ -230,6 +230,19 @@ def stats_to_json(stats: BioStats) -> str:
         "latency_p99_us": stats.latency_p99_us,
         "latency_max_us": stats.latency_max_us,
         "slow_io_count": len(stats.slow_ios),
+        "slow_ios": [
+            {
+                "ts": e.ts,
+                "comm": e.comm,
+                "pid": e.pid,
+                "disk": e.disk,
+                "type": e.type,
+                "offset": e.offset,
+                "bytes": e.bytes,
+                "latency_us": e.latency_us,
+            }
+            for e in stats.slow_ios[:100]  # 限制最多 100 条
+        ],
         "by_disk": stats.by_disk,
         "top_processes": stats.by_process,
         "summary": stats.summary,

@@ -295,6 +295,7 @@ func (p *HPROFParser) parseClassDump() error {
 		return err
 	}
 
+	// stack trace serial (4 bytes)
 	if _, err := readBytes(p.reader, 4); err != nil {
 		return err
 	}
@@ -305,6 +306,8 @@ func (p *HPROFParser) parseClassDump() error {
 	}
 	_ = superClassID
 
+	// skip: class loader + signers + protection domain + 2 reserved = 5 * idSize
+	// then instance size (4 bytes)
 	if _, err := readBytes(p.reader, p.idSize*5+4); err != nil {
 		return err
 	}
@@ -331,6 +334,34 @@ func (p *HPROFParser) parseClassDump() error {
 			return err
 		}
 		class.Fields[i] = FieldInfo{Type: fieldType}
+	}
+
+	// 静态字段
+	staticFieldCount, err := readUint16(p.reader, p.byteOrder)
+	if err != nil {
+		return err
+	}
+	for i := 0; i < int(staticFieldCount); i++ {
+		// skip field name id
+		if _, err := readID(p.reader, p.idSize); err != nil {
+			return err
+		}
+		fieldType, err := readByte(p.reader)
+		if err != nil {
+			return err
+		}
+		// skip field value based on type
+		size := primTypeSizes[fieldType]
+		if size > 0 {
+			if _, err := readBytes(p.reader, size); err != nil {
+				return err
+			}
+		} else if fieldType == 2 || fieldType == 4 {
+			// object reference
+			if _, err := readBytes(p.reader, p.idSize); err != nil {
+				return err
+			}
+		}
 	}
 
 	// 计算实例大小

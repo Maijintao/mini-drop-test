@@ -33,7 +33,7 @@ def parse_perf_script(text: str) -> dict[str, int]:
         # 空行 = 一个采样结束，保存当前栈
         if not line.strip():
             if current_stack:
-                key = ";".join(reversed(current_stack))
+                key = ";".join(current_stack)
                 stacks[key] += 1
                 current_stack = []
                 current_comm = ""
@@ -52,7 +52,7 @@ def parse_perf_script(text: str) -> dict[str, int]:
                 current_stack = []
 
             current_comm = header_match.group(1).strip()
-            # comm 也作为栈底
+            # comm 作为栈底（根节点）
             current_stack = [current_comm]
             continue
 
@@ -67,7 +67,7 @@ def parse_perf_script(text: str) -> dict[str, int]:
 
     # 最后一个栈
     if current_stack:
-        key = ";".join(reversed(current_stack))
+        key = ";".join(current_stack)
         stacks[key] += 1
 
     return dict(stacks)

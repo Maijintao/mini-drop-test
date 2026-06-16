@@ -105,11 +105,17 @@ func main() {
 	r := setupRouter(srv, logger, cfg)
 
 	// 10. 优雅退出
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
-		quit := make(chan os.Signal, 1)
-		signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 		<-quit
 		logger.Info("shutting down...")
+		srv.Schedule.Stop()
+		if grpcClient != nil {
+			grpcClient.Close()
+		}
+		sqlDB.Close()
+		logger.Info("shutdown complete")
 		os.Exit(0)
 	}()
 
