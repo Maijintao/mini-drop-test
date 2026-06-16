@@ -54,6 +54,12 @@ int Perf::Record(int pid, int duration_sec, int freq,
   return ExecCommand(args, "", duration_sec + 30);
 }
 
+int Perf::collect_result(const std::string& output_path,
+                         const std::string& result_path) {
+  // perf script -i <perf_data> > <result>
+  return Script(output_path, result_path);
+}
+
 int Perf::Script(const std::string& perf_data_path,
                   const std::string& output_path) {
   // perf script -i <perf_data> > <output>

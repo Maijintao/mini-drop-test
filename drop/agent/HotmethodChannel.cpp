@@ -4,6 +4,8 @@
 #include "BpftraceProfiler.h"
 #include "AsyncProfiler.h"
 #include "PprofProfiler.h"
+#include "MemrayProfiler.h"
+#include "JavaHeapDumper.h"
 #include "ScriptRunner.h"
 #include "Log.h"
 #include <iostream>
@@ -18,9 +20,9 @@ HotmethodChannel::HotmethodChannel(const std::string& server_addr, const Config&
   auto channel = grpc::CreateChannel(server_addr, grpc::InsecureChannelCredentials());
   stub_ = Hotmethod::NewStub(channel);
 
-  // 初始化 MinIO 客户端
+  // 初始化存储客户端（链式回退：mc CLI → curl S3 → AWS CLI）
   if (!config.storage_endpoint.empty()) {
-    storage_ = std::make_unique<MinIOClient>(
+    storage_ = std::make_unique<FallbackStorageClient>(
       config.storage_endpoint,
       config.storage_access_key,
       config.storage_secret_key,
@@ -103,6 +105,10 @@ static std::unique_ptr<IProfiler> CreateProfiler(int profiler_type, const Config
       return std::make_unique<PprofProfiler>(config.pprof_host, config.pprof_port);
     case PROFILER_BPFTRACE:
       return std::make_unique<BpftraceProfiler>(event);
+    case PROFILER_MEMRAY:
+      return std::make_unique<MemrayProfiler>();
+    case PROFILER_JAVA_HEAP:
+      return std::make_unique<JavaHeapDumper>();
     default:
       return nullptr;
   }
@@ -140,10 +146,15 @@ void HotmethodChannel::WorkerLoop() {
       ext = ".collapsed";
     } else if (task.profiler_type() == PROFILER_PPROF) {
       ext = ".pb.gz";
+    } else if (task.profiler_type() == PROFILER_MEMRAY) {
+      ext = ".bin";
+    } else if (task.profiler_type() == PROFILER_JAVA_HEAP) {
+      ext = ".hprof";
     }
 
     std::string output_path = "/tmp/profiler_" + task.task_id() + ext;
     int ret = -1;
+    std::unique_ptr<IProfiler> profiler;
 
     // 脚本执行任务：有 script_content 时走 ScriptRunner
     if (!task.script_content().empty()) {
@@ -157,7 +168,7 @@ void HotmethodChannel::WorkerLoop() {
       std::remove(script_path.c_str());
     } else {
       // 选择采集器执行（统一走 IProfiler 多态接口）
-      auto profiler = CreateProfiler(task.profiler_type(), config_, task.sample_argv().event());
+      profiler = CreateProfiler(task.profiler_type(), config_, task.sample_argv().event());
       if (profiler) {
         ret = profiler->Record(
           task.sample_argv().pid(),
@@ -178,6 +189,17 @@ void HotmethodChannel::WorkerLoop() {
       LOG_INFO("Task " + task.task_id() + " completed, output: " + output_path);
       result.set_error_message("");
 
+      // 后处理：格式转换（如 perf script、memray flamegraph）
+      std::string upload_path = output_path;
+      if (profiler) {
+        std::string result_path = "/tmp/result_" + task.task_id() + ext;
+        int post_ret = profiler->collect_result(output_path, result_path);
+        if (post_ret == 0) {
+          upload_path = result_path;
+          LOG_INFO("Task " + task.task_id() + " post-processed: " + result_path);
+        }
+      }
+
       // 状态迁移：UPLOADING（正在上传到存储）
       ReportStatus(task.task_id(), TASK_UPLOADING, "采集完成，正在上传结果到存储");
 
@@ -185,14 +207,42 @@ void HotmethodChannel::WorkerLoop() {
       if (storage_) {
         LOG_INFO("Task " + task.task_id() + " uploading...");
         std::string remote_key = "profiler/" + task.task_id() + "/" + task.task_id() + ext;
-        int upload_ret = storage_->Upload(output_path, remote_key);
+        int upload_ret = storage_->Upload(upload_path, remote_key);
         if (upload_ret == 0) {
           LOG_INFO("Task " + task.task_id() + " uploaded to " + remote_key);
           result.set_cos_key(remote_key);  // 设置 cos_key
           std::remove(output_path.c_str());
+          if (upload_path != output_path) std::remove(upload_path.c_str());
         } else {
-          LOG_ERROR("Task " + task.task_id() + " upload failed, marking task as failed");
-          result.set_error_message("upload to storage failed with code " + std::to_string(upload_ret));
+          // 模式 4 回退：将文件内容嵌入 gRPC 消息
+          LOG_WARN("Task " + task.task_id() + " upload failed, trying gRPC embed fallback...");
+          std::ifstream ifs(upload_path, std::ios::binary | std::ios::ate);
+          if (ifs.is_open()) {
+            auto size = ifs.tellg();
+            ifs.seekg(0);
+            // 限制嵌入大小（最大 16MB）
+            constexpr size_t MAX_EMBED_SIZE = 16 * 1024 * 1024;
+            if (size > 0 && static_cast<size_t>(size) <= MAX_EMBED_SIZE) {
+              std::string content(size, '\0');
+              ifs.read(content.data(), size);
+              auto* file = result.mutable_file();
+              file->set_name(task.task_id() + ext);
+              file->set_content(content);
+              file->set_size(size);
+              result.set_error_message("");
+              LOG_INFO("Task " + task.task_id() + " embedded in gRPC message (" +
+                       std::to_string(size) + " bytes)");
+              std::remove(output_path.c_str());
+              if (upload_path != output_path) std::remove(upload_path.c_str());
+            } else {
+              // 模式 5 回退：保留本地文件，报告路径
+              LOG_WARN("Task " + task.task_id() + " file too large for embed (" +
+                       std::to_string(size) + " bytes), keeping local file");
+              result.set_error_message("upload failed, local file: " + upload_path);
+            }
+          } else {
+            result.set_error_message("upload failed and cannot read local file: " + upload_path);
+          }
         }
       } else {
         LOG_ERROR("Task " + task.task_id() + " no storage configured");

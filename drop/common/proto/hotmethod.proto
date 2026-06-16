@@ -9,8 +9,21 @@ import "google/protobuf/empty.proto";
 
 // Server → Agent 任务下发服务
 service Hotmethod {
+  rpc Collect(CollectRequest) returns (CollectResponse);
   rpc NotifyResult(TaskResult) returns (google.protobuf.Empty);
   rpc UpdateTaskStatus(TaskStatusUpdate) returns (google.protobuf.Empty);
+}
+
+message CollectRequest {
+  string target_ip = 1;
+  TaskDesc task_desc = 2;
+  uint32 timeout_sec = 3;  // 同步等待超时，0 表示仅入队不等待
+}
+
+message CollectResponse {
+  int32 code = 1;           // 0=成功, -1=超时, -2=执行失败
+  string message = 2;
+  TaskResult result = 3;    // code=0 时填充
 }
 
 // 任务状态枚举

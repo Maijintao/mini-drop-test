@@ -227,6 +227,60 @@ void HotmethodService::UpdateTaskStatus(const std::string& task_id, TaskStatus s
   LOG_INFO("[STATE] Task " + task_id + " -> " + status_str + " (reason: " + reason + ") [persisted]");
 }
 
+grpc::Status HotmethodService::Collect(grpc::ServerContext* context,
+                                        const CollectRequest* request,
+                                        CollectResponse* response) {
+  // 入队
+  bool ok = PushTask(request->target_ip(), request->task_desc());
+  if (!ok) {
+    response->set_code(-1);
+    response->set_message("task queue full or push failed");
+    return grpc::Status::OK;
+  }
+
+  uint32_t wait_sec = request->timeout_sec();
+  if (wait_sec == 0) {
+    // 仅入队，不等待结果
+    response->set_code(0);
+    response->set_message("task queued (async)");
+    return grpc::Status::OK;
+  }
+
+  // 同步等待结果：轮询 results_ 直到超时
+  std::string task_id = request->task_desc().task_id();
+  auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(wait_sec);
+
+  while (std::chrono::steady_clock::now() < deadline) {
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      auto it = results_.find(task_id);
+      if (it != results_.end()) {
+        // 结果已到
+        response->set_code(0);
+        response->set_message("OK");
+        *response->mutable_result() = it->second;
+        return grpc::Status::OK;
+      }
+      // 检查是否已超时/失败
+      auto state_it = tasks_state_.find(task_id);
+      if (state_it != tasks_state_.end()) {
+        auto s = state_it->second.status;
+        if (s == TaskStatus::TIMEOUT || s == TaskStatus::FAILED) {
+          response->set_code(s == TaskStatus::TIMEOUT ? -1 : -2);
+          response->set_message(state_it->second.reason);
+          return grpc::Status::OK;
+        }
+      }
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+  }
+
+  // 等待超时
+  response->set_code(-1);
+  response->set_message("collect timed out waiting for result");
+  return grpc::Status::OK;
+}
+
 grpc::Status HotmethodService::NotifyResult(grpc::ServerContext* context,
                                              const TaskResult* request,
                                              google::protobuf::Empty* response) {

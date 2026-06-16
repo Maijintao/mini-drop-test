@@ -11,6 +11,8 @@ public:
   // IProfiler 接口
   int Record(int pid, int duration_sec, int freq,
              const std::string& output_path) override;
+  int collect_result(const std::string& output_path,
+                     const std::string& result_path) override;
   std::string Name() const override { return "perf"; }
   int Type() const override { return PROFILER_PERF; }
 

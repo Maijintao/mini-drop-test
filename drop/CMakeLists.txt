@@ -74,6 +74,8 @@ add_executable(drop_agent
   common/BpftraceProfiler.cpp
   common/AsyncProfiler.cpp
   common/PprofProfiler.cpp
+  common/MemrayProfiler.cpp
+  common/JavaHeapDumper.cpp
   common/Daemon.cpp
   common/Log.cpp
   common/ScriptRunner.cpp

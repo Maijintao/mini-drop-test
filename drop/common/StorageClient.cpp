@@ -225,4 +225,297 @@ std::string MinIOClient::GetPresignedUrl(const std::string& remote_key,
   return protocol + "://" + endpoint_ + "/" + bucket_ + "/" + remote_key;
 }
 
+// ========== CurlS3Client ==========
+
+CurlS3Client::CurlS3Client(const std::string& endpoint,
+                             const std::string& access_key,
+                             const std::string& secret_key,
+                             const std::string& bucket,
+                             bool use_ssl)
+    : endpoint_(endpoint), access_key_(access_key),
+      secret_key_(secret_key), bucket_(bucket), use_ssl_(use_ssl) {}
+
+int CurlS3Client::ExecCommand(const std::vector<std::string>& args, int timeout_sec) {
+  std::vector<char*> c_args;
+  for (const auto& arg : args) {
+    c_args.push_back(const_cast<char*>(arg.c_str()));
+  }
+  c_args.push_back(nullptr);
+
+  pid_t pid = fork();
+  if (pid == -1) return -1;
+
+  if (pid == 0) {
+    setpgid(0, 0);
+    for (int fd = 3; fd < 1024; fd++) close(fd);
+    execvp(c_args[0], c_args.data());
+    _exit(127);
+  }
+
+  int elapsed = 0;
+  int status = 0;
+  while (elapsed < timeout_sec) {
+    pid_t ret = waitpid(pid, &status, WNOHANG);
+    if (ret == pid) break;
+    if (ret == -1) return -1;
+    sleep(1);
+    elapsed++;
+  }
+  if (elapsed >= timeout_sec) {
+    killpg(getpgid(pid), SIGTERM);
+    sleep(3);
+    if (kill(pid, 0) == 0) killpg(getpgid(pid), SIGKILL);
+    waitpid(pid, nullptr, 0);
+    return -2;
+  }
+  if (WIFEXITED(status)) return WEXITSTATUS(status);
+  return -1;
+}
+
+int CurlS3Client::Upload(const std::string& local_path,
+                          const std::string& remote_key) {
+  // curl -X PUT -T <local> http://endpoint/bucket/key
+  std::string protocol = use_ssl_ ? "https" : "http";
+  std::string url = protocol + "://" + endpoint_ + "/" + bucket_ + "/" + remote_key;
+
+  std::vector<std::string> args = {
+    "curl", "-s", "-f", "-X", "PUT",
+    "-T", local_path,
+    "-u", access_key_ + ":" + secret_key_,
+    url
+  };
+
+  LOG_INFO("CurlS3: PUT " + url);
+  return ExecCommand(args, 300);
+}
+
+int CurlS3Client::Download(const std::string& remote_key,
+                             const std::string& local_path) {
+  std::string protocol = use_ssl_ ? "https" : "http";
+  std::string url = protocol + "://" + endpoint_ + "/" + bucket_ + "/" + remote_key;
+
+  std::vector<std::string> args = {
+    "curl", "-s", "-f", "-o", local_path,
+    "-u", access_key_ + ":" + secret_key_,
+    url
+  };
+
+  LOG_INFO("CurlS3: GET " + url);
+  return ExecCommand(args, 300);
+}
+
+bool CurlS3Client::Exists(const std::string& remote_key) {
+  std::string protocol = use_ssl_ ? "https" : "http";
+  std::string url = protocol + "://" + endpoint_ + "/" + bucket_ + "/" + remote_key;
+
+  std::vector<std::string> args = {
+    "curl", "-s", "-f", "-I",
+    "-u", access_key_ + ":" + secret_key_,
+    url
+  };
+
+  return ExecCommand(args, 30) == 0;
+}
+
+std::string CurlS3Client::GetPresignedUrl(const std::string& remote_key,
+                                            int /*expire_seconds*/) {
+  std::string protocol = use_ssl_ ? "https" : "http";
+  return protocol + "://" + endpoint_ + "/" + bucket_ + "/" + remote_key;
+}
+
+// ========== AwsCliClient ==========
+
+AwsCliClient::AwsCliClient(const std::string& endpoint,
+                              const std::string& access_key,
+                              const std::string& secret_key,
+                              const std::string& bucket,
+                              bool use_ssl)
+    : endpoint_(endpoint), access_key_(access_key),
+      secret_key_(secret_key), bucket_(bucket), use_ssl_(use_ssl) {}
+
+int AwsCliClient::ExecCommand(const std::vector<std::string>& args, int timeout_sec) {
+  std::vector<char*> c_args;
+  for (const auto& arg : args) {
+    c_args.push_back(const_cast<char*>(arg.c_str()));
+  }
+  c_args.push_back(nullptr);
+
+  pid_t pid = fork();
+  if (pid == -1) return -1;
+
+  if (pid == 0) {
+    setpgid(0, 0);
+    for (int fd = 3; fd < 1024; fd++) close(fd);
+    execvp(c_args[0], c_args.data());
+    _exit(127);
+  }
+
+  int elapsed = 0;
+  int status = 0;
+  while (elapsed < timeout_sec) {
+    pid_t ret = waitpid(pid, &status, WNOHANG);
+    if (ret == pid) break;
+    if (ret == -1) return -1;
+    sleep(1);
+    elapsed++;
+  }
+  if (elapsed >= timeout_sec) {
+    killpg(getpgid(pid), SIGTERM);
+    sleep(3);
+    if (kill(pid, 0) == 0) killpg(getpgid(pid), SIGKILL);
+    waitpid(pid, nullptr, 0);
+    return -2;
+  }
+  if (WIFEXITED(status)) return WEXITSTATUS(status);
+  return -1;
+}
+
+int AwsCliClient::Upload(const std::string& local_path,
+                           const std::string& remote_key) {
+  // aws s3 cp <local> s3://bucket/key --endpoint-url http://endpoint
+  std::string protocol = use_ssl_ ? "https" : "http";
+  std::string s3_path = "s3://" + bucket_ + "/" + remote_key;
+  std::string endpoint_url = protocol + "://" + endpoint_;
+
+  std::vector<std::string> args = {
+    "aws", "s3", "cp", local_path, s3_path,
+    "--endpoint-url", endpoint_url
+  };
+
+  LOG_INFO("AwsCli: cp " + local_path + " -> " + s3_path);
+  return ExecCommand(args, 300);
+}
+
+int AwsCliClient::Download(const std::string& remote_key,
+                              const std::string& local_path) {
+  std::string protocol = use_ssl_ ? "https" : "http";
+  std::string s3_path = "s3://" + bucket_ + "/" + remote_key;
+  std::string endpoint_url = protocol + "://" + endpoint_;
+
+  std::vector<std::string> args = {
+    "aws", "s3", "cp", s3_path, local_path,
+    "--endpoint-url", endpoint_url
+  };
+
+  LOG_INFO("AwsCli: cp " + s3_path + " -> " + local_path);
+  return ExecCommand(args, 300);
+}
+
+bool AwsCliClient::Exists(const std::string& remote_key) {
+  std::string protocol = use_ssl_ ? "https" : "http";
+  std::string s3_path = "s3://" + bucket_ + "/" + remote_key;
+  std::string endpoint_url = protocol + "://" + endpoint_;
+
+  std::vector<std::string> args = {
+    "aws", "s3", "ls", s3_path,
+    "--endpoint-url", endpoint_url
+  };
+
+  return ExecCommand(args, 30) == 0;
+}
+
+std::string AwsCliClient::GetPresignedUrl(const std::string& remote_key,
+                                            int expire_seconds) {
+  std::string protocol = use_ssl_ ? "https" : "http";
+  std::string s3_path = "s3://" + bucket_ + "/" + remote_key;
+  std::string endpoint_url = protocol + "://" + endpoint_;
+
+  // aws s3 presign s3://bucket/key --expires-in <sec> --endpoint-url <url>
+  int pipefd[2];
+  if (pipe(pipefd) < 0) return "";
+
+  pid_t pid = fork();
+  if (pid == -1) {
+    close(pipefd[0]); close(pipefd[1]);
+    return "";
+  }
+
+  if (pid == 0) {
+    close(pipefd[0]);
+    dup2(pipefd[1], STDOUT_FILENO);
+    close(pipefd[1]);
+    for (int fd = 3; fd < 1024; fd++) close(fd);
+
+    char* args[] = {
+      const_cast<char*>("aws"), const_cast<char*>("s3"), const_cast<char*>("presign"),
+      const_cast<char*>(s3_path.c_str()),
+      const_cast<char*>("--expires-in"), const_cast<char*>(std::to_string(expire_seconds).c_str()),
+      const_cast<char*>("--endpoint-url"), const_cast<char*>(endpoint_url.c_str()),
+      nullptr
+    };
+    execvp(args[0], args);
+    _exit(127);
+  }
+
+  close(pipefd[1]);
+  std::string output;
+  char buf[4096];
+  ssize_t n;
+  while ((n = read(pipefd[0], buf, sizeof(buf) - 1)) > 0) {
+    buf[n] = '\0';
+    output += buf;
+  }
+  close(pipefd[0]);
+  waitpid(pid, nullptr, 0);
+
+  // 去掉尾部换行
+  size_t end = output.find_last_not_of(" \t\n\r");
+  if (end != std::string::npos) return output.substr(0, end + 1);
+  return output;
+}
+
+// ========== FallbackStorageClient ==========
+
+FallbackStorageClient::FallbackStorageClient(const std::string& endpoint,
+                                               const std::string& access_key,
+                                               const std::string& secret_key,
+                                               const std::string& bucket,
+                                               bool use_ssl) {
+  // 构建回退链：mc CLI → curl S3 → AWS CLI
+  clients_.push_back(std::make_unique<MinIOClient>(endpoint, access_key, secret_key, bucket, use_ssl));
+  clients_.push_back(std::make_unique<CurlS3Client>(endpoint, access_key, secret_key, bucket, use_ssl));
+  clients_.push_back(std::make_unique<AwsCliClient>(endpoint, access_key, secret_key, bucket, use_ssl));
+}
+
+int FallbackStorageClient::Upload(const std::string& local_path,
+                                    const std::string& remote_key) {
+  for (size_t i = 0; i < clients_.size(); i++) {
+    int ret = clients_[i]->Upload(local_path, remote_key);
+    if (ret == 0) {
+      LOG_INFO("Upload succeeded via client #" + std::to_string(i));
+      last_success_ = std::to_string(i);
+      return 0;
+    }
+    LOG_WARN("Upload client #" + std::to_string(i) +
+             " failed (code=" + std::to_string(ret) + "), trying next...");
+  }
+  LOG_ERROR("All upload methods failed");
+  return -1;
+}
+
+int FallbackStorageClient::Download(const std::string& remote_key,
+                                      const std::string& local_path) {
+  for (size_t i = 0; i < clients_.size(); i++) {
+    int ret = clients_[i]->Download(remote_key, local_path);
+    if (ret == 0) return 0;
+  }
+  return -1;
+}
+
+bool FallbackStorageClient::Exists(const std::string& remote_key) {
+  for (auto& client : clients_) {
+    if (client->Exists(remote_key)) return true;
+  }
+  return false;
+}
+
+std::string FallbackStorageClient::GetPresignedUrl(const std::string& remote_key,
+                                                     int expire_seconds) {
+  for (auto& client : clients_) {
+    std::string url = client->GetPresignedUrl(remote_key, expire_seconds);
+    if (!url.empty()) return url;
+  }
+  return "";
+}
+
 }  // namespace drop

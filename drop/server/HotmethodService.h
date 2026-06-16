@@ -84,6 +84,10 @@ public:
   // 超时清理：检查 DISPATCHED 超过 timeout_sec 的任务
   void CleanupTimeoutTasks(int timeout_sec = 30);
 
+  grpc::Status Collect(grpc::ServerContext* context,
+                       const CollectRequest* request,
+                       CollectResponse* response) override;
+
   grpc::Status NotifyResult(grpc::ServerContext* context,
                             const TaskResult* request,
                             google::protobuf::Empty* response) override;
