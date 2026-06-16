@@ -10,6 +10,7 @@ ERR_CONFIG = 4        # 配置错误
 ERR_APISERVER = 5     # apiserver 通信错误
 ERR_UNSUPPORTED = 6   # 不支持的 task_type
 ERR_IDEMPOTENT = 7    # 重复触发，跳过
+ERR_ANALYSIS = 8      # 分析结果错误（解析失败、格式不合法等）
 
 
 class ErrorInfo:

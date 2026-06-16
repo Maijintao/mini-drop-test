@@ -296,6 +296,12 @@ def run_cpu_flamegraph(perf_data_path: str, work_dir: str, tid: str,
 
 def run_java_heap(hprof_path: str, work_dir: str, tid: str) -> dict:
     """Java HPROF 堆分析"""
+    # 校验 HPROF 魔术头
+    with open(hprof_path, "rb") as f:
+        header = f.read(18)
+    if not header.startswith(b"JAVA PROFILE"):
+        raise RuntimeError(f"not a valid HPROF file: {hprof_path}")
+
     result_path = os.path.join(work_dir, "heap_stats.json")
     proc = subprocess.run(
         ["go", "run", ".", hprof_path, "--output", result_path],
@@ -373,7 +379,20 @@ def run_namespace(data_path: str, work_dir: str, tid: str) -> dict:
     """容器命名空间解析"""
     result_path = os.path.join(work_dir, "namespace.json")
     with open(data_path, "r") as f:
-        pid = int(f.read().strip())
+        content = f.read().strip()
+
+    # 如果文件已是 JSON 格式（agent 预采集），直接使用
+    if content.startswith("{"):
+        with open(result_path, "w") as f:
+            f.write(content)
+        log.info("namespace (pre-collected) -> %s", result_path)
+        return {result_path: "namespace.json"}
+
+    # 否则当作 PID 解析（仅在分析与目标同主机时有效）
+    try:
+        pid = int(content)
+    except ValueError:
+        raise RuntimeError(f"namespace.txt 既非 JSON 也非有效 PID: {content[:100]}")
 
     info = parse_pid_namespaces(pid)
     with open(result_path, "w") as f:
@@ -395,11 +414,31 @@ def run_assembly(data_path: str, work_dir: str, tid: str) -> dict:
     return {result_path: "assembly_stats.json"}
 
 
+def _read_pprof_file(data_path: str) -> str:
+    """读取 pprof 文件，自动处理 .pb.gz 二进制格式。"""
+    if data_path.endswith(".pb.gz") or data_path.endswith(".gz"):
+        # 二进制 protobuf 格式，尝试 go tool pprof 转文本
+        try:
+            proc = subprocess.run(
+                ["go", "tool", "pprof", "-top", "-nodecount=100", data_path],
+                capture_output=True, text=True, timeout=30,
+            )
+            if proc.returncode == 0 and proc.stdout.strip():
+                return proc.stdout
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
+        raise RuntimeError(
+            f"pprof 二进制格式 (.pb.gz) 需要 go tool pprof 转换，"
+            f"请先在 agent 端导出文本格式，或确保 go 可用: {data_path}"
+        )
+    with open(data_path, "r") as f:
+        return f.read()
+
+
 def run_pprof_cpu(data_path: str, work_dir: str, tid: str) -> dict:
     """pprof CPU 分析"""
     result_path = os.path.join(work_dir, "pprof_cpu.json")
-    with open(data_path, "r") as f:
-        content = f.read()
+    content = _read_pprof_file(data_path)
 
     # 尝试 CSV 格式，fallback 到文本格式
     try:
@@ -417,8 +456,7 @@ def run_pprof_cpu(data_path: str, work_dir: str, tid: str) -> dict:
 def run_pprof_heap(data_path: str, work_dir: str, tid: str) -> dict:
     """pprof Heap 分析"""
     result_path = os.path.join(work_dir, "pprof_heap.json")
-    with open(data_path, "r") as f:
-        content = f.read()
+    content = _read_pprof_file(data_path)
 
     # 尝试 CSV 格式，fallback 到文本格式
     try:

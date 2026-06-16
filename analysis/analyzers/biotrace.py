@@ -232,13 +232,13 @@ def stats_to_json(stats: BioStats) -> str:
         "slow_io_count": len(stats.slow_ios),
         "slow_ios": [
             {
-                "ts": e.ts,
+                "ts": e.timestamp,
                 "comm": e.comm,
                 "pid": e.pid,
                 "disk": e.disk,
-                "type": e.type,
-                "offset": e.offset,
-                "bytes": e.bytes,
+                "type": e.direction,
+                "sector": e.sector,
+                "bytes": e.io_size,
                 "latency_us": e.latency_us,
             }
             for e in stats.slow_ios[:100]  # 限制最多 100 条
