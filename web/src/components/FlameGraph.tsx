@@ -27,20 +27,21 @@ export default function FlameGraph({ data, width = 960, height = 400 }: FlameGra
     // 清空容器
     containerRef.current.innerHTML = '';
 
-    // 转换数据为 d3-flame-graph 格式
-    const root = {
-      name: 'root',
-      value: 0,
-      children: [] as any[],
-    };
-
     // 按 self 排序，取 top 100
     const sorted = [...data].sort((a, b) => b.self - a.self).slice(0, 100);
-    root.value = sorted.reduce((sum, item) => sum + item.self, 0);
-    root.children = sorted.map(item => ({
-      name: item.func,
-      value: item.self,
-    }));
+    const totalSamples = sorted.reduce((sum, item) => sum + item.self, 0);
+
+    // 构建火焰图树结构
+    // TopN 数据是扁平的，每个函数独立展示为一个子树
+    // 这样可以在火焰图中看到每个函数的占比
+    const root = {
+      name: 'all',
+      value: totalSamples,
+      children: sorted.map(item => ({
+        name: item.func,
+        value: item.self,
+      })),
+    };
 
     // 创建火焰图
     const chart = flamegraph()

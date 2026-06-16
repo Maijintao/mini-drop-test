@@ -8,13 +8,40 @@ interface AuthState {
   loading: boolean;
   login: (uid?: string, userName?: string) => Promise<void>;
   logout: () => void;
+  checkAuth: () => Promise<void>;
 }
 
 const useAuth = create<AuthState>((set) => ({
   uid: '',
   userName: '',
   isAuth: false,
-  loading: false,
+  loading: true, // 初始为 true，等待校验完成
+
+  checkAuth: async () => {
+    // 先检查 cookie 是否存在
+    const uid = document.cookie.match(/(?:^| )drop_user_uid=([^;]+)/)?.[1];
+    if (!uid) {
+      set({ isAuth: false, loading: false });
+      return;
+    }
+
+    set({ loading: true });
+    try {
+      const res: any = await authCheck();
+      if (res.code === 0) {
+        set({
+          uid: res.data.uid,
+          userName: res.data.user_name,
+          isAuth: true,
+          loading: false,
+        });
+      } else {
+        set({ isAuth: false, loading: false });
+      }
+    } catch {
+      set({ isAuth: false, loading: false });
+    }
+  },
 
   login: async (uid?: string, userName?: string) => {
     // 如果传了参数，直接 mock 登录（开发模式）
@@ -50,5 +77,8 @@ const useAuth = create<AuthState>((set) => ({
     set({ uid: '', userName: '', isAuth: false });
   },
 }));
+
+// 初始化时自动校验
+useAuth.getState().checkAuth();
 
 export default useAuth;

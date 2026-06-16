@@ -1,10 +1,10 @@
 {
     "uid": "agent-local-001",
-    "ip_addr": "drop-agent",
-    "server_ips": ["drop-server"],
+    "ip_addr": "127.0.0.1",
+    "server_ips": ["127.0.0.1"],
     "server_port": 50051,
     "storage": {
-        "endpoint": "minio:9000",
+        "endpoint": "localhost:9000",
         "access_key": "minioadmin",
         "secret_key": "minioadmin",
         "bucket": "drop-data"
