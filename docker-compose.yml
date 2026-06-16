@@ -46,6 +46,9 @@ services:
       context: ./drop
       dockerfile: Dockerfile
     container_name: drop-server
+    depends_on:
+      minio:
+        condition: service_healthy
     ports:
       - "50051:50051"
     volumes:
@@ -108,7 +111,10 @@ services:
     command: ["./apiserver", "-c", "/etc/apiserver/apiserver.yaml"]
     restart: unless-stopped
 
-  # Analysis - Python 分析引擎（按需启动）
+  # Analysis - Python 分析引擎（按需手动启动）
+  # 正常流程中 apiserver 容器内自带 Python，会以子进程方式调用 analysis 脚本，
+  # 无需单独启动此服务。如需独立调试分析引擎，执行:
+  #   docker compose --profile analysis run analysis-runner --task-id <tid> --task-type 0
   analysis-runner:
     build:
       context: ./analysis
@@ -120,7 +126,7 @@ services:
       postgres:
         condition: service_healthy
     volumes:
-      - ./analysis/config.ini.example:/app/analysis/config.ini:ro
+      - ./analysis/config.ini:/app/analysis/config.ini:ro
     entrypoint: ["python3", "hotmethod_analyzer.py"]
     command: ["--config", "/app/analysis/config.ini"]
     profiles:

@@ -142,7 +142,11 @@ func (s *APIServer) CreateTask(c *gin.Context) {
 		})
 		return
 	}
-	go s.waitTaskResult(context.Background(), tid, req.Duration+60)
+	s.WG.Add(1)
+	go func() {
+		defer s.WG.Done()
+		s.waitTaskResult(context.Background(), tid, req.Duration+60)
+	}()
 
 	c.JSON(http.StatusOK, gin.H{
 		"code": CodeSuccess,
@@ -244,9 +248,11 @@ func (s *APIServer) GetTaskDetail(c *gin.Context) {
 	// 生成 COS 签名 URL（如果任务完成）
 	var cosFiles []gin.H
 	if task.Status == TaskStatusSuccess {
-		// 尝试列出任务产出文件
-		prefix := tid + "/"
-		objects := s.listStorageObjects(c, prefix)
+		// 列出任务产出文件（agent 前缀 + analysis 前缀）
+		var objects []string
+		for _, prefix := range []string{"profiler/" + tid + "/", tid + "/"} {
+			objects = append(objects, s.listStorageObjects(c, prefix)...)
+		}
 		for _, obj := range objects {
 			url, err := s.Storage.PreSign(c, obj, 1*time.Hour)
 			if err != nil {
@@ -296,13 +302,14 @@ func (s *APIServer) DeleteTask(c *gin.Context) {
 	// 级联删状态历史
 	s.Db.Where("tid = ?", tid).Delete(&model.TaskStateHistory{})
 
-	// 级联删 MinIO 文件
+	// 级联删 MinIO 文件（agent 上传前缀 profiler/tid/ + analysis 上传前缀 tid/）
 	if s.Storage != nil {
-		prefix := "profiler/" + tid + "/"
-		keys, err := s.Storage.List(c, prefix)
-		if err == nil {
-			for _, key := range keys {
-				s.Storage.Delete(c, key)
+		for _, prefix := range []string{"profiler/" + tid + "/", tid + "/"} {
+			keys, err := s.Storage.List(c, prefix)
+			if err == nil {
+				for _, key := range keys {
+					s.Storage.Delete(c, key)
+				}
 			}
 		}
 	}
@@ -420,7 +427,8 @@ func (s *APIServer) RetryTask(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if _, err := s.GRPC.CreateTask(ctx, pbReq); err != nil {
+	resp, err := s.GRPC.CreateTask(ctx, pbReq)
+	if err != nil {
 		s.Db.Model(newTask).Updates(map[string]interface{}{
 			"status":      TaskStatusFailed,
 			"status_info": "dispatch failed: " + err.Error(),
@@ -431,7 +439,22 @@ func (s *APIServer) RetryTask(c *gin.Context) {
 		})
 		return
 	}
-	go s.waitTaskResult(context.Background(), newTID, duration+60)
+	if resp.GetCode() != 0 {
+		s.Db.Model(newTask).Updates(map[string]interface{}{
+			"status":      TaskStatusFailed,
+			"status_info": "drop_server rejected: " + resp.GetMessage(),
+		})
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    CodeGRPCError,
+			"message": "drop_server rejected: " + resp.GetMessage(),
+		})
+		return
+	}
+	s.WG.Add(1)
+	go func() {
+		defer s.WG.Done()
+		s.waitTaskResult(context.Background(), newTID, duration+60)
+	}()
 
 	c.JSON(http.StatusOK, gin.H{
 		"code": CodeSuccess,
@@ -498,7 +521,11 @@ func (s *APIServer) waitTaskResult(ctx context.Context, tid string, timeoutSec u
 			// 自动触发分析
 			var task model.HotmethodTask
 			if err := s.Db.Where("tid = ?", tid).First(&task).Error; err == nil {
-				go s.runAnalysis(tid, task.Type)
+				s.WG.Add(1)
+				go func() {
+					defer s.WG.Done()
+					s.runAnalysis(tid, task.Type)
+				}()
 			}
 			return
 		}
@@ -554,8 +581,11 @@ func (s *APIServer) GetCOSFiles(c *gin.Context) {
 		}
 	}
 
-	prefix := tid + "/"
-	objects := s.listStorageObjects(c, prefix)
+	// 列出任务产出文件（agent 前缀 + analysis 前缀）
+	var objects []string
+	for _, prefix := range []string{"profiler/" + tid + "/", tid + "/"} {
+		objects = append(objects, s.listStorageObjects(c, prefix)...)
+	}
 
 	var files []gin.H
 	for _, obj := range objects {

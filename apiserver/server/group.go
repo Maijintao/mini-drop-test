@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 
 	"mini-drop/apiserver/middleware"
 	"mini-drop/apiserver/model"
@@ -42,20 +43,18 @@ func (s *APIServer) CreateGroup(c *gin.Context) {
 		Name:    req.Name,
 		OwnerID: uid,
 	}
-	if err := s.Db.Create(group).Error; err != nil {
+
+	// 事务：创建组 + 创建者自动加入
+	err := s.Db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(group).Error; err != nil {
+			return err
+		}
+		return tx.Create(&model.GroupMember{GID: group.GID, UID: uid}).Error
+	})
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    CodeInternal,
 			"message": err.Error(),
-		})
-		return
-	}
-
-	// 创建者自动加入组
-	if err := s.Db.Create(&model.GroupMember{GID: group.GID, UID: uid}).Error; err != nil {
-		// 组已创建但加人失败，记录警告但不回滚
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    CodeInternal,
-			"message": "group created but failed to add owner as member: " + err.Error(),
 		})
 		return
 	}
@@ -108,10 +107,19 @@ func (s *APIServer) DeleteGroup(c *gin.Context) {
 		return
 	}
 
-	s.Db.Delete(&group)
-
-	// 级联删成员
-	s.Db.Where("gid = ?", gid).Delete(&model.GroupMember{})
+	// 事务：删组 + 删成员
+	if err := s.Db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Delete(&group).Error; err != nil {
+			return err
+		}
+		return tx.Where("gid = ?", gid).Delete(&model.GroupMember{}).Error
+	}); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    CodeInternal,
+			"message": err.Error(),
+		})
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"code":    CodeSuccess,

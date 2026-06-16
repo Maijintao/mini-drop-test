@@ -249,14 +249,26 @@ func (sm *ScheduleManager) executeScheduledTask(task model.HotmethodTask) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if _, err := s.GRPC.CreateTask(ctx, pbReq); err != nil {
+	resp, err := s.GRPC.CreateTask(ctx, pbReq)
+	if err != nil {
 		s.Db.Model(newTask).Updates(map[string]interface{}{
 			"status":      TaskStatusFailed,
 			"status_info": "cron dispatch failed: " + err.Error(),
 		})
 		return
 	}
-	go s.waitTaskResult(context.Background(), newTid, uint64(duration)+60)
+	if resp.GetCode() != 0 {
+		s.Db.Model(newTask).Updates(map[string]interface{}{
+			"status":      TaskStatusFailed,
+			"status_info": "cron dispatch rejected: " + resp.GetMessage(),
+		})
+		return
+	}
+	s.WG.Add(1)
+	go func() {
+		defer s.WG.Done()
+		s.waitTaskResult(context.Background(), newTid, uint64(duration)+60)
+	}()
 }
 
 // loadFromDB 从数据库加载定时任务，重启后恢复

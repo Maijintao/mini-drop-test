@@ -2,10 +2,12 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"net/http"
 	"os/exec"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -39,7 +41,11 @@ func (s *APIServer) TriggerAnalysis(c *gin.Context) {
 	}
 
 	// 异步触发，不阻塞请求
-	go s.runAnalysis(tid, task.Type)
+	s.WG.Add(1)
+	go func() {
+		defer s.WG.Done()
+		s.runAnalysis(tid, task.Type)
+	}()
 
 	c.JSON(http.StatusOK, gin.H{"code": CodeSuccess, "message": "analysis triggered"})
 }
@@ -67,14 +73,17 @@ func (s *APIServer) runAnalysis(tid string, taskType int) {
 		args = append(args, "--config", configPath)
 	}
 
-	cmd := exec.Command(cmdStr, args...)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, cmdStr, args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
 	err := cmd.Run()
 
 	if err != nil {
-		// 子进程崩溃时兜底：如果子进程已自行设置终态则不覆盖
+		// 子进程超时或崩溃时兜底：如果子进程已自行设置终态则不覆盖
 		var task model.HotmethodTask
 		if dbErr := s.Db.Where("tid = ?", tid).First(&task).Error; dbErr == nil {
 			if task.AnalysisStatus == AnalysisStatusRunning {

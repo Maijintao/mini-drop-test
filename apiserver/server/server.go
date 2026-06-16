@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"sync"
 
 	"gorm.io/gorm"
 
@@ -26,6 +27,7 @@ type APIServer struct {
 	Storage     storage.Storage
 	Schedule    *ScheduleManager
 	AnalysisCmd config.AnalysisConfig
+	WG          sync.WaitGroup // 跟踪后台 goroutine
 }
 
 // New 创建 APIServer 实例

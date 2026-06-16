@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -114,6 +115,20 @@ func main() {
 		if grpcClient != nil {
 			grpcClient.Close()
 		}
+
+		// 等待后台 goroutine 完成（最多 10 秒）
+		done := make(chan struct{})
+		go func() {
+			srv.WG.Wait()
+			close(done)
+		}()
+		select {
+		case <-done:
+			logger.Info("all background goroutines finished")
+		case <-time.After(10 * time.Second):
+			logger.Warn("timeout waiting for background goroutines, forcing exit")
+		}
+
 		sqlDB.Close()
 		logger.Info("shutdown complete")
 		os.Exit(0)
