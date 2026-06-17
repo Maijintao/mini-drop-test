@@ -5,7 +5,7 @@ import gsap from 'gsap';
 import { createTask, deleteTask, getAgents, getTasks, retryTask } from '@/api';
 import type { AgentInfo, CreateTaskParams, HotmethodTask } from '@/domain';
 import { analysisMap, formatDate, formatDuration, statusMap } from '@/domain';
-import { waitForTaskResult } from '@/taskPolling';
+import { createTaskPoller } from '@/taskPolling';
 import CreateTaskModal from '@/components/CreateTaskModal';
 import ScheduleTasksPanel from '@/components/ScheduleTasksPanel';
 
@@ -66,6 +66,11 @@ export default function TaskList() {
   const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState<CreateTaskParams>(defaultForm);
   const [activeView, setActiveView] = useState<'tasks' | 'schedules'>('tasks');
+  const pollerRef = useRef<ReturnType<typeof createTaskPoller> | null>(null);
+
+  useEffect(() => {
+    return () => { pollerRef.current?.abort(); };
+  }, []);
 
   useGSAP(() => {
     gsap.fromTo('.task-header', { y: -10, autoAlpha: 0 }, { y: 0, autoAlpha: 1, duration: 0.35, clearProps: 'transform,opacity,visibility' });
@@ -136,11 +141,13 @@ export default function TaskList() {
       await loadTasks(1);
       if (tid) {
         navigate(`/task/result?tid=${tid}`);
-        void waitForTaskResult(tid).then(() => {
+        const poller = createTaskPoller(tid);
+        poller.promise.then(() => {
           navigate(`/task/result?tid=${tid}`, { replace: true });
         }).catch((e: any) => {
           console.error('task polling failed:', e);
         });
+        pollerRef.current = poller;
       }
     } finally {
       setSubmitting(false);

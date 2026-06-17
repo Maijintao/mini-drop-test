@@ -42,6 +42,38 @@ func (s *APIServer) AuthCheck(c *gin.Context) {
 	})
 }
 
+// Login 登录端点 — POST /api/v1/auth/login
+// 生成 HMAC token 返回给前端，前端存 cookie 后续请求带上
+func (s *APIServer) Login(c *gin.Context) {
+	var req struct {
+		UID      string `json:"uid" binding:"required"`
+		UserName string `json:"user_name"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    CodeParamError,
+			"message": "uid is required",
+		})
+		return
+	}
+
+	token := middleware.ComputeHMAC(req.UID, s.AuthSecret)
+
+	// 同时设置 cookie，兼容纯 cookie 模式
+	c.SetCookie("drop_user_uid", req.UID, 86400*7, "/", "", false, false)
+	c.SetCookie("drop_user_name", req.UserName, 86400*7, "/", "", false, false)
+	c.SetCookie("drop_user_token", token, 86400*7, "/", "", false, false)
+
+	c.JSON(http.StatusOK, gin.H{
+		"code": CodeSuccess,
+		"data": gin.H{
+			"uid":       req.UID,
+			"user_name": req.UserName,
+			"token":     token,
+		},
+	})
+}
+
 // GetUsers 获取当前用户信息 — GET /api/v1/users
 func (s *APIServer) GetUsers(c *gin.Context) {
 	uid := c.GetString(middleware.CtxUID)

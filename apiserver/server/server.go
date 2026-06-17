@@ -27,17 +27,19 @@ type APIServer struct {
 	Storage     storage.Storage
 	Schedule    *ScheduleManager
 	AnalysisCmd config.AnalysisConfig
+	AuthSecret  string // HMAC 鉴权密钥
 	WG          sync.WaitGroup // 跟踪后台 goroutine
 }
 
 // New 创建 APIServer 实例
-func New(db *gorm.DB, grpcClient GRPCClient, store storage.Storage, analysisCfg config.AnalysisConfig) *APIServer {
+func New(db *gorm.DB, grpcClient GRPCClient, store storage.Storage, analysisCfg config.AnalysisConfig, authSecret string) *APIServer {
 	s := &APIServer{
 		Db:          db,
 		GRPC:        grpcClient,
 		Storage:     store,
 		Schedule:    NewScheduleManager(db),
 		AnalysisCmd: analysisCfg,
+		AuthSecret:  authSecret,
 	}
 	s.Schedule.api = s
 	return s

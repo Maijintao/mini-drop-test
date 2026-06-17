@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { authCheck } from '@/api';
+import { authCheck, loginApi } from '@/api';
 
 interface AuthState {
   uid: string;
@@ -44,8 +44,19 @@ const useAuth = create<AuthState>((set) => ({
   },
 
   login: async (uid?: string, userName?: string) => {
-    // 如果传了参数，直接 mock 登录（开发模式）
+    // 调用后端登录端点获取 HMAC token
     if (uid && userName) {
+      try {
+        const res: any = await loginApi(uid, userName);
+        if (res.code === 0) {
+          // 后端已通过 Set-Cookie 设置 cookie，前端也存一份 token
+          document.cookie = `drop_user_token=${res.data.token}; path=/; max-age=${7 * 86400}`;
+          set({ uid, userName, isAuth: true, loading: false });
+          return;
+        }
+      } catch {
+        // fallback: 直接设置 cookie（开发模式，无后端）
+      }
       document.cookie = `drop_user_uid=${uid}; path=/`;
       document.cookie = `drop_user_name=${encodeURIComponent(userName)}; path=/`;
       set({ uid, userName, isAuth: true, loading: false });
@@ -74,6 +85,7 @@ const useAuth = create<AuthState>((set) => ({
   logout: () => {
     document.cookie = 'drop_user_uid=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
     document.cookie = 'drop_user_name=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+    document.cookie = 'drop_user_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
     set({ uid: '', userName: '', isAuth: false });
   },
 }));

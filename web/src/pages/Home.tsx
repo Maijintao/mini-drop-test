@@ -5,7 +5,7 @@ import gsap from 'gsap';
 import { createTask, getAgents, getTasks } from '@/api';
 import type { AgentInfo, CreateTaskParams, HotmethodTask } from '@/domain';
 import { formatDate, formatRelativeTime, statusMap } from '@/domain';
-import { waitForTaskResult } from '@/taskPolling';
+import { createTaskPoller } from '@/taskPolling';
 import CreateTaskModal from '@/components/CreateTaskModal';
 
 gsap.registerPlugin(useGSAP);
@@ -25,7 +25,12 @@ const glassCard: React.CSSProperties = {
 
 export default function Home() {
   const containerRef = useRef<HTMLDivElement>(null);
+  const pollerRef = useRef<ReturnType<typeof createTaskPoller> | null>(null);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    return () => { pollerRef.current?.abort(); };
+  }, []);
   const [tasks, setTasks] = useState<HotmethodTask[]>([]);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -95,11 +100,13 @@ export default function Home() {
       if (taskRes.code === 0) setTasks(taskRes.data?.list || []);
       if (tid) {
         navigate(`/task/result?tid=${tid}`);
-        void waitForTaskResult(tid).then(() => {
+        const poller = createTaskPoller(tid);
+        poller.promise.then(() => {
           navigate(`/task/result?tid=${tid}`, { replace: true });
         }).catch((e: any) => {
           console.error('task polling failed:', e);
         });
+        pollerRef.current = poller;
       }
     } finally {
       setSubmitting(false);

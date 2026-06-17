@@ -138,7 +138,7 @@ func SetupTestRouter(srv *server.APIServer) *gin.Engine {
 		})
 
 		auth := api.Group("")
-		auth.Use(middleware.CheckLogin())
+		auth.Use(middleware.CheckLogin(""))
 		{
 			auth.GET("/auth/check", srv.AuthCheck)
 			auth.GET("/users", srv.GetUsers)
@@ -189,7 +189,7 @@ func SetupTestRouterNoAuth(srv *server.APIServer) *gin.Engine {
 func CreateTestAPIServer(db *gorm.DB) (*server.APIServer, *MockGRPCClient, *MockStorage) {
 	mockGRPC := &MockGRPCClient{}
 	mockStore := NewMockStorage()
-	srv := server.New(db, mockGRPC, mockStore, config.AnalysisConfig{})
+	srv := server.New(db, mockGRPC, mockStore, config.AnalysisConfig{}, "")
 	return srv, mockGRPC, mockStore
 }
 

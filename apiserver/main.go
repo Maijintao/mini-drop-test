@@ -96,7 +96,7 @@ func main() {
 	}
 
 	// 7. 创建 APIServer
-	srv := server.New(db, grpcClient, store, cfg.Analysis)
+	srv := server.New(db, grpcClient, store, cfg.Analysis, cfg.Auth.Secret)
 
 	// 8. 启动定时任务调度器
 	srv.Schedule.Start()
@@ -145,14 +145,19 @@ func main() {
 func setupRouter(srv *server.APIServer, logger *zap.Logger, cfg config.Config) *gin.Engine {
 	r := gin.Default()
 
-	// CORS — 用 AllowOriginFunc 动态反射 Origin，兼容 AllowCredentials
-	r.Use(cors.New(cors.Config{
-		AllowOriginFunc:  func(origin string) bool { return true },
+	// CORS — 配置化 Origin 白名单
+	corsCfg := cors.Config{
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization", "Drop_user_uid", "Drop_user_name"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization", "Drop_user_uid", "Drop_user_name", "Drop_user_token"},
 		ExposeHeaders:    []string{"Content-Length"},
 		AllowCredentials: true,
-	}))
+	}
+	if len(cfg.CORS.AllowedOrigins) > 0 {
+		corsCfg.AllowOrigins = cfg.CORS.AllowedOrigins
+	} else {
+		corsCfg.AllowOriginFunc = func(origin string) bool { return true }
+	}
+	r.Use(cors.New(corsCfg))
 
 	// Access log
 	r.Use(middleware.AccessLog(logger))
@@ -169,10 +174,11 @@ func setupRouter(srv *server.APIServer, logger *zap.Logger, cfg config.Config) *
 		api.GET("/healthz", func(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{"status": "ok"})
 		})
+		api.POST("/auth/login", srv.Login)
 
 		// 需要鉴权
 		auth := api.Group("")
-		auth.Use(middleware.CheckLogin())
+		auth.Use(middleware.CheckLogin(cfg.Auth.Secret))
 		{
 			// Auth & User
 			auth.GET("/auth/check", srv.AuthCheck)

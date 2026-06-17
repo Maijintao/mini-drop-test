@@ -26,8 +26,10 @@ const api = axios.create({
 api.interceptors.request.use((cfg) => {
   const uid = getCookie('drop_user_uid');
   const userName = getCookie('drop_user_name');
+  const token = getCookie('drop_user_token');
   if (uid) cfg.headers['Drop_user_uid'] = uid;
   if (userName) cfg.headers['Drop_user_name'] = userName;
+  if (token) cfg.headers['Drop_user_token'] = token;
   return cfg;
 });
 
@@ -68,6 +70,8 @@ function typedDelete<T>(url: string): Promise<ApiResponse<T>> {
 
 // Auth
 export const authCheck = () => typedGet<{ uid: string; user_name: string }>('/auth/check');
+export const loginApi = (uid: string, userName: string) =>
+  typedPost<{ uid: string; user_name: string; token: string }>('/auth/login', { uid, user_name: userName });
 export const getUsers = () => typedGet<any>('/users');
 
 // Agent

@@ -13,6 +13,8 @@ type Config struct {
 	MinIO    MinIOConfig    `mapstructure:"minio"`
 	Log      LogConfig      `mapstructure:"log"`
 	Analysis AnalysisConfig `mapstructure:"analysis"`
+	Auth     AuthConfig     `mapstructure:"auth"`
+	CORS     CORSConfig     `mapstructure:"cors"`
 }
 
 type ServerConfig struct {
@@ -58,6 +60,14 @@ type AnalysisConfig struct {
 	Command    string `mapstructure:"command"`     // analyzer 可执行路径, e.g. "python3"
 	ScriptPath string `mapstructure:"script_path"` // hotmethod_analyzer.py 路径
 	ConfigPath string `mapstructure:"config_path"` // analyzer 配置文件路径
+}
+
+type AuthConfig struct {
+	Secret string `mapstructure:"secret"` // HMAC 签名密钥，空则跳过验证（开发模式）
+}
+
+type CORSConfig struct {
+	AllowedOrigins []string `mapstructure:"allowed_origins"` // 允许的 Origin 列表，空则允许所有
 }
 
 var Cfg Config
