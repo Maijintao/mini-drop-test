@@ -57,8 +57,10 @@ int BpftraceProfiler::Record(int pid, int duration_sec, int freq,
     dup2(fd, STDERR_FILENO);  // bpftrace 的输出也可能走 stderr
     close(fd);
 
-    // 关闭多余 fd
-    for (int i = 3; i < 1024; i++) {
+    // 关闭多余 fd（P2 修复：使用 sysconf 获取实际 fd 上限）
+    long max_fd = sysconf(_SC_OPEN_MAX);
+    if (max_fd < 0) max_fd = 1024;  // fallback
+    for (int i = 3; i < max_fd; i++) {
       close(i);
     }
 
@@ -101,23 +103,40 @@ std::string BpftraceProfiler::GenerateIOProbeScript(int pid, int duration) {
   // bpftrace 脚本：追踪 IO 延迟
   // 使用 block:block_rq_issue 和 block:block_rq_complete 追踪块设备请求延迟
   // 注意：block tracepoint 的 pid 是内核线程，需要用 curtask->tgid 过滤用户进程
+  // P0-1 修复：用 tuple key (dev, sector) 区分并发 IO，避免同一扇区事件覆盖
+  // P0-2 修复：改为逐事件 printf，与 biotrace.py 的 CSV 解析器匹配
+  // P2 修复：添加 END 块清理 map，避免进程中途退出时残留
   return R"(
 tracepoint:block:block_rq_issue
 /curtask->tgid == )" + std::to_string(pid) + R"( /
 {
-  @start[args->sector] = nsecs;
+  @start[args->dev, args->sector] = nsecs;
 }
 
 tracepoint:block:block_rq_complete
-/@start[args->sector]/
+/@start[args->dev, args->sector]/
 {
-  @usecs = hist((nsecs - @start[args->sector]) / 1000);
-  delete(@start[args->sector]);
+  $lat_ns = nsecs - @start[args->dev, args->sector];
+  printf("%lld,%s,%d,%s,%s,%d,%lld\n",
+    nsecs,
+    comm,
+    pid,
+    str(args->dev),
+    "R",
+    0,
+    $lat_ns
+  );
+  delete(@start[args->dev, args->sector]);
 }
 
 interval:s:)" + std::to_string(duration) + R"(
 {
   exit();
+}
+
+END
+{
+  clear(@start);
 }
 )";
 }

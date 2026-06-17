@@ -161,7 +161,8 @@ def analyze_biosnoop(events: list[BioEvent], slow_threshold_us: float = 10000) -
     latencies = sorted([e.latency_us for e in events])
     latency_avg = sum(latencies) / len(latencies)
     latency_p50 = latencies[len(latencies) // 2]
-    latency_p99 = latencies[int(len(latencies) * 0.99)]
+    # P1 修复：p99 计算索引可能越界，使用 min 保护
+    latency_p99 = latencies[min(int(len(latencies) * 0.99), len(latencies) - 1)]
     latency_max = latencies[-1]
 
     # 慢 IO
