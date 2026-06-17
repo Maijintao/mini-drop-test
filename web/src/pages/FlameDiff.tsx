@@ -9,6 +9,27 @@ import type { DiffTreeNode, FlameDiffResult } from '@/domain';
 
 gsap.registerPlugin(useGSAP);
 
+// CSS 一次性注入
+const flamegraphStyles = `
+.d3-flame-graph .frame { rx: 2; ry: 2; }
+.d3-flame-graph .frame:hover { stroke: #fff; stroke-width: 1; }
+.d3-flame-graph rect { stroke: rgba(0,0,0,0.5); stroke-width: 0.5; }
+.d3-flame-graph rect:hover { stroke: #fff; stroke-width: 1; }
+.d3-flame-graph .label { pointer-events: none; fill: #fff; }
+.d3-flame-graph .title { font-size: 14px; font-family: monospace; color: #fff; }
+.d3-flame-graph svg { font: 11px monospace; background: transparent; }
+.d3-flame-graph .d3-flame-graph-tip { background: rgba(0,0,0,0.9); color: #fff; border: 1px solid rgba(255,255,255,0.2); border-radius: 6px; font-size: 12px; padding: 6px 10px; }
+`;
+
+let cssInjected = false;
+function injectCSS() {
+  if (cssInjected) return;
+  const style = document.createElement('style');
+  style.textContent = flamegraphStyles;
+  document.head.appendChild(style);
+  cssInjected = true;
+}
+
 const glassCard: React.CSSProperties = {
   background: 'rgba(255,255,255,0.04)',
   backdropFilter: 'blur(25px)',
@@ -45,15 +66,6 @@ const buttonStyle: React.CSSProperties = {
   fontWeight: 500,
   cursor: 'pointer',
 };
-
-const flamegraphStyles = `
-.d3-flame-graph rect { stroke: rgba(0,0,0,0.4); stroke-width: 0.5; }
-.d3-flame-graph rect:hover { stroke: #fff; stroke-width: 1; }
-.d3-flame-graph .label { pointer-events: none; }
-.d3-flame-graph .title { font-size: 14px; font-family: monospace; color: #fff; }
-.d3-flame-graph svg { font: 11px monospace; background: transparent; }
-.d3-flame-graph .d3-flame-graph-tip { background: rgba(0,0,0,0.85); color: #fff; border: 0.5px solid rgba(255,255,255,0.15); border-radius: 6px; font-size: 12px; padding: 6px 10px; }
-`;
 
 export default function FlameDiff() {
   const [searchParams] = useSearchParams();
@@ -195,10 +207,39 @@ export default function FlameDiff() {
 function DiffFlamePanel({ result }: { result: FlameDiffResult }) {
   const flameRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<any>(null);
+  const chartDataRef = useRef<any>(null);
 
-  // 渲染 d3-flame-graph
+  // 注入 CSS（只执行一次）
   useEffect(() => {
-    if (!result.tree || !flameRef.current) return;
+    injectCSS();
+  }, []);
+
+  // 转换数据：使用 selfValue(true) 模式
+  // 叶子节点：value = |selfDelta|, delta = selfDelta
+  // 中间节点：value = sum(children.value), delta = sum(children.delta)
+  const transformNode = (node: any): any => {
+    const transformed: any = {
+      name: node.name,
+      selfValue: node.selfValue,  // 基准采样数（用于 tooltip）
+    };
+
+    if (node.children && node.children.length > 0) {
+      transformed.children = node.children.map(transformNode);
+      // 中间节点：value = 子节点 value 之和，delta = 子节点 delta 之和
+      transformed.value = transformed.children.reduce((sum: number, c: any) => sum + (c.value || 0), 0);
+      transformed.delta = transformed.children.reduce((sum: number, c: any) => sum + (c.delta || 0), 0);
+    } else {
+      // 叶子节点：value = |selfDelta|，delta = selfDelta
+      transformed.value = Math.abs(node.selfDelta);
+      transformed.delta = node.selfDelta;
+    }
+
+    return transformed;
+  };
+
+  // 渲染火焰图的函数
+  const renderChart = () => {
+    if (!flameRef.current || !chartDataRef.current) return;
 
     const el = flameRef.current;
     el.innerHTML = '';
@@ -210,18 +251,48 @@ function DiffFlamePanel({ result }: { result: FlameDiffResult }) {
       .transitionDuration(300)
       .tooltip(true)
       .title('')
-      .selfValue(true)
+      .selfValue(true)  // 使用 true，每个节点的 value 就是它自己的宽度
       .setColorMapper((colorMapper as any).differentialColorMapper);
 
     chartRef.current = chart;
 
-    // 先绑定数据，再初始化图表（避免 processData 时 datum 为空）
-    const selection = d3Select(el);
-    selection.datum(result.tree);
-    chart(selection);
+    d3Select(el)
+      .datum(chartDataRef.current)
+      .call(chart);
+  };
 
-    return () => { el.innerHTML = ''; };
+  // 渲染 d3-flame-graph
+  useEffect(() => {
+    if (!result.tree) return;
+
+    chartDataRef.current = transformNode(result.tree);
+    renderChart();
+
+    return () => {
+      // 完整清理
+      chartRef.current?.destroy?.();
+      if (flameRef.current) {
+        flameRef.current.innerHTML = '';
+      }
+    };
   }, [result.tree]);
+
+  // 监听窗口 resize 事件
+  useEffect(() => {
+    const handleResize = () => {
+      // 延迟执行，避免频繁重绘
+      setTimeout(() => {
+        if (chartDataRef.current) {
+          renderChart();
+        }
+      }, 100);
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+    };
+  }, []);
 
   // 搜索
   const [searchTerm, setSearchTerm] = useState('');
@@ -265,8 +336,9 @@ function DiffFlamePanel({ result }: { result: FlameDiffResult }) {
         </div>
         {/* 图例 */}
         <div style={{ display: 'flex', gap: 16, fontSize: 12, color: 'rgba(255,255,255,0.5)' }}>
-          <span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: '#ef4444', marginRight: 4, verticalAlign: -1 }} />回归</span>
-          <span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: '#3b82f6', marginRight: 4, verticalAlign: -1 }} />优化</span>
+          <span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: '#ef4444', marginRight: 4, verticalAlign: -1 }} />回归（采样数增加）</span>
+          <span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: '#3b82f6', marginRight: 4, verticalAlign: -1 }} />优化（采样数减少）</span>
+          <span>宽度 = |delta| 占比</span>
         </div>
       </div>
 

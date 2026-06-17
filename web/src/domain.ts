@@ -125,8 +125,9 @@ export interface TopFunction {
 
 export interface DiffTreeNode {
   name: string;
-  delta: number;
-  value: number;
+  selfDelta: number;    // 自身delta（叶子=stack delta，非叶子=0）
+  totalDelta: number;   // 子树delta总和（用于宽度计算）
+  selfValue: number;    // 自身采样数（基准）
   children?: DiffTreeNode[];
 }
 

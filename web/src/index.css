@@ -9,3 +9,163 @@ body {
 #root {
   min-height: 100vh;
 }
+
+/* Antd Tabs 标签白色 */
+.ant-tabs .ant-tabs-tab {
+  color: rgba(255,255,255,0.55) !important;
+}
+.ant-tabs .ant-tabs-tab-active .ant-tabs-tab-btn {
+  color: rgba(255,255,255,0.85) !important;
+}
+.ant-tabs .ant-tabs-tab:hover {
+  color: rgba(255,255,255,0.75) !important;
+}
+.ant-tabs .ant-tabs-ink-bar {
+  background: rgba(255,255,255,0.65) !important;
+}
+
+/* Antd Table 暗色主题 */
+.ant-table {
+  background: transparent !important;
+  color: rgba(255,255,255,0.85) !important;
+}
+.ant-table-thead > tr > th {
+  background: rgba(255,255,255,0.04) !important;
+  color: rgba(255,255,255,0.65) !important;
+  border-bottom: 0.5px solid rgba(255,255,255,0.08) !important;
+}
+.ant-table-tbody > tr > td {
+  background: transparent !important;
+  color: rgba(255,255,255,0.85) !important;
+  border-bottom: 0.5px solid rgba(255,255,255,0.04) !important;
+}
+.ant-table-tbody > tr:hover > td {
+  background: rgba(255,255,255,0.03) !important;
+}
+.ant-table-cell-row-hover {
+  background: rgba(255,255,255,0.03) !important;
+}
+.ant-table-wrapper .ant-table-container {
+  background: transparent !important;
+}
+.ant-table-wrapper .ant-table {
+  --table-header-bg: transparent;
+}
+.ant-table-wrapper .ant-table-column-sorter {
+  color: rgba(255,255,255,0.45) !important;
+}
+.ant-table-wrapper .ant-table-column-sorter-up.active,
+.ant-table-wrapper .ant-table-column-sorter-down.active {
+  color: rgba(255,255,255,0.75) !important;
+}
+.ant-pagination .ant-pagination-item {
+  background: rgba(255,255,255,0.04) !important;
+  border: 0.5px solid rgba(255,255,255,0.1) !important;
+}
+.ant-pagination .ant-pagination-item a {
+  color: rgba(255,255,255,0.65) !important;
+}
+.ant-pagination .ant-pagination-item-active {
+  background: rgba(96,165,250,0.15) !important;
+  border-color: rgba(96,165,250,0.3) !important;
+}
+.ant-pagination .ant-pagination-item-active a {
+  color: #60a5fa !important;
+}
+.ant-pagination .ant-pagination-prev .ant-pagination-item-link,
+.ant-pagination .ant-pagination-next .ant-pagination-item-link {
+  color: rgba(255,255,255,0.55) !important;
+  background: rgba(255,255,255,0.04) !important;
+  border: 0.5px solid rgba(255,255,255,0.1) !important;
+}
+
+/* Antd Card 暗色 */
+.ant-card {
+  background: transparent !important;
+  color: rgba(255,255,255,0.85) !important;
+}
+.ant-card-body {
+  color: rgba(255,255,255,0.85) !important;
+}
+
+/* Antd Statistic 暗色 */
+.ant-statistic-title {
+  color: rgba(255,255,255,0.5) !important;
+}
+.ant-statistic-content {
+  color: rgba(255,255,255,0.85) !important;
+}
+.ant-statistic-content-suffix {
+  color: rgba(255,255,255,0.65) !important;
+}
+
+/* Antd Spin 暗色 */
+.ant-spin-dot-item {
+  background: rgba(255,255,255,0.65) !important;
+}
+.ant-spin-text {
+  color: rgba(255,255,255,0.65) !important;
+}
+
+/* Antd Button 暗色 */
+.ant-btn-default {
+  background: rgba(255,255,255,0.06) !important;
+  border: 0.5px solid rgba(255,255,255,0.12) !important;
+  color: rgba(255,255,255,0.75) !important;
+}
+.ant-btn-default:hover {
+  background: rgba(255,255,255,0.1) !important;
+  border-color: rgba(255,255,255,0.2) !important;
+  color: rgba(255,255,255,0.85) !important;
+}
+.ant-btn-primary {
+  background: rgba(96,165,250,0.2) !important;
+  border: 0.5px solid rgba(96,165,250,0.35) !important;
+  color: #60a5fa !important;
+}
+.ant-btn-primary:hover {
+  background: rgba(96,165,250,0.3) !important;
+  border-color: rgba(96,165,250,0.5) !important;
+}
+.ant-btn-text {
+  color: rgba(255,255,255,0.55) !important;
+}
+.ant-btn-text:hover {
+  color: rgba(255,255,255,0.75) !important;
+  background: rgba(255,255,255,0.06) !important;
+}
+.ant-btn-link {
+  color: #60a5fa !important;
+}
+
+/* Antd Typography 暗色 */
+.ant-typography {
+  color: rgba(255,255,255,0.85) !important;
+}
+.ant-typography.ant-typography-secondary {
+  color: rgba(255,255,255,0.55) !important;
+}
+.ant-typography code {
+  background: rgba(255,255,255,0.06) !important;
+  border: 0.5px solid rgba(255,255,255,0.1) !important;
+  color: rgba(255,255,255,0.85) !important;
+}
+
+/* Antd 消息提示 */
+.ant-message .ant-message-notice-content {
+  background: rgba(30,30,50,0.95) !important;
+  border: 0.5px solid rgba(255,255,255,0.1) !important;
+  color: rgba(255,255,255,0.85) !important;
+  backdrop-filter: blur(20px);
+}
+
+/* Antd 空状态 */
+.ant-empty-description {
+  color: rgba(255,255,255,0.4) !important;
+}
+
+/* Antd Tooltip */
+.ant-tooltip-inner {
+  background: rgba(0,0,0,0.85) !important;
+  color: #fff !important;
+}

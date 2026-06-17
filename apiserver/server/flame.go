@@ -191,38 +191,57 @@ func diffAdded(top1, top2 []FuncSample) []FuncSample {
 
 // diffChanged 找出两次都存在但采样数变化较大的函数
 func diffChanged(top1, top2 []FuncSample) []FuncSample {
-	map1 := make(map[string]int64)
+	map1 := make(map[string]FuncSample)
 	for _, f := range top1 {
-		map1[normalizeFunc(f.Func)] = f.Self
+		map1[normalizeFunc(f.Func)] = f
 	}
 
 	var changed []FuncSample
 	for _, f := range top2 {
 		key := normalizeFunc(f.Func)
-		if oldSelf, ok := map1[key]; ok {
-			diff := f.Self - oldSelf
-			// 变化超过 20% 才算
-			if oldSelf > 0 {
-				ratio := float64(diff) / float64(oldSelf)
-				if ratio > 0.2 || ratio < -0.2 {
-					changed = append(changed, FuncSample{
-						Func:  f.Func,
-						Self:  f.Self,
-						Total: diff,
-					})
-				}
+		if old, ok := map1[key]; ok {
+			selfDiff := f.Self - old.Self
+			totalDiff := f.Total - old.Total
+
+			// Self 或 Total 变化超过 20% 都算
+			selfRatio := safeRatio(selfDiff, old.Self)
+			totalRatio := safeRatio(totalDiff, old.Total)
+
+			if abs64f(selfRatio) > 0.2 || abs64f(totalRatio) > 0.2 {
+				changed = append(changed, FuncSample{
+					Func:  f.Func,
+					Self:  selfDiff,
+					Total: totalDiff,
+				})
 			}
 		}
 	}
 	return changed
 }
 
-func normalizeFunc(name string) string {
-	// 去掉参数列表，只保留函数名
-	if idx := strings.IndexByte(name, '('); idx > 0 {
-		return name[:idx]
+func safeRatio(diff, base int64) float64 {
+	if base == 0 {
+		if diff > 0 {
+			return 1.0
+		}
+		if diff < 0 {
+			return -1.0
+		}
+		return 0
 	}
-	return name
+	return float64(diff) / float64(base)
+}
+
+func abs64f(f float64) float64 {
+	if f < 0 {
+		return -f
+	}
+	return f
+}
+
+func normalizeFunc(name string) string {
+	// 保留函数名+参数，只做trim
+	return strings.TrimSpace(name)
 }
 
 // ============================================================
@@ -231,10 +250,11 @@ func normalizeFunc(name string) string {
 
 // DiffTreeNode 差异火焰图节点
 type DiffTreeNode struct {
-	Name     string          `json:"name"`
-	Delta    int64           `json:"delta"`    // 本节点自身 delta（叶子 = stack delta，非叶子 = 0）
-	Value    int64           `json:"value"`    // 子树 delta 绝对值总和（用于宽度）
-	Children []*DiffTreeNode `json:"children,omitempty"`
+	Name       string          `json:"name"`
+	SelfDelta  int64           `json:"selfDelta"`   // 自身delta（叶子=stack delta，非叶子=0）
+	TotalDelta int64           `json:"totalDelta"`  // 子树delta总和（用于宽度计算）
+	SelfValue  int64           `json:"selfValue"`   // 自身采样数（基准）
+	Children   []*DiffTreeNode `json:"children,omitempty"`
 }
 
 // loadCollapsed 从存储加载 collapsed.txt
@@ -270,21 +290,27 @@ func buildDiffTree(collapsed1, collapsed2 string) *DiffTreeNode {
 	type stackDelta struct {
 		frames []string
 		delta  int64
+		base   int64
 	}
 	var deltas []stackDelta
 
 	visited := make(map[string]bool)
 	for stack, c1 := range stacks1 {
-		if c2, ok := stacks2[stack]; ok {
-			deltas = append(deltas, stackDelta{strings.Split(stack, ";"), c2 - c1})
-		} else {
-			deltas = append(deltas, stackDelta{strings.Split(stack, ";"), -c1})
-		}
+		c2 := stacks2[stack]
+		deltas = append(deltas, stackDelta{
+			frames: strings.Split(stack, ";"),
+			delta:  c2 - c1,
+			base:   c1,
+		})
 		visited[stack] = true
 	}
 	for stack, c2 := range stacks2 {
 		if !visited[stack] {
-			deltas = append(deltas, stackDelta{strings.Split(stack, ";"), c2})
+			deltas = append(deltas, stackDelta{
+				frames: strings.Split(stack, ";"),
+				delta:  c2,
+				base:   0,
+			})
 		}
 	}
 
@@ -292,19 +318,39 @@ func buildDiffTree(collapsed1, collapsed2 string) *DiffTreeNode {
 		return nil
 	}
 
-	// 构建树
+	// 构建树（使用 map 优化搜索）
 	root := &DiffTreeNode{Name: "all"}
+	childIndex := make(map[string]*DiffTreeNode)
+
 	for _, d := range deltas {
 		node := root
+		path := ""
 		for _, frame := range d.frames {
-			child := findOrCreateChild(node, frame)
-			node = child
+			if path == "" {
+				path = frame
+			} else {
+				path = path + ";" + frame
+			}
+
+			if child, ok := childIndex[path]; ok {
+				node = child
+			} else {
+				child := &DiffTreeNode{Name: frame}
+				node.Children = append(node.Children, child)
+				childIndex[path] = child
+				node = child
+			}
 		}
-		node.Delta += d.delta
+		// 只在叶子设置 SelfDelta 和 SelfValue
+		node.SelfDelta += d.delta
+		node.SelfValue += d.base
 	}
 
-	// 计算每个节点的 Value（子树 delta 绝对值总和）
-	computeTreeValue(root)
+	// 递归计算 TotalDelta
+	computeTotalDelta(root)
+
+	// 剪枝：移除整个没有变化的子树
+	pruneZeroDeltaNodes(root)
 
 	return root
 }
@@ -331,6 +377,15 @@ func parseFoldedStacks(text string) map[string]int64 {
 }
 
 func parseInt64(s string) int64 {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0
+	}
+	negative := false
+	if s[0] == '-' {
+		negative = true
+		s = s[1:]
+	}
 	var n int64
 	for _, c := range s {
 		if c >= '0' && c <= '9' {
@@ -339,28 +394,49 @@ func parseInt64(s string) int64 {
 			break
 		}
 	}
+	if negative {
+		return -n
+	}
 	return n
 }
 
-func findOrCreateChild(node *DiffTreeNode, name string) *DiffTreeNode {
+// computeTotalDelta 递归计算每个节点的 TotalDelta = SelfDelta + sum(children.TotalDelta)
+func computeTotalDelta(node *DiffTreeNode) int64 {
+	total := node.SelfDelta
 	for _, child := range node.Children {
-		if child.Name == name {
-			return child
-		}
+		total += computeTotalDelta(child)
 	}
-	child := &DiffTreeNode{Name: name}
-	node.Children = append(node.Children, child)
-	return child
+	node.TotalDelta = total
+	return total
 }
 
-// computeTreeValue 递归计算每个节点的 Value = |Delta| + sum(children.Value)
-func computeTreeValue(node *DiffTreeNode) int64 {
-	total := abs(node.Delta)
-	for _, child := range node.Children {
-		total += computeTreeValue(child)
+// pruneZeroDeltaNodes 移除整个没有变化的子树
+func pruneZeroDeltaNodes(node *DiffTreeNode) {
+	if node.Children == nil {
+		return
 	}
-	node.Value = total
-	return total
+	var filtered []*DiffTreeNode
+	for _, child := range node.Children {
+		pruneZeroDeltaNodes(child)
+		// 只保留有实际变化的子树
+		if hasNonZeroDelta(child) {
+			filtered = append(filtered, child)
+		}
+	}
+	node.Children = filtered
+}
+
+// hasNonZeroDelta 检查节点或其子节点是否有非零 delta
+func hasNonZeroDelta(node *DiffTreeNode) bool {
+	if node.TotalDelta != 0 {
+		return true
+	}
+	for _, child := range node.Children {
+		if hasNonZeroDelta(child) {
+			return true
+		}
+	}
+	return false
 }
 
 func abs(n int64) int64 {

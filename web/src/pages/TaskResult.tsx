@@ -3,7 +3,7 @@ import { useSearchParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { useGSAP } from '@gsap/react';
 import gsap from 'gsap';
-import { Button, Card, Table, Tabs, Typography, Space, message, Spin, Empty, Statistic, Row, Col } from 'antd';
+import { Button, Card, Table, Tabs, Typography, Space, message, Spin, Statistic, Row, Col } from 'antd';
 import { ReloadOutlined, PlayCircleOutlined, ArrowLeftOutlined, FireOutlined } from '@ant-design/icons';
 import { fetchSignedJson, getCosFiles, getFlameData, getSuggestions, getTaskDetail, triggerAnalysis } from '@/api';
 import type { AnalysisSuggestion, CosFile, HotmethodTask, TopFunction } from '@/domain';
@@ -284,7 +284,7 @@ export default function TaskResult() {
   const infoItems = [
     { label: '任务ID', value: task?.tid },
     { label: '任务名称', value: task?.name || '-' },
-    { label: '状态', value: status.label, color: status.color },
+    { label: '状态', value: status.label },
     { label: '目标 IP', value: task?.target_ip },
     { label: '采集类型', value: taskTypeMap[task?.type || 0] || String(task?.type || 0) },
     { label: '采集器', value: profilerTypeMap[task?.profiler_type || 0] || String(task?.profiler_type || 0) },
@@ -324,14 +324,14 @@ export default function TaskResult() {
         <>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 24 }} className="result-stats">
             {[
-              { label: '采集时长', value: formatDuration(task), color: '#60a5fa' },
-              { label: '采样数', value: String(totalSamples || '-'), color: '#4ade80' },
-              { label: '任务状态', value: status.label, color: status.color },
-              { label: '分析状态', value: analysis.label, color: analysis.color },
+              { label: '采集时长', value: formatDuration(task) },
+              { label: '采样数', value: String(totalSamples || '-') },
+              { label: '任务状态', value: status.label },
+              { label: '分析状态', value: analysis.label },
             ].map((s) => (
               <div key={s.label} style={{ ...glassCard, padding: '16px' }}>
                 <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', marginBottom: 6 }}>{s.label}</div>
-                <div style={{ fontSize: 24, fontWeight: 700, color: s.color }}>{s.value}</div>
+                <div style={{ fontSize: 24, fontWeight: 700, color: 'rgba(255,255,255,0.85)' }}>{s.value}</div>
               </div>
             ))}
           </div>
@@ -348,8 +348,8 @@ export default function TaskResult() {
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px 32px' }}>
                       {infoItems.map((item) => (
                         <div key={item.label} style={{ display: 'flex', justifyContent: 'space-between', gap: 16, padding: '12px 0', borderBottom: '0.5px solid rgba(255,255,255,0.04)' }}>
-                          <Text style={{ color: 'rgba(255,255,255,0.4)' }}>{item.label}</Text>
-                          <Text style={{ fontWeight: 500, color: item.color || 'rgba(255,255,255,0.85)', textAlign: 'right' }}>{item.value}</Text>
+                          <Text style={{ color: 'rgba(255,255,255,0.5)' }}>{item.label}</Text>
+                          <Text style={{ fontWeight: 500, color: 'rgba(255,255,255,0.85)', textAlign: 'right' }}>{item.value}</Text>
                         </div>
                       ))}
                     </div>
@@ -360,19 +360,19 @@ export default function TaskResult() {
                   label: '火焰图',
                   children: (
                     flameUrl ? (
-                      <div style={{ border: '0.5px solid rgba(255,255,255,0.08)', borderRadius: 12, overflow: 'hidden', background: '#fff' }}>
+                      <div style={{ border: '0.5px solid rgba(255,255,255,0.08)', borderRadius: 12, overflow: 'hidden' }}>
                         <div style={{
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'space-between',
                           gap: 12,
                           padding: '10px 12px',
-                          background: '#f8fafc',
-                          borderBottom: '1px solid #e5e7eb',
+                          background: 'rgba(255,255,255,0.03)',
+                          borderBottom: '0.5px solid rgba(255,255,255,0.08)',
                         }}>
-                          <Text strong style={{ color: '#111827', fontSize: 13 }}>
+                          <Text strong style={{ color: 'rgba(255,255,255,0.75)', fontSize: 13 }}>
                             flamegraph.svg
-                            {flameLoading && <Text style={{ marginLeft: 8, color: '#64748b', fontWeight: 500 }}>加载中...</Text>}
+                            {flameLoading && <Text style={{ marginLeft: 8, color: 'rgba(255,255,255,0.4)', fontWeight: 500 }}>加载中...</Text>}
                           </Text>
                           <Space>
                             <Button size="small" onClick={() => setFlameUrl((url) => `${url}${url.includes('?') ? '&' : '?'}_reload=${Date.now()}`)}>刷新</Button>
@@ -380,7 +380,7 @@ export default function TaskResult() {
                           </Space>
                         </div>
                         {flameError && (
-                          <div style={{ padding: '8px 12px', color: '#b91c1c', background: '#fee2e2', fontSize: 12 }}>
+                          <div style={{ padding: '8px 12px', color: '#f87171', background: 'rgba(248,113,113,0.1)', fontSize: 12 }}>
                             {flameError}
                           </div>
                         )}
@@ -401,7 +401,10 @@ export default function TaskResult() {
                     ) : (topn.length > 0 || collapsedText) ? (
                       <FlameGraph data={topn} collapsedText={collapsedText} width={900} height={400} />
                     ) : (
-                      <Empty description={flameError || '暂无可渲染的火焰图数据'} />
+                      <div style={{ padding: 60, textAlign: 'center' }}>
+                        <div style={{ fontSize: 15, color: 'rgba(255,255,255,0.35)' }}>这里空空如也</div>
+                        <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.2)', marginTop: 6 }}>{flameError || '暂无可渲染的火焰图数据'}</div>
+                      </div>
                     )
                   ),
                 },
@@ -424,7 +427,10 @@ export default function TaskResult() {
                   label: '优化建议',
                   children: (
                     suggestions.length === 0 ? (
-                      <Empty description="暂无优化建议" />
+                      <div style={{ padding: 60, textAlign: 'center' }}>
+                        <div style={{ fontSize: 15, color: 'rgba(255,255,255,0.35)' }}>这里空空如也</div>
+                        <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.2)', marginTop: 6 }}>暂无优化建议</div>
+                      </div>
                     ) : (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                         {suggestions.map((item) => (
@@ -517,7 +523,10 @@ export default function TaskResult() {
                         )}
                       </div>
                     ) : (
-                      <Empty description="暂无 eBPF 分析数据（需先触发分析）" />
+                      <div style={{ padding: 60, textAlign: 'center' }}>
+                        <div style={{ fontSize: 15, color: 'rgba(255,255,255,0.35)' }}>这里空空如也</div>
+                        <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.2)', marginTop: 6 }}>暂无 eBPF 分析数据（需先触发分析）</div>
+                      </div>
                     )
                   ),
                 },
