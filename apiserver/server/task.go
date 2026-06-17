@@ -109,6 +109,7 @@ func (s *APIServer) CreateTask(c *gin.Context) {
 			"status":      TaskStatusFailed,
 			"status_info": "drop_server unavailable (gRPC not connected)",
 		})
+		s.recordStateChange(tid, TaskStatusNew, TaskStatusFailed, "drop_server unavailable (gRPC not connected)", ChangeTypeTask)
 		c.JSON(http.StatusServiceUnavailable, gin.H{
 			"code":    CodeGRPCError,
 			"message": "drop_server unavailable",
@@ -126,6 +127,7 @@ func (s *APIServer) CreateTask(c *gin.Context) {
 			"status":      TaskStatusFailed,
 			"status_info": "dispatch failed: " + err.Error(),
 		})
+		s.recordStateChange(tid, TaskStatusNew, TaskStatusFailed, "dispatch failed: "+err.Error(), ChangeTypeTask)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    CodeGRPCError,
 			"message": "dispatch failed: " + err.Error(),
@@ -137,12 +139,21 @@ func (s *APIServer) CreateTask(c *gin.Context) {
 			"status":      TaskStatusFailed,
 			"status_info": "drop_server rejected: " + resp.GetMessage(),
 		})
+		s.recordStateChange(tid, TaskStatusNew, TaskStatusFailed, "drop_server rejected: "+resp.GetMessage(), ChangeTypeTask)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    CodeGRPCError,
 			"message": "drop_server rejected: " + resp.GetMessage(),
 		})
 		return
 	}
+
+	// N4: gRPC 下发成功，标记为已派发
+	s.Db.Model(task).Updates(map[string]interface{}{
+		"status":      TaskStatusDispatched,
+		"status_info": "dispatched to drop_server",
+	})
+	s.recordStateChange(tid, TaskStatusNew, TaskStatusDispatched, "dispatched to drop_server", ChangeTypeTask)
+
 	s.WG.Add(1)
 	go func() {
 		defer s.WG.Done()
@@ -421,6 +432,7 @@ func (s *APIServer) RetryTask(c *gin.Context) {
 			"status":      TaskStatusFailed,
 			"status_info": "drop_server unavailable (gRPC not connected)",
 		})
+		s.recordStateChange(newTID, TaskStatusNew, TaskStatusFailed, "drop_server unavailable (gRPC not connected)", ChangeTypeTask)
 		c.JSON(http.StatusServiceUnavailable, gin.H{
 			"code":    CodeGRPCError,
 			"message": "drop_server unavailable",
@@ -437,6 +449,7 @@ func (s *APIServer) RetryTask(c *gin.Context) {
 			"status":      TaskStatusFailed,
 			"status_info": "dispatch failed: " + err.Error(),
 		})
+		s.recordStateChange(newTID, TaskStatusNew, TaskStatusFailed, "dispatch failed: "+err.Error(), ChangeTypeTask)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    CodeGRPCError,
 			"message": "dispatch failed: " + err.Error(),
@@ -448,12 +461,21 @@ func (s *APIServer) RetryTask(c *gin.Context) {
 			"status":      TaskStatusFailed,
 			"status_info": "drop_server rejected: " + resp.GetMessage(),
 		})
+		s.recordStateChange(newTID, TaskStatusNew, TaskStatusFailed, "drop_server rejected: "+resp.GetMessage(), ChangeTypeTask)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    CodeGRPCError,
 			"message": "drop_server rejected: " + resp.GetMessage(),
 		})
 		return
 	}
+
+	// N4: gRPC 下发成功，标记为已派发
+	s.Db.Model(newTask).Updates(map[string]interface{}{
+		"status":      TaskStatusDispatched,
+		"status_info": "dispatched to drop_server",
+	})
+	s.recordStateChange(newTID, TaskStatusNew, TaskStatusDispatched, "dispatched to drop_server", ChangeTypeTask)
+
 	s.WG.Add(1)
 	go func() {
 		defer s.WG.Done()
@@ -482,15 +504,15 @@ func (s *APIServer) waitTaskResult(ctx context.Context, tid string, timeoutSec u
 		Where("tid = ?", tid).
 		Updates(map[string]interface{}{
 			"status":      TaskStatusRunning,
-			"status_info": "dispatched to drop_server",
+			"status_info": "agent is running",
 			"begin_time":   time.Now(),
 		})
-	s.recordStateChange(tid, TaskStatusNew, TaskStatusRunning, "dispatched to drop_server")
+	s.recordStateChange(tid, TaskStatusDispatched, TaskStatusRunning, "agent is running", ChangeTypeTask)
 
 	for {
 		select {
 		case <-ctx.Done():
-			s.recordStateChange(tid, TaskStatusRunning, TaskStatusFailed, "cancelled: "+ctx.Err().Error())
+			s.recordStateChange(tid, TaskStatusRunning, TaskStatusFailed, "cancelled: "+ctx.Err().Error(), ChangeTypeTask)
 			return
 		default:
 		}
@@ -500,11 +522,11 @@ func (s *APIServer) waitTaskResult(ctx context.Context, tid string, timeoutSec u
 			s.Db.Model(&model.HotmethodTask{}).
 				Where("tid = ?", tid).
 				Updates(map[string]interface{}{
-					"status":      TaskStatusFailed,
+					"status":      TaskStatusTimeout,
 					"status_info": "timeout waiting for drop_server result",
 					"end_time":    &now,
 				})
-			s.recordStateChange(tid, TaskStatusRunning, TaskStatusFailed, "timeout waiting for drop_server result")
+			s.recordStateChange(tid, TaskStatusRunning, TaskStatusTimeout, "timeout waiting for drop_server result", ChangeTypeTask)
 			return
 		}
 
@@ -520,7 +542,7 @@ func (s *APIServer) waitTaskResult(ctx context.Context, tid string, timeoutSec u
 					"status_info": "collector result ready: " + resp.GetCosKey(),
 					"end_time":    &now,
 				})
-			s.recordStateChange(tid, TaskStatusRunning, TaskStatusSuccess, "collector result ready: "+resp.GetCosKey())
+			s.recordStateChange(tid, TaskStatusRunning, TaskStatusSuccess, "collector result ready: "+resp.GetCosKey(), ChangeTypeTask)
 
 			// 自动触发分析
 			var task model.HotmethodTask
@@ -542,7 +564,7 @@ func (s *APIServer) waitTaskResult(ctx context.Context, tid string, timeoutSec u
 					"status_info": resp.GetMessage(),
 					"end_time":    &now,
 				})
-			s.recordStateChange(tid, TaskStatusRunning, TaskStatusFailed, resp.GetMessage())
+			s.recordStateChange(tid, TaskStatusRunning, TaskStatusFailed, resp.GetMessage(), ChangeTypeTask)
 			return
 		}
 
@@ -633,12 +655,13 @@ func (s *APIServer) listStorageObjects(c context.Context, prefix string) []strin
 }
 
 // recordStateChange 记录状态迁移历史
-func (s *APIServer) recordStateChange(tid string, fromState, toState int, reason string) {
+func (s *APIServer) recordStateChange(tid string, fromState, toState int, reason string, changeType int) {
 	history := &model.TaskStateHistory{
-		TID:       tid,
-		FromState: fromState,
-		ToState:   toState,
-		Reason:    reason,
+		TID:        tid,
+		FromState:  fromState,
+		ToState:    toState,
+		Reason:     reason,
+		ChangeType: changeType,
 	}
 	s.Db.Create(history)
 }

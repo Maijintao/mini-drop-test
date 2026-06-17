@@ -162,6 +162,7 @@ export const statusMap: Record<number, { label: string; color: string }> = {
   3: { label: '上传中', color: '#fbbf24' },
   4: { label: '成功', color: '#4ade80' },
   5: { label: '失败', color: '#f87171' },
+  6: { label: '超时', color: '#f87171' },
 };
 
 export const analysisMap: Record<number, { label: string; color: string }> = {

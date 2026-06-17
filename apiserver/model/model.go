@@ -111,12 +111,13 @@ func (AnalysisSuggestion) TableName() string { return "analysis_suggestion" }
 
 // 任务状态迁移历史
 type TaskStateHistory struct {
-	ID        uint      `gorm:"primaryKey;autoIncrement;column:id" json:"id"`
-	TID       string    `gorm:"type:varchar(64);index;column:tid" json:"tid"`
-	FromState int       `gorm:"column:from_state" json:"from_state"`
-	ToState   int       `gorm:"column:to_state" json:"to_state"`
-	Reason    string    `gorm:"type:text;column:reason" json:"reason"`
-	CreatedAt time.Time `json:"created_at"`
+	ID         uint      `gorm:"primaryKey;autoIncrement;column:id" json:"id"`
+	TID        string    `gorm:"type:varchar(64);index;column:tid" json:"tid"`
+	FromState  int       `gorm:"column:from_state" json:"from_state"`
+	ToState    int       `gorm:"column:to_state" json:"to_state"`
+	Reason     string    `gorm:"type:text;column:reason" json:"reason"`
+	ChangeType int       `gorm:"default:0;column:change_type" json:"change_type"` // 0=任务状态 1=分析状态
+	CreatedAt  time.Time `json:"created_at"`
 }
 
 func (TaskStateHistory) TableName() string { return "task_state_history" }

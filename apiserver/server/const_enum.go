@@ -8,6 +8,7 @@ const (
 	TaskStatusUploading  = 3 // 上传中（UPLOADING）
 	TaskStatusSuccess    = 4 // 成功（DONE）
 	TaskStatusFailed     = 5 // 失败（FAILED）
+	TaskStatusTimeout    = 6 // 超时（TIMEOUT）
 )
 
 // 分析状态
@@ -16,6 +17,12 @@ const (
 	AnalysisStatusRunning  = 1 // 分析中
 	AnalysisStatusSuccess  = 2 // 成功
 	AnalysisStatusFailed   = 3 // 失败
+)
+
+// 状态变更类型（区分任务状态和分析状态的审计记录）
+const (
+	ChangeTypeTask     = 0 // 任务状态变更
+	ChangeTypeAnalysis = 1 // 分析状态变更
 )
 
 // 通用错误码

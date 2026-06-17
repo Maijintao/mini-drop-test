@@ -44,8 +44,8 @@ export async function waitForTaskResult(tid: string, options: WaitForTaskResultO
 
     const task = await loadTask(tid);
 
-    if (task.status === 5) {
-      throw new Error(task.status_info || '任务执行失败');
+    if (task.status === 5 || task.status === 6) {
+      throw new Error(task.status_info || (task.status === 6 ? '任务超时' : '任务执行失败'));
     }
 
     if (task.status < 4) {

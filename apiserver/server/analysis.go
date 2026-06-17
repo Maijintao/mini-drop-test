@@ -51,6 +51,7 @@ func (s *APIServer) runAnalysis(tid string, taskType int) {
 
 	// 设为分析中
 	s.Db.Model(&model.HotmethodTask{}).Where("tid = ?", tid).Update("analysis_status", AnalysisStatusRunning)
+	s.recordStateChange(tid, AnalysisStatusPending, AnalysisStatusRunning, "analysis started", ChangeTypeAnalysis)
 	logger.Info("analysis started", zap.String("tid", tid))
 
 	// 构造命令
@@ -81,10 +82,12 @@ func (s *APIServer) runAnalysis(tid string, taskType int) {
 		var task model.HotmethodTask
 		if dbErr := s.Db.Where("tid = ?", tid).First(&task).Error; dbErr == nil {
 			if task.AnalysisStatus == AnalysisStatusRunning {
+				failReason := fmt.Sprintf("analysis failed: %v, stderr: %s", err, stderr.String())
 				s.Db.Model(&model.HotmethodTask{}).Where("tid = ?", tid).Updates(map[string]interface{}{
 					"analysis_status": AnalysisStatusFailed,
-					"status_info":     fmt.Sprintf("analysis failed: %v, stderr: %s", err, stderr.String()),
+					"status_info":     failReason,
 				})
+				s.recordStateChange(tid, AnalysisStatusRunning, AnalysisStatusFailed, failReason, ChangeTypeAnalysis)
 			}
 		}
 		logger.Error("analysis failed", zap.String("tid", tid), zap.Error(err), zap.String("stderr", stderr.String()))

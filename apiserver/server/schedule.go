@@ -228,6 +228,7 @@ func (sm *ScheduleManager) executeScheduledTask(task model.HotmethodTask) {
 			"status":      TaskStatusFailed,
 			"status_info": "cron dispatch failed: drop_server unavailable",
 		})
+		s.recordStateChange(newTid, TaskStatusNew, TaskStatusFailed, "cron dispatch failed: drop_server unavailable", ChangeTypeTask)
 		return
 	}
 
@@ -255,6 +256,7 @@ func (sm *ScheduleManager) executeScheduledTask(task model.HotmethodTask) {
 			"status":      TaskStatusFailed,
 			"status_info": "cron dispatch failed: " + err.Error(),
 		})
+		s.recordStateChange(newTid, TaskStatusNew, TaskStatusFailed, "cron dispatch failed: "+err.Error(), ChangeTypeTask)
 		return
 	}
 	if resp.GetCode() != 0 {
@@ -262,8 +264,17 @@ func (sm *ScheduleManager) executeScheduledTask(task model.HotmethodTask) {
 			"status":      TaskStatusFailed,
 			"status_info": "cron dispatch rejected: " + resp.GetMessage(),
 		})
+		s.recordStateChange(newTid, TaskStatusNew, TaskStatusFailed, "cron dispatch rejected: "+resp.GetMessage(), ChangeTypeTask)
 		return
 	}
+
+	// N4: gRPC 下发成功，标记为已派发
+	s.Db.Model(newTask).Updates(map[string]interface{}{
+		"status":      TaskStatusDispatched,
+		"status_info": "dispatched to drop_server (cron)",
+	})
+	s.recordStateChange(newTid, TaskStatusNew, TaskStatusDispatched, "dispatched to drop_server (cron)", ChangeTypeTask)
+
 	s.WG.Add(1)
 	go func() {
 		defer s.WG.Done()

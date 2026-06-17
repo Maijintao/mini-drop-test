@@ -93,12 +93,21 @@ func (s *APIServer) UpdateAnalysisStatus(c *gin.Context) {
 		return
 	}
 
+	// 查询当前分析状态用于审计
+	var currentTask model.HotmethodTask
+	s.Db.Where("tid = ?", tid).First(&currentTask)
+
 	result := s.Db.Model(&model.HotmethodTask{}).
 		Where("tid = ?", tid).
 		Updates(map[string]interface{}{
 			"analysis_status": req.AnalysisStatus,
 			"status_info":     req.StatusInfo,
 		})
+
+	// 记录分析状态变更审计
+	if result.Error == nil && result.RowsAffected > 0 && currentTask.AnalysisStatus != req.AnalysisStatus {
+		s.recordStateChange(tid, currentTask.AnalysisStatus, req.AnalysisStatus, req.StatusInfo, ChangeTypeAnalysis)
+	}
 
 	if result.Error != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
