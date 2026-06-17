@@ -32,15 +32,19 @@ bool Process::ReadStat(int pid, ProcStat* stat) {
   std::istringstream iss(line.substr(paren_end + 2));
   iss >> stat->state;
 
-  // 跳过字段直到 utime (第 14 个字段)
+  // /proc/[pid]/stat 字段：state(2) ppid(3) pgrp(4) session(5) tty(6) tpgid(7)
+  //   flags(8) minflt(9) cminflt(10) majflt(11) cmajflt(12) utime(13) stime(14)
+  //   cutime(15) cstime(16) priority(17) nice(18) num_threads(19) itrealvalue(20)
+  //   starttime(21) vsize(22) rss(23)
   long dummy;
-  for (int i = 0; i < 11; i++) {
+  // state 之后跳过 10 个字段到达 utime(13)
+  for (int i = 0; i < 10; i++) {
     iss >> dummy;
   }
   iss >> stat->utime >> stat->stime;
 
-  // 跳过字段直到 rss (第 24 个字段)
-  for (int i = 0; i < 7; i++) {
+  // stime(14) 之后跳过 8 个字段到达 rss(23)
+  for (int i = 0; i < 8; i++) {
     iss >> dummy;
   }
   iss >> stat->rss;

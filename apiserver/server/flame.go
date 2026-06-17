@@ -25,6 +25,14 @@ func (s *APIServer) FlameDiff(c *gin.Context) {
 		return
 	}
 
+	// 权限校验：两个任务都需要有访问权限
+	if _, ok := s.checkTaskAccess(c, req.TID1); !ok {
+		return
+	}
+	if _, ok := s.checkTaskAccess(c, req.TID2); !ok {
+		return
+	}
+
 	// 优先加载 collapsed.txt（层次数据）
 	collapsed1 := s.loadCollapsed(c, req.TID1)
 	collapsed2 := s.loadCollapsed(c, req.TID2)
@@ -79,6 +87,10 @@ func (s *APIServer) FlameDiff(c *gin.Context) {
 // GetFlameData 获取火焰图数据 — GET /api/v1/tasks/:tid/flame
 func (s *APIServer) GetFlameData(c *gin.Context) {
 	tid := c.Param("tid")
+
+	if _, ok := s.checkTaskAccess(c, tid); !ok {
+		return
+	}
 
 	// 尝试获取 SVG
 	svgKey := tid + "/flamegraph.svg"

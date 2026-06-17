@@ -24,6 +24,7 @@ private:
   void MonitorLoop();
 
   pid_t pid_;
+  pid_t pgid_;          // 启动时记录，避免进程退出后 PID 复用
   int timeout_sec_;
   std::atomic<bool> running_;
   std::atomic<bool> timeout_;

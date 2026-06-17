@@ -1,12 +1,13 @@
 package server
 
-// 任务状态
+// 任务状态（对齐 C++ drop_server 的 TaskStatus 枚举写入 DB 的值）
 const (
-	TaskStatusNew       = 0 // 新建
-	TaskStatusRunning   = 1 // 执行中
-	TaskStatusUploading = 2 // 上传中
-	TaskStatusSuccess   = 3 // 成功
-	TaskStatusFailed    = 4 // 失败
+	TaskStatusNew        = 0 // 新建（PENDING）
+	TaskStatusDispatched = 1 // 已派发（DISPATCHED）
+	TaskStatusRunning    = 2 // 执行中（RUNNING）
+	TaskStatusUploading  = 3 // 上传中（UPLOADING）
+	TaskStatusSuccess    = 4 // 成功（DONE）
+	TaskStatusFailed     = 5 // 失败（FAILED）
 )
 
 // 分析状态

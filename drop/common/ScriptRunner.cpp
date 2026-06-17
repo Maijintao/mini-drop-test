@@ -11,7 +11,9 @@ namespace drop {
 int ScriptRunner::Execute(const std::string& script_path,
                           const std::vector<std::string>& args,
                           int timeout_sec) {
+  // 用 /bin/bash 执行脚本，不依赖文件权限和 shebang
   std::vector<char*> c_args;
+  c_args.push_back(const_cast<char*>("/bin/bash"));
   c_args.push_back(const_cast<char*>(script_path.c_str()));
   for (const auto& arg : args) {
     c_args.push_back(const_cast<char*>(arg.c_str()));

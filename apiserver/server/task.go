@@ -279,9 +279,12 @@ func (s *APIServer) GetTaskDetail(c *gin.Context) {
 // DeleteTask 软删除任务 — DELETE /api/v1/tasks/:tid
 func (s *APIServer) DeleteTask(c *gin.Context) {
 	tid := c.Param("tid")
-	uid := c.GetString(middleware.CtxUID)
 
-	result := s.Db.Where("tid = ? AND uid = ?", tid, uid).Delete(&model.HotmethodTask{})
+	if _, ok := s.checkTaskAccess(c, tid); !ok {
+		return
+	}
+
+	result := s.Db.Where("tid = ?", tid).Delete(&model.HotmethodTask{})
 	if result.Error != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    CodeInternal,
@@ -326,12 +329,8 @@ func (s *APIServer) RetryTask(c *gin.Context) {
 	tid := c.Param("tid")
 	uid := c.GetString(middleware.CtxUID)
 
-	var task model.HotmethodTask
-	if err := s.Db.Where("tid = ? AND uid = ?", tid, uid).First(&task).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{
-			"code":    CodeNotFound,
-			"message": "task not found",
-		})
+	task, ok := s.checkTaskAccess(c, tid)
+	if !ok {
 		return
 	}
 
@@ -642,4 +641,41 @@ func (s *APIServer) recordStateChange(tid string, fromState, toState int, reason
 		Reason:    reason,
 	}
 	s.Db.Create(history)
+}
+
+// checkTaskAccess 权限校验：自己的任务 或 组内成员的任务。
+// 返回 (task, true) 表示允许访问，(nil, false) 表示已拒绝（已写入响应）。
+func (s *APIServer) checkTaskAccess(c *gin.Context, tid string) (*model.HotmethodTask, bool) {
+	uid := c.GetString(middleware.CtxUID)
+
+	var task model.HotmethodTask
+	if err := s.Db.Where("tid = ?", tid).First(&task).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"code":    CodeNotFound,
+			"message": "task not found",
+		})
+		return nil, false
+	}
+
+	if task.UID != uid {
+		var gids []uint
+		s.Db.Model(&model.GroupMember{}).Where("uid = ?", uid).Pluck("gid", &gids)
+		allowed := false
+		if len(gids) > 0 {
+			var count int64
+			s.Db.Model(&model.GroupMember{}).Where("uid = ? AND gid IN ?", task.UID, gids).Count(&count)
+			if count > 0 {
+				allowed = true
+			}
+		}
+		if !allowed {
+			c.JSON(http.StatusNotFound, gin.H{
+				"code":    CodeNotFound,
+				"message": "task not found",
+			})
+			return nil, false
+		}
+	}
+
+	return &task, true
 }

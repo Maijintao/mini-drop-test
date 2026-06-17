@@ -202,8 +202,8 @@ echo "--- 测试 2: 更新任务状态 ---"
 
 # 通过 docker exec 更新任务状态（macOS 没装 psql）
 docker exec postgres psql -U postgres -d drop -c \
-    "UPDATE hotmethod_task SET status=2 WHERE tid='$TID'" 2>/dev/null
-check "任务状态更新为 success (status=2)" "docker exec postgres psql -U postgres -d drop -t -c \"SELECT status FROM hotmethod_task WHERE tid='$TID'\" | grep -q '2'"
+    "UPDATE hotmethod_task SET status=4 WHERE tid='$TID'" 2>/dev/null
+check "任务状态更新为 success (status=4)" "docker exec postgres psql -U postgres -d drop -t -c \"SELECT status FROM hotmethod_task WHERE tid='$TID'\" | grep -q '4'"
 
 echo ""
 

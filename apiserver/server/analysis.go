@@ -11,7 +11,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
-	"gorm.io/gorm"
 
 	"mini-drop/apiserver/model"
 )
@@ -20,13 +19,8 @@ import (
 func (s *APIServer) TriggerAnalysis(c *gin.Context) {
 	tid := c.Param("tid")
 
-	var task model.HotmethodTask
-	if err := s.Db.Where("tid = ?", tid).First(&task).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{"code": CodeNotFound, "message": "task not found"})
-			return
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{"code": CodeInternal, "message": err.Error()})
+	task, ok := s.checkTaskAccess(c, tid)
+	if !ok {
 		return
 	}
 

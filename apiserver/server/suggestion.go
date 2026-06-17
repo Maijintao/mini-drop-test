@@ -4,7 +4,6 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"gorm.io/gorm"
 
 	"mini-drop/apiserver/model"
 )
@@ -12,6 +11,10 @@ import (
 // GetSuggestions 获取任务的分析建议 — GET /api/v1/tasks/:tid/suggestions
 func (s *APIServer) GetSuggestions(c *gin.Context) {
 	tid := c.Param("tid")
+
+	if _, ok := s.checkTaskAccess(c, tid); !ok {
+		return
+	}
 
 	var suggestions []model.AnalysisSuggestion
 	if err := s.Db.Where("tid = ?", tid).Order("id ASC").Find(&suggestions).Error; err != nil {
@@ -32,6 +35,10 @@ func (s *APIServer) GetSuggestions(c *gin.Context) {
 func (s *APIServer) CreateSuggestion(c *gin.Context) {
 	tid := c.Param("tid")
 
+	if _, ok := s.checkTaskAccess(c, tid); !ok {
+		return
+	}
+
 	var req struct {
 		Func         string `json:"func" binding:"required"`
 		Suggestion   string `json:"suggestion"`
@@ -40,23 +47,6 @@ func (s *APIServer) CreateSuggestion(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"code":    CodeParamError,
-			"message": err.Error(),
-		})
-		return
-	}
-
-	// 校验任务存在
-	var task model.HotmethodTask
-	if err := s.Db.Where("tid = ?", tid).First(&task).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
-			c.JSON(http.StatusNotFound, gin.H{
-				"code":    CodeNotFound,
-				"message": "task not found",
-			})
-			return
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    CodeInternal,
 			"message": err.Error(),
 		})
 		return
@@ -86,6 +76,10 @@ func (s *APIServer) CreateSuggestion(c *gin.Context) {
 // UpdateAnalysisStatus 更新任务分析状态 — PUT /api/v1/tasks/:tid/analysis_status
 func (s *APIServer) UpdateAnalysisStatus(c *gin.Context) {
 	tid := c.Param("tid")
+
+	if _, ok := s.checkTaskAccess(c, tid); !ok {
+		return
+	}
 
 	var req struct {
 		AnalysisStatus int    `json:"analysis_status"`

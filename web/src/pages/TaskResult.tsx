@@ -44,6 +44,7 @@ export default function TaskResult() {
   const [eBpfData, setEBpfData] = useState<any>(null);
   const [eBpfLoading, setEBpfLoading] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const taskRef = useRef<HotmethodTask | null>(null);
   const navigate = useNavigate();
 
   useGSAP(() => {
@@ -94,7 +95,20 @@ export default function TaskResult() {
         setFlameError('暂无可渲染的 flamegraph.svg');
       }
 
-      const files = Array.isArray(detailRes.data?.cos_files) ? detailRes.data.cos_files : [];
+      // 确保 files 列表有数据（task detail 可能返回 null）
+      let files = Array.isArray(detailRes.data?.cos_files) ? detailRes.data.cos_files : [];
+      if (files.length === 0) {
+        try {
+          const fileRes = await getCosFiles(tid);
+          const freshFiles = Array.isArray(fileRes.data) ? fileRes.data : [];
+          setCosFiles(freshFiles);
+          files = freshFiles;
+        } catch {
+          setCosFiles([]);
+        }
+      }
+
+      // 加载 top.json（如果 getFlameData 没有返回，从 cos_files 加载）
       const topFile = files.find(file => basename(file.key || file.name).toLowerCase() === 'top.json');
       if (topFile?.url) {
         try {
@@ -118,17 +132,8 @@ export default function TaskResult() {
         }
       }
 
-      if (files.length === 0) {
-        try {
-          const fileRes = await getCosFiles(tid);
-          setCosFiles(Array.isArray(fileRes.data) ? fileRes.data : []);
-        } catch {
-          setCosFiles([]);
-        }
-      }
-
       // 加载 eBPF 分析数据（biosnoop_stats.json 等）
-      const allFiles = files.length > 0 ? files : cosFiles;
+      const allFiles = files;
       const eBpfFile = allFiles.find(f => {
         const name = basename(f.key || f.name || '').toLowerCase();
         return name === 'biosnoop_stats.json' || name === 'resource_stats.json';
@@ -157,10 +162,21 @@ export default function TaskResult() {
   }, [loadTask]);
 
   useEffect(() => {
-    if (!task || task.status >= 3) return;
-    const id = window.setInterval(loadTask, 3000);
+    taskRef.current = task;
+  }, [task]);
+
+  useEffect(() => {
+    if (!loadTask) return;
+    const id = window.setInterval(() => {
+      const t = taskRef.current;
+      if (!t || t.status >= 4) {
+        window.clearInterval(id);
+        return;
+      }
+      loadTask();
+    }, 3000);
     return () => window.clearInterval(id);
-  }, [task, loadTask]);
+  }, [loadTask]);
 
   useEffect(() => {
     if (flameUrl) setFlameLoading(true);
@@ -313,7 +329,7 @@ export default function TaskResult() {
           <Space>
             <Button icon={<ReloadOutlined />} onClick={loadTask}>刷新</Button>
             <Button icon={<FireOutlined />} onClick={() => navigate(`/flame/diff?tid1=${tid}`)}>火焰图对比</Button>
-            <Button type="primary" icon={<PlayCircleOutlined />} onClick={runAnalysis} disabled={!task || task.status !== 2}>触发分析</Button>
+            <Button type="primary" icon={<PlayCircleOutlined />} onClick={runAnalysis} disabled={!task || task.status !== 4}>触发分析</Button>
           </Space>
         </div>
       </div>

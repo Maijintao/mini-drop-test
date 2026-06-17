@@ -8,6 +8,7 @@ Mini-Drop 分析引擎入口
 退出码: 0 成功 / 非 0 失败，stderr 写 ErrorInfo JSON
 """
 import argparse
+import fcntl
 import json
 import logging
 import os
@@ -63,8 +64,15 @@ def parse_args():
     return parser.parse_args()
 
 
-def error_exit(message: str, code: int = 1, detail: str = ""):
-    """输出 ErrorInfo JSON 到 stderr 并退出"""
+def error_exit(message: str, code: int = 1, detail: str = "",
+               api=None, tid: str = ""):
+    """输出 ErrorInfo JSON 到 stderr，标记分析失败后退出"""
+    # 先标记分析状态为失败，避免任务卡在 running
+    if api and tid:
+        try:
+            api.update_analysis_status(tid, 3, message)  # AnalysisStatusFailed
+        except Exception:
+            pass
     info = ErrorInfo(code, message, detail)
     print(json.dumps(info.to_dict()), file=sys.stderr)
     sys.exit(code)
@@ -94,17 +102,27 @@ def main():
     # 3. 初始化 apiserver 客户端
     api = APIServerClient(cfg.apiserver_url)
 
-    # 4. 幂等性检查：通过 apiserver 查询任务状态
+    # 4. 幂等性检查：文件锁 + 双重检查，防止并发重复执行
+    lock_path = f"/tmp/analysis_{tid}.lock"
+    lock_fd = open(lock_path, "w")
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)  # 阻塞等待获取独占锁
+    except OSError as e:
+        log.warning("failed to acquire lock %s: %s", lock_path, e)
+
     try:
         resp = api._request("GET", f"/api/v1/tasks/{tid}")
         task = resp.get("data", {}).get("task", {})
         if task.get("analysis_status") == 2:  # 已成功
             log.info("task %s already analyzed, skipping", tid)
             sys.exit(0)
+        if task.get("analysis_status") == 1:  # 已在运行（另一个进程）
+            log.info("task %s analysis already running, skipping", tid)
+            sys.exit(0)
     except Exception as e:
         log.warning("idempotency check failed (will proceed): %s", e)
 
-    # 5. 标记分析开始
+    # 5. 标记分析开始（持锁状态下，其他进程会阻塞在步骤 4）
     try:
         api.update_analysis_status(tid, 1)  # AnalysisStatusRunning
         log.info("analysis_status -> 1 (running)")
@@ -156,7 +174,7 @@ def main():
                 raw_path = local_path
 
         if raw_path is None and pre_collapsed_path is None:
-            error_exit(f"no data found for task_type={task_type}, tried: {candidate_files}", ERR_NOT_FOUND)
+            error_exit(f"no data found for task_type={task_type}, tried: {candidate_files}", ERR_NOT_FOUND, api=api, tid=tid)
 
         # 7. 按 task_type 分发到具体 analyzer
         if task_type == 0:
@@ -164,46 +182,46 @@ def main():
                                         pre_collapsed_path if has_collapsed else None)
         elif task_type == 1:
             if raw_path is None:
-                error_exit("no hprof/perf data found for Java task", ERR_NOT_FOUND)
+                error_exit("no hprof/perf data found for Java task", ERR_NOT_FOUND, api=api, tid=tid)
             result = run_java_heap(raw_path, work_dir, tid)
         elif task_type == 2:
             if raw_path is None:
-                error_exit("no tracing data found", ERR_NOT_FOUND)
+                error_exit("no tracing data found", ERR_NOT_FOUND, api=api, tid=tid)
             result = run_tracing(raw_path, work_dir, tid)
         elif task_type == 4:
             if raw_path is None:
-                error_exit("no memleak data found", ERR_NOT_FOUND)
+                error_exit("no memleak data found", ERR_NOT_FOUND, api=api, tid=tid)
             result = run_memleak(raw_path, work_dir, tid)
         elif task_type == 5:
             if raw_path is None:
-                error_exit("no pidstat data found for resource analysis", ERR_NOT_FOUND)
+                error_exit("no pidstat data found for resource analysis", ERR_NOT_FOUND, api=api, tid=tid)
             result = run_resource_analysis(raw_path, work_dir, tid)
         elif task_type == 6:
             if raw_path is None:
-                error_exit("no biosnoop data found for eBPF analysis", ERR_NOT_FOUND)
+                error_exit("no biosnoop data found for eBPF analysis", ERR_NOT_FOUND, api=api, tid=tid)
             result = run_biosnoop(raw_path, work_dir, tid)
         elif task_type == 7:
             if raw_path is None:
-                error_exit("no bw_sync data found", ERR_NOT_FOUND)
+                error_exit("no bw_sync data found", ERR_NOT_FOUND, api=api, tid=tid)
             result = run_bw_sync(raw_path, work_dir, tid)
         elif task_type == 8:
             if raw_path is None:
-                error_exit("no namespace data found", ERR_NOT_FOUND)
+                error_exit("no namespace data found", ERR_NOT_FOUND, api=api, tid=tid)
             result = run_namespace(raw_path, work_dir, tid)
         elif task_type == 9:
             if raw_path is None:
-                error_exit("no assembly data found", ERR_NOT_FOUND)
+                error_exit("no assembly data found", ERR_NOT_FOUND, api=api, tid=tid)
             result = run_assembly(raw_path, work_dir, tid)
         elif task_type == 10:
             if raw_path is None:
-                error_exit("no pprof cpu data found", ERR_NOT_FOUND)
+                error_exit("no pprof cpu data found", ERR_NOT_FOUND, api=api, tid=tid)
             result = run_pprof_cpu(raw_path, work_dir, tid)
         elif task_type == 11:
             if raw_path is None:
-                error_exit("no pprof heap data found", ERR_NOT_FOUND)
+                error_exit("no pprof heap data found", ERR_NOT_FOUND, api=api, tid=tid)
             result = run_pprof_heap(raw_path, work_dir, tid)
         else:
-            error_exit(f"unsupported task_type={task_type}", ERR_UNSUPPORTED)
+            error_exit(f"unsupported task_type={task_type}", ERR_UNSUPPORTED, api=api, tid=tid)
 
         # 8. 上传产物
         for local_path, key_name in result.items():
@@ -234,6 +252,11 @@ def main():
         error_exit(f"analysis failed: {e}", ERR_ANALYZER)
     finally:
         shutil.rmtree(work_dir, ignore_errors=True)
+        try:
+            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            lock_fd.close()
+        except Exception:
+            pass
 
 
 MAX_COLLAPSED_LINES = 200000   # 最大折叠栈行数

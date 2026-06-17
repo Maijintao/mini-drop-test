@@ -120,8 +120,8 @@ export default function TaskList() {
   const stats = useMemo(() => ({
     total,
     running: tasks.filter(task => task.status === 1).length,
-    done: tasks.filter(task => task.status === 3).length,
-    failed: tasks.filter(task => task.status === 4).length,
+    done: tasks.filter(task => task.status === 4).length,
+    failed: tasks.filter(task => task.status === 5).length,
   }), [tasks, total]);
 
   const submitCreate = async () => {
