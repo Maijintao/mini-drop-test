@@ -38,8 +38,8 @@ api.interceptors.request.use((cfg) => {
 api.interceptors.response.use(
   (r) => r.data,
   (err) => {
-    if (err.response?.status === 401 && err.response.data?.code === 4010001) {
-      const location = err.response.data.data?.location || '/login';
+    if (err.response?.status === 401) {
+      const location = err.response.data?.data?.location || '/login';
       window.location.href = location;
     }
     return Promise.reject(err);

@@ -70,7 +70,7 @@ int main(int argc, char* argv[]) {
   // 启动超时清理线程
   std::thread cleanup_thread([&hotmethod_service]() {
     while (g_running) {
-      hotmethod_service.CleanupTimeoutTasks(300);  // 300 秒超时，长时间 profiling 不会被误杀
+      hotmethod_service.CleanupTimeoutTasks(30);  // DISPATCHED 超过 30 秒未报开始视为掉线
       std::this_thread::sleep_for(std::chrono::seconds(10));  // 每 10 秒检查一次
     }
   });

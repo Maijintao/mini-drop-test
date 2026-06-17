@@ -77,7 +77,11 @@ export default function CreateTaskModal({
   onSubmit,
 }: CreateTaskModalProps) {
   const onlineAgents = agents.filter(agent => agent.online);
-  const canSubmit = Boolean(form.target_ip && form.pid && form.duration && !submitting);
+  // N21: 范围校验 — pid>0, duration 1~3600, hz 1~1000
+  const pidValid = form.pid > 0 && Number.isInteger(form.pid);
+  const durationValid = form.duration >= 1 && form.duration <= 3600;
+  const hzValid = !form.hz || (form.hz >= 1 && form.hz <= 1000);
+  const canSubmit = Boolean(form.target_ip && pidValid && durationValid && hzValid && !submitting);
 
   return (
     <div
@@ -192,8 +196,9 @@ export default function CreateTaskModal({
                 <input
                   type="number"
                   placeholder="例如 12345"
+                  min={1}
                   value={form.pid || ''}
-                  onChange={(event) => onChange({ pid: Number(event.target.value) })}
+                  onChange={(event) => onChange({ pid: Math.max(1, Math.floor(Number(event.target.value))) })}
                   style={fieldStyle}
                 />
               </Field>
@@ -207,8 +212,9 @@ export default function CreateTaskModal({
                   <input
                     type="number"
                     min={1}
+                    max={3600}
                     value={form.duration}
-                    onChange={(event) => onChange({ duration: Number(event.target.value) })}
+                    onChange={(event) => onChange({ duration: Math.max(1, Math.min(3600, Math.floor(Number(event.target.value)))) })}
                     style={{ ...fieldStyle, paddingRight: 38 }}
                   />
                   <span style={{ position: 'absolute', right: 12, top: 11, color: 'rgba(255,255,255,0.34)', fontSize: 12 }}>s</span>
@@ -219,8 +225,9 @@ export default function CreateTaskModal({
                   <input
                     type="number"
                     min={1}
+                    max={1000}
                     value={form.hz}
-                    onChange={(event) => onChange({ hz: Number(event.target.value) })}
+                    onChange={(event) => onChange({ hz: Math.max(1, Math.min(1000, Math.floor(Number(event.target.value)))) })}
                     style={{ ...fieldStyle, paddingRight: 42 }}
                   />
                   <span style={{ position: 'absolute', right: 12, top: 11, color: 'rgba(255,255,255,0.34)', fontSize: 12 }}>Hz</span>

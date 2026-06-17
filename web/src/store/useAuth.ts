@@ -49,6 +49,8 @@ const useAuth = create<AuthState>((set) => ({
       throw new Error(res.message || 'login failed');
     }
     document.cookie = `drop_user_token=${res.data.token}; path=/; max-age=${7 * 86400}`;
+    document.cookie = `drop_user_uid=${res.data.uid}; path=/; max-age=${7 * 86400}`;
+    document.cookie = `drop_user_name=${encodeURIComponent(res.data.user_name)}; path=/; max-age=${7 * 86400}`;
     set({
       uid: res.data.uid,
       userName: res.data.user_name,
@@ -63,6 +65,8 @@ const useAuth = create<AuthState>((set) => ({
       throw new Error(res.message || 'register failed');
     }
     document.cookie = `drop_user_token=${res.data.token}; path=/; max-age=${7 * 86400}`;
+    document.cookie = `drop_user_uid=${res.data.uid}; path=/; max-age=${7 * 86400}`;
+    document.cookie = `drop_user_name=${encodeURIComponent(res.data.user_name)}; path=/; max-age=${7 * 86400}`;
     set({
       uid: res.data.uid,
       userName: res.data.user_name,
