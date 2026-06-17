@@ -62,7 +62,8 @@ func main() {
 	}
 	sqlDB.SetMaxOpenConns(100)
 	sqlDB.SetMaxIdleConns(10)
-	sqlDB.SetConnMaxLifetime(3600e9) // 1 hour
+	sqlDB.SetConnMaxLifetime(3600e9)       // 1 hour
+	sqlDB.SetConnMaxIdleTime(300e9) // 5 min
 
 	// 4. 自动建表（表已存在时跳过）
 	if err := model.AutoMigrate(db); err != nil {

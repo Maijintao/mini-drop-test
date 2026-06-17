@@ -11,6 +11,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -19,7 +20,7 @@ import shutil
 
 from apiserver_client import APIServerClient
 from config import Config
-from error import ErrorInfo, ERR_STORAGE, ERR_NOT_FOUND, ERR_ANALYZER, ERR_UNSUPPORTED
+from error import ErrorInfo, ERR_STORAGE, ERR_NOT_FOUND, ERR_ANALYZER, ERR_UNSUPPORTED, ERR_ANALYSIS
 from storage import MinIOStorage
 
 
@@ -100,8 +101,8 @@ def main():
         if task.get("analysis_status") == 2:  # 已成功
             log.info("task %s already analyzed, skipping", tid)
             sys.exit(0)
-    except Exception:
-        pass  # 查不到就继续
+    except Exception as e:
+        log.warning("idempotency check failed (will proceed): %s", e)
 
     # 5. 标记分析开始
     try:
@@ -235,6 +236,55 @@ def main():
         shutil.rmtree(work_dir, ignore_errors=True)
 
 
+MAX_COLLAPSED_LINES = 200000   # 最大折叠栈行数
+MAX_STACK_DEPTH = 50           # 最大调用栈深度
+
+
+def _truncate_collapsed(collapsed_path: str):
+    """截断过大的 collapsed 文件，防止前端/浏览器卡死"""
+    with open(collapsed_path, "r") as f:
+        lines = f.readlines()
+
+    original_count = len(lines)
+    if original_count == 0:
+        return
+
+    changed = False
+
+    # 1. 截断过深的调用栈
+    truncated_lines = []
+    for line in lines:
+        parts = line.rstrip("\n").rsplit(" ", 1)
+        if len(parts) != 2:
+            truncated_lines.append(line)
+            continue
+        stack, count = parts
+        frames = stack.split(";")
+        if len(frames) > MAX_STACK_DEPTH:
+            frames = frames[:MAX_STACK_DEPTH]
+            changed = True
+        truncated_lines.append(";".join(frames) + " " + count + "\n")
+
+    # 2. 按采样数降序排列，截取前 N 行
+    if len(truncated_lines) > MAX_COLLAPSED_LINES:
+        def extract_count(line: str) -> int:
+            parts = line.rsplit(" ", 1)
+            try:
+                return int(parts[-1])
+            except ValueError:
+                return 0
+
+        truncated_lines.sort(key=extract_count, reverse=True)
+        truncated_lines = truncated_lines[:MAX_COLLAPSED_LINES]
+        changed = True
+
+    if changed:
+        with open(collapsed_path, "w") as f:
+            f.writelines(truncated_lines)
+        log.info("truncated collapsed: %d -> %d lines (max_depth=%d)",
+                 original_count, len(truncated_lines), MAX_STACK_DEPTH)
+
+
 def run_cpu_flamegraph(perf_data_path: str, work_dir: str, tid: str,
                        pre_collapsed_path: str = None) -> dict:
     """
@@ -272,6 +322,9 @@ def run_cpu_flamegraph(perf_data_path: str, work_dir: str, tid: str,
         # perf script → 折叠栈
         perf_script_to_collapsed(script_path, collapsed_path)
         log.info("collapsed -> %s", collapsed_path)
+
+    # 折叠栈截断：防止超大文件导致浏览器卡死
+    _truncate_collapsed(collapsed_path)
 
     # 折叠栈 → SVG
     title = f"CPU Flame Graph [{tid}]"
@@ -449,7 +502,6 @@ def run_pprof_cpu(data_path: str, work_dir: str, tid: str) -> dict:
     except Exception:
         samples = parse_pprof_text(content)
 
-    import json
     with open(result_path, "w") as f:
         json.dump(samples, f, indent=2)
     log.info("pprof_cpu -> %s", result_path)
@@ -467,7 +519,6 @@ def run_pprof_heap(data_path: str, work_dir: str, tid: str) -> dict:
     except Exception:
         samples = parse_heap_text(content)
 
-    import json
     with open(result_path, "w") as f:
         json.dump([{
             "func": s.func,
@@ -522,33 +573,25 @@ def run_memleak(data_path: str, work_dir: str, tid: str) -> dict:
 
 def _write_suggestions_to_apiserver(api: APIServerClient, tid: str,
                                      suggestions_path: str):
-    """解析 suggestions.md 并逐条写入 apiserver"""
-    from analyzers.advisor import load_rules, match_rules
-    from analyzers.topn import analyze_topn
-    from data_parser.collapsed_parser import parse_collapsed
+    """解析已有的 suggestions.md 并逐条写入 apiserver，避免重复计算"""
+    with open(suggestions_path, "r") as f:
+        content = f.read()
 
-    # 读取折叠栈，重新计算 TopN + 建议
-    collapsed_path = os.path.join(os.path.dirname(suggestions_path), "collapsed.txt")
-    if not os.path.exists(collapsed_path):
-        return
+    # 解析 markdown 格式: "### N. func" + "**建议**: advice"
+    pattern = re.compile(r'###\s+\d+\.\s+(.+?)\n.*?\*\*建议\*\*:\s*(.+?)(?:\n|$)')
+    matches = pattern.findall(content)
 
-    with open(collapsed_path) as f:
-        stacks = parse_collapsed(f.read())
-    topn = analyze_topn(stacks, top_k=50)
-    rules = load_rules()
-    suggestions = match_rules(topn, rules)
-
-    for s in suggestions:
+    for func, advice in matches:
         try:
             api.create_suggestion(
                 tid=tid,
-                func=s["func"],
-                suggestion=s["advice"],
+                func=func.strip(),
+                suggestion=advice.strip(),
             )
         except Exception as e:
-            log.warning("failed to write suggestion for %s: %s", s["func"], e)
+            log.warning("failed to write suggestion for %s: %s", func, e)
 
-    log.info("wrote %d suggestions to apiserver", len(suggestions))
+    log.info("wrote %d suggestions to apiserver", len(matches))
 
 
 if __name__ == "__main__":

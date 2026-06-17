@@ -10,8 +10,6 @@ def test_config_defaults():
     cfg = Config("")
     assert cfg.minio_endpoint == "localhost:9000"
     assert cfg.minio_access_key == "minioadmin"
-    assert cfg.pg_host == "localhost"
-    assert cfg.pg_port == 5432
     assert cfg.apiserver_url == "http://localhost:8191"
 
 
@@ -27,13 +25,6 @@ secret_key = mysecret
 bucket = mybucket
 secure = true
 
-[postgres]
-host = pg.example.com
-port = 5433
-user = pguser
-password = pgpass
-dbname = mydb
-
 [apiserver]
 url = http://api.example.com:8080
 """)
@@ -42,8 +33,6 @@ url = http://api.example.com:8080
     assert cfg.minio_access_key == "mykey"
     assert cfg.minio_bucket == "mybucket"
     assert cfg.minio_secure is True
-    assert cfg.pg_host == "pg.example.com"
-    assert cfg.pg_port == 5433
     assert cfg.apiserver_url == "http://api.example.com:8080"
 
     os.unlink(ini)
@@ -59,7 +48,6 @@ def test_config_partial_file():
     cfg = Config(ini)
     assert cfg.minio_endpoint == "custom:9000"
     assert cfg.minio_access_key == "minioadmin"  # 默认值
-    assert cfg.pg_host == "localhost"  # 默认值
 
     os.unlink(ini)
     os.rmdir(d)

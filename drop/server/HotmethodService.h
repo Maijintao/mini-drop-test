@@ -7,6 +7,7 @@
 #include <deque>
 #include <vector>
 #include <mutex>
+#include <condition_variable>
 #include <chrono>
 #include <sqlite3.h>
 
@@ -106,6 +107,7 @@ private:
   std::map<std::string, AgentStatus> agents_;      // Agent 心跳状态
   std::map<std::string, TaskStateInfo> tasks_state_;   // 任务状态跟踪
   std::mutex mutex_;
+  std::condition_variable cv_;  // 用于 Collect 同步等待结果
 };
 
 }  // namespace drop

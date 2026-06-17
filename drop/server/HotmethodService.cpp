@@ -246,36 +246,45 @@ grpc::Status HotmethodService::Collect(grpc::ServerContext* context,
     return grpc::Status::OK;
   }
 
-  // 同步等待结果：轮询 results_ 直到超时
+  // 同步等待结果：condition_variable 通知，避免轮询
   std::string task_id = request->task_desc().task_id();
   auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(wait_sec);
 
-  while (std::chrono::steady_clock::now() < deadline) {
-    {
-      std::lock_guard<std::mutex> lock(mutex_);
-      auto it = results_.find(task_id);
-      if (it != results_.end()) {
-        // 结果已到
-        response->set_code(0);
-        response->set_message("OK");
-        *response->mutable_result() = it->second;
-        return grpc::Status::OK;
-      }
-      // 检查是否已超时/失败
-      auto state_it = tasks_state_.find(task_id);
-      if (state_it != tasks_state_.end()) {
-        auto s = state_it->second.status;
-        if (s == TaskStatus::TIMEOUT || s == TaskStatus::FAILED) {
-          response->set_code(s == TaskStatus::TIMEOUT ? -1 : -2);
-          response->set_message(state_it->second.reason);
-          return grpc::Status::OK;
-        }
-      }
+  std::unique_lock<std::mutex> lock(mutex_);
+  bool finished = cv_.wait_until(lock, deadline, [&]() {
+    if (results_.find(task_id) != results_.end()) return true;
+    auto state_it = tasks_state_.find(task_id);
+    if (state_it != tasks_state_.end()) {
+      auto s = state_it->second.status;
+      if (s == TaskStatus::TIMEOUT || s == TaskStatus::FAILED) return true;
     }
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    return false;
+  });
+
+  if (!finished) {
+    response->set_code(-1);
+    response->set_message("collect timed out waiting for result");
+    return grpc::Status::OK;
   }
 
-  // 等待超时
+  // 检查结果
+  auto it = results_.find(task_id);
+  if (it != results_.end()) {
+    response->set_code(0);
+    response->set_message("OK");
+    *response->mutable_result() = it->second;
+    return grpc::Status::OK;
+  }
+
+  // 检查失败/超时状态
+  auto state_it = tasks_state_.find(task_id);
+  if (state_it != tasks_state_.end()) {
+    auto s = state_it->second.status;
+    response->set_code(s == TaskStatus::TIMEOUT ? -1 : -2);
+    response->set_message(state_it->second.reason);
+    return grpc::Status::OK;
+  }
+
   response->set_code(-1);
   response->set_message("collect timed out waiting for result");
   return grpc::Status::OK;
@@ -298,6 +307,7 @@ grpc::Status HotmethodService::NotifyResult(grpc::ServerContext* context,
   }
 
   results_[task_id] = *request;
+  cv_.notify_all();  // 通知等待中的 Collect
   return grpc::Status::OK;
 }
 

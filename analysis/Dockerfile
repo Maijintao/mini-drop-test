@@ -17,6 +17,6 @@ COPY . .
 RUN chmod +x flamegraph.pl stackcollapse-perf.pl 2>/dev/null || true
 
 # 构建 Java heap analyzer
-RUN cd java_heap_analyzer && go build -o /app/analysis/java_heap_analyzer/analyzer . 2>/dev/null || true
+RUN cd java_heap_analyzer && go build -o /app/analysis/java_heap_analyzer/analyzer .
 
 ENTRYPOINT ["python3", "hotmethod_analyzer.py"]
