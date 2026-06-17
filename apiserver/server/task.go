@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"log"
 	"net/http"
 	"time"
 
@@ -337,7 +338,11 @@ func (s *APIServer) RetryTask(c *gin.Context) {
 	// 解析原任务参数
 	var params map[string]interface{}
 	if task.RequestParams != nil {
-		params = mustUnmarshal(task.RequestParams)
+		var err error
+		params, err = unmarshalParams(task.RequestParams)
+		if err != nil {
+			log.Printf("WARN: unmarshal task params failed: %v", err)
+		}
 	}
 
 	// 提取参数

@@ -131,6 +131,7 @@ func main() {
 
 		sqlDB.Close()
 		logger.Info("shutdown complete")
+		logger.Sync()
 		os.Exit(0)
 	}()
 

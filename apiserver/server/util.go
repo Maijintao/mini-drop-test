@@ -17,16 +17,16 @@ func mustMarshal(v interface{}) datatypes.JSON {
 	return datatypes.JSON(b)
 }
 
-// mustUnmarshal 反序列化 JSON，失败则 panic
-func mustUnmarshal(data datatypes.JSON) map[string]interface{} {
+// unmarshalParams 反序列化 JSON，失败返回 error
+func unmarshalParams(data datatypes.JSON) (map[string]interface{}, error) {
 	if data == nil {
-		return nil
+		return nil, nil
 	}
 	var m map[string]interface{}
 	if err := json.Unmarshal(data, &m); err != nil {
-		panic(fmt.Sprintf("mustUnmarshal: %v", err))
+		return nil, fmt.Errorf("unmarshalParams: %w", err)
 	}
-	return m
+	return m, nil
 }
 
 func parseIntDefault(s string, def int) int {

@@ -1,13 +1,16 @@
 #include "ScriptRunner.h"
+#include "ProcessKiller.h"
 #include "Log.h"
 #include <unistd.h>
 #include <sys/wait.h>
 #include <cstring>
+#include <memory>
 
 namespace drop {
 
 int ScriptRunner::Execute(const std::string& script_path,
-                          const std::vector<std::string>& args) {
+                          const std::vector<std::string>& args,
+                          int timeout_sec) {
   std::vector<char*> c_args;
   c_args.push_back(const_cast<char*>(script_path.c_str()));
   for (const auto& arg : args) {
@@ -36,8 +39,24 @@ int ScriptRunner::Execute(const std::string& script_path,
     _exit(127);
   }
 
+  // 父进程：启动超时监控
+  std::unique_ptr<ProcessKiller> killer;
+  if (timeout_sec > 0) {
+    killer = std::make_unique<ProcessKiller>(pid, timeout_sec);
+    killer->Start();
+  }
+
   int status;
   waitpid(pid, &status, 0);
+
+  // 停止超时监控
+  if (killer) {
+    killer->Stop();
+    if (killer->IsTimeout()) {
+      LOG_WARN("script timeout after " + std::to_string(timeout_sec) + "s: " + script_path);
+      return -2;
+    }
+  }
 
   if (WIFEXITED(status)) {
     return WEXITSTATUS(status);

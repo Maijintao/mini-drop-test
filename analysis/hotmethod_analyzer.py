@@ -279,7 +279,8 @@ def run_cpu_flamegraph(perf_data_path: str, work_dir: str, tid: str,
     log.info("flamegraph -> %s", svg_path)
 
     # 折叠栈 → TopN 热点
-    stacks = parse_collapsed(open(collapsed_path).read())
+    with open(collapsed_path) as f:
+        stacks = parse_collapsed(f.read())
     topn = analyze_topn(stacks, top_k=50)
     topn_path = os.path.join(work_dir, "top.json")
     with open(topn_path, "w") as f:
@@ -531,7 +532,8 @@ def _write_suggestions_to_apiserver(api: APIServerClient, tid: str,
     if not os.path.exists(collapsed_path):
         return
 
-    stacks = parse_collapsed(open(collapsed_path).read())
+    with open(collapsed_path) as f:
+        stacks = parse_collapsed(f.read())
     topn = analyze_topn(stacks, top_k=50)
     rules = load_rules()
     suggestions = match_rules(topn, rules)
