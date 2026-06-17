@@ -65,14 +65,14 @@ func TestBug2_LoadTopN_LargeJSON(t *testing.T) {
 	}
 }
 
-// Bug3: CreateScheduleTask 不检查 DB 写入错误
-// 测试：重复 TID 应返回错误而非 200
-func TestBug3_CreateScheduleTask_DBError(t *testing.T) {
+// Bug3: CreateScheduleTask TID 碰撞（N12 已修复：改用 UUID）
+// 测试：同名定时任务不再 TID 碰撞
+func TestBug3_CreateScheduleTask_SameNameNoCollision(t *testing.T) {
 	db := SetupTestDB()
 	SeedTestData(db)
-	// 先插入一个 sched-test 任务
+	// 先插入一个 sched- 开头的任务
 	db.Create(&model.HotmethodTask{
-		TID: "sched-test", Name: "[定时] test", TargetIP: "10.0.0.1",
+		TID: "sched-old-test", Name: "[定时] test", TargetIP: "10.0.0.1",
 		Status: 0, UID: "test-user-1", UserName: "TestUser1",
 	})
 
@@ -80,19 +80,19 @@ func TestBug3_CreateScheduleTask_DBError(t *testing.T) {
 	r := SetupTestRouter(srv)
 
 	body := map[string]interface{}{
-		"task_name": "test", // 会生成 sched-test，与已有 TID 冲突
+		"task_name": "test", // N12 修复后用 UUID，不再碰撞
 		"target_ip": "10.0.0.1",
 		"pid":       1234,
 		"duration":  10,
 		"cron_expr": "* * * * *",
 	}
 	w := DoAuthRequest(r, "POST", "/api/v1/schedule/task", body)
-	// 重复 TID 应该报错，不是 200
-	if w.Code == http.StatusOK {
-		resp := ParseJSON(w)
-		if resp["code"].(float64) == 0 {
-			t.Fatal("Bug3: duplicate TID should return error, not 200")
-		}
+	if w.Code != http.StatusOK {
+		t.Fatalf("Bug3: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	resp := ParseJSON(w)
+	if resp["code"].(float64) != 0 {
+		t.Fatalf("Bug3: expected code 0, got %v", resp["code"])
 	}
 }
 

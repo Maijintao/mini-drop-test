@@ -258,7 +258,7 @@ func (s *APIServer) GetTaskDetail(c *gin.Context) {
 	s.Db.Where("tid = ?", tid).Find(&suggestions)
 
 	// 生成 COS 签名 URL（如果任务完成）
-	var cosFiles []gin.H
+	cosFiles := make([]gin.H, 0)
 	if task.Status == TaskStatusSuccess {
 		// 列出任务产出文件（agent 前缀 + analysis 前缀）
 		var objects []string
@@ -295,15 +295,29 @@ func (s *APIServer) DeleteTask(c *gin.Context) {
 		return
 	}
 
-	result := s.Db.Where("tid = ?", tid).Delete(&model.HotmethodTask{})
-	if result.Error != nil {
+	// 事务：软删 task + 硬删 suggestion + 硬删 state_history
+	var rowsAffected int64
+	err := s.Db.Transaction(func(tx *gorm.DB) error {
+		result := tx.Where("tid = ?", tid).Delete(&model.HotmethodTask{})
+		if result.Error != nil {
+			return result.Error
+		}
+		rowsAffected = result.RowsAffected
+		if rowsAffected == 0 {
+			return nil // 由外层处理 not found
+		}
+		tx.Where("tid = ?", tid).Delete(&model.AnalysisSuggestion{})
+		tx.Where("tid = ?", tid).Delete(&model.TaskStateHistory{})
+		return nil
+	})
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    CodeInternal,
-			"message": result.Error.Error(),
+			"message": err.Error(),
 		})
 		return
 	}
-	if result.RowsAffected == 0 {
+	if rowsAffected == 0 {
 		c.JSON(http.StatusNotFound, gin.H{
 			"code":    CodeNotFound,
 			"message": "task not found",
@@ -311,13 +325,7 @@ func (s *APIServer) DeleteTask(c *gin.Context) {
 		return
 	}
 
-	// 级联删分析建议
-	s.Db.Where("tid = ?", tid).Delete(&model.AnalysisSuggestion{})
-
-	// 级联删状态历史
-	s.Db.Where("tid = ?", tid).Delete(&model.TaskStateHistory{})
-
-	// 级联删 MinIO 文件（agent 上传前缀 profiler/tid/ + analysis 上传前缀 tid/）
+	// 事务提交后再删 MinIO 文件（非事务性存储）
 	if s.Storage != nil {
 		for _, prefix := range []string{"profiler/" + tid + "/", tid + "/"} {
 			keys, err := s.Storage.List(c, prefix)

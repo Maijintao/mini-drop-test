@@ -2,6 +2,7 @@ package server
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -156,10 +157,18 @@ func (s *APIServer) AddMember(c *gin.Context) {
 		UID: req.UID,
 	}
 	if err := s.Db.Create(member).Error; err != nil {
-		// 可能是重复添加，忽略
-		c.JSON(http.StatusOK, gin.H{
-			"code":    CodeSuccess,
-			"message": "already member or added",
+		// 区分唯一约束冲突（重复添加）和真实错误
+		errStr := err.Error()
+		if strings.Contains(errStr, "UNIQUE") || strings.Contains(errStr, "duplicate key") {
+			c.JSON(http.StatusOK, gin.H{
+				"code":    CodeSuccess,
+				"message": "already a member",
+			})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    CodeInternal,
+			"message": err.Error(),
 		})
 		return
 	}

@@ -74,10 +74,7 @@ func (s *APIServer) syncAgentsFromDrop(ctx context.Context, ownerUID string) err
 			hostname = ip
 		}
 
-		agentUID := ownerUID
-		if remote.GetUid() != "" {
-			agentUID = remote.GetUid()
-		}
+		agentUID := remote.GetUid()
 
 		// 查该 Agent 归属用户的 GID
 		agentGID := ownerGID

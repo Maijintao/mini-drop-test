@@ -81,8 +81,18 @@ func (s *APIServer) CreateScheduleTask(c *gin.Context) {
 		req.Callgraph = "dwarf"
 	}
 
-	// 创建一个"模板任务"标记为定时
-	tid := "sched-" + req.TaskName
+	// N13: 预校验 cron 表达式
+	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
+	if _, err := parser.Parse(req.CronExpr); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    CodeParamError,
+			"message": "invalid cron expression: " + err.Error(),
+		})
+		return
+	}
+
+	// N12: 用 UUID 避免跨用户 TID 碰撞
+	tid := "sched-" + uuid.New().String()[:8]
 	task := &model.HotmethodTask{
 		TID:          tid,
 		Name:         "[定时] " + req.TaskName,
