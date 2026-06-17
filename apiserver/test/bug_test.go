@@ -249,30 +249,21 @@ func TestBug10_TaskDetail_COSURLNotEmpty(t *testing.T) {
 // Bug13+14: main.go 错误处理 — 通过编译即可（运行时错误）
 // 不写测试，直接在代码中修复
 
-// Bug15: auth.go AuthCheck 自动创建用户失败应返回错误
-func TestBug15_AuthCheck_AutoCreateUser(t *testing.T) {
+// Bug15: auth.go AuthCheck 未注册用户应返回 401
+func TestBug15_AuthCheck_UnregisteredUser(t *testing.T) {
 	db := SetupTestDB()
-	// 不预插用户，AuthCheck 应自动创建
+	// 不预插用户，AuthCheck 应返回 401
 	srv, _, _ := CreateTestAPIServer(db)
 	r := SetupTestRouter(srv)
 
 	w := DoAuthRequest(r, "GET", "/api/v1/auth/check", nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("Bug15: expected 200, got %d", w.Code)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("Bug15: expected 401, got %d", w.Code)
 	}
 
-	// 验证用户已被创建
 	resp := ParseJSON(w)
-	data := resp["data"].(map[string]interface{})
-	if data["uid"] != "test-user-1" {
-		t.Fatalf("Bug15: expected uid=test-user-1, got %v", data["uid"])
-	}
-
-	// 验证 DB 中有记录
-	var count int64
-	db.Model(&model.UserInfo{}).Where("uid = ?", "test-user-1").Count(&count)
-	if count == 0 {
-		t.Fatal("Bug15: user should be auto-created in DB")
+	if resp["code"].(float64) != 4010003 {
+		t.Fatalf("Bug15: expected code=4010003, got %v", resp["code"])
 	}
 }
 

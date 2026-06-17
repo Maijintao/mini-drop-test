@@ -9,10 +9,11 @@ import (
 
 // 用户信息
 type UserInfo struct {
-	UID    string         `gorm:"primaryKey;type:varchar(64);column:uid" json:"uid"`
-	Name   string         `gorm:"type:varchar(128);column:name" json:"name"`
-	Groups datatypes.JSON `gorm:"type:jsonb;column:groups" json:"groups"` // []string
-	Key    string         `gorm:"type:varchar(256);column:key" json:"key"`
+	UID          string         `gorm:"primaryKey;type:varchar(64);column:uid" json:"uid"`
+	Name         string         `gorm:"type:varchar(128);column:name" json:"name"`
+	PasswordHash string         `gorm:"type:varchar(128);column:password_hash" json:"-"`
+	Groups       datatypes.JSON `gorm:"type:jsonb;column:groups" json:"groups"` // []string
+	Key          string         `gorm:"type:varchar(256);column:key" json:"key"`
 }
 
 func (UserInfo) TableName() string { return "user_info" }

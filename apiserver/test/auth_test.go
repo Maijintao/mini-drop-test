@@ -5,9 +5,10 @@ import (
 	"testing"
 )
 
-// 测试 AuthCheck 正常鉴权
+// 测试 AuthCheck 正常鉴权（用户已注册）
 func TestAuthCheck_OK(t *testing.T) {
 	db := SetupTestDB()
+	SeedTestData(db) // 预插入用户
 	srv, _, _ := CreateTestAPIServer(db)
 	r := SetupTestRouter(srv)
 

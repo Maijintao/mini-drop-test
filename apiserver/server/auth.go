@@ -2,8 +2,10 @@ package server
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 
 	"mini-drop/apiserver/middleware"
@@ -13,62 +15,153 @@ import (
 // AuthCheck 鉴权检查 — GET /api/v1/auth/check
 func (s *APIServer) AuthCheck(c *gin.Context) {
 	uid := c.GetString(middleware.CtxUID)
-	userName := c.GetString(middleware.CtxUserName)
 
-	// 确保用户存在于 DB，不存在则自动创建
+	// 查找用户（必须已注册）
 	var user model.UserInfo
 	if err := s.Db.Where("uid = ?", uid).First(&user).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
-			user = model.UserInfo{
-				UID:  uid,
-				Name: userName,
-			}
-			if createErr := s.Db.Create(&user).Error; createErr != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{
-					"code":    CodeInternal,
-					"message": "auto-create user failed: " + createErr.Error(),
-				})
-				return
-			}
-		}
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"code":    4010003,
+			"message": "user not found, please register first",
+		})
+		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"code": CodeSuccess,
 		"data": gin.H{
-			"uid":       uid,
-			"user_name": userName,
+			"uid":       user.UID,
+			"user_name": user.Name,
 		},
 	})
 }
 
-// Login 登录端点 — POST /api/v1/auth/login
-// 生成 HMAC token 返回给前端，前端存 cookie 后续请求带上
-func (s *APIServer) Login(c *gin.Context) {
+// Register 注册 — POST /api/v1/auth/register
+func (s *APIServer) Register(c *gin.Context) {
 	var req struct {
-		UID      string `json:"uid" binding:"required"`
-		UserName string `json:"user_name"`
+		Username string `json:"username" binding:"required"`
+		Password string `json:"password" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"code":    CodeParamError,
-			"message": "uid is required",
+			"message": "username and password are required",
 		})
 		return
 	}
 
-	token := middleware.ComputeHMAC(req.UID, s.AuthSecret)
+	username := strings.TrimSpace(req.Username)
+	password := req.Password
 
-	// 同时设置 cookie，兼容纯 cookie 模式
-	c.SetCookie("drop_user_uid", req.UID, 86400*7, "/", "", false, false)
-	c.SetCookie("drop_user_name", req.UserName, 86400*7, "/", "", false, false)
+	if len(username) < 2 || len(username) > 32 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    CodeParamError,
+			"message": "username must be 2-32 characters",
+		})
+		return
+	}
+	if len(password) < 4 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    CodeParamError,
+			"message": "password must be at least 4 characters",
+		})
+		return
+	}
+
+	// 检查用户名是否已存在
+	uid := "user-" + username
+	var existing model.UserInfo
+	if err := s.Db.Where("uid = ?", uid).First(&existing).Error; err == nil {
+		c.JSON(http.StatusConflict, gin.H{
+			"code":    4090001,
+			"message": "username already exists",
+		})
+		return
+	}
+
+	// 哈希密码
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    CodeInternal,
+			"message": "failed to hash password",
+		})
+		return
+	}
+
+	user := model.UserInfo{
+		UID:          uid,
+		Name:         username,
+		PasswordHash: string(hash),
+	}
+	if err := s.Db.Create(&user).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    CodeInternal,
+			"message": "failed to create user: " + err.Error(),
+		})
+		return
+	}
+
+	token := middleware.ComputeHMAC(uid, s.AuthSecret)
+
+	c.SetCookie("drop_user_uid", uid, 86400*7, "/", "", false, false)
+	c.SetCookie("drop_user_name", username, 86400*7, "/", "", false, false)
 	c.SetCookie("drop_user_token", token, 86400*7, "/", "", false, false)
 
 	c.JSON(http.StatusOK, gin.H{
 		"code": CodeSuccess,
 		"data": gin.H{
-			"uid":       req.UID,
-			"user_name": req.UserName,
+			"uid":       uid,
+			"user_name": username,
+			"token":     token,
+		},
+	})
+}
+
+// Login 登录 — POST /api/v1/auth/login
+func (s *APIServer) Login(c *gin.Context) {
+	var req struct {
+		Username string `json:"username" binding:"required"`
+		Password string `json:"password" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    CodeParamError,
+			"message": "username and password are required",
+		})
+		return
+	}
+
+	uid := "user-" + strings.TrimSpace(req.Username)
+
+	var user model.UserInfo
+	if err := s.Db.Where("uid = ?", uid).First(&user).Error; err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"code":    4010004,
+			"message": "invalid username or password",
+		})
+		return
+	}
+
+	// 验证密码
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"code":    4010004,
+			"message": "invalid username or password",
+		})
+		return
+	}
+
+	token := middleware.ComputeHMAC(uid, s.AuthSecret)
+
+	c.SetCookie("drop_user_uid", uid, 86400*7, "/", "", false, false)
+	c.SetCookie("drop_user_name", user.Name, 86400*7, "/", "", false, false)
+	c.SetCookie("drop_user_token", token, 86400*7, "/", "", false, false)
+
+	c.JSON(http.StatusOK, gin.H{
+		"code": CodeSuccess,
+		"data": gin.H{
+			"uid":       uid,
+			"user_name": user.Name,
 			"token":     token,
 		},
 	})

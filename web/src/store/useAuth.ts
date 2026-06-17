@@ -1,12 +1,13 @@
 import { create } from 'zustand';
-import { authCheck, loginApi } from '@/api';
+import { authCheck, loginApi, registerApi } from '@/api';
 
 interface AuthState {
   uid: string;
   userName: string;
   isAuth: boolean;
   loading: boolean;
-  login: (uid?: string, userName?: string) => Promise<void>;
+  login: (username: string, password: string) => Promise<void>;
+  register: (username: string, password: string) => Promise<void>;
   logout: () => void;
   checkAuth: () => Promise<void>;
 }
@@ -15,10 +16,9 @@ const useAuth = create<AuthState>((set) => ({
   uid: '',
   userName: '',
   isAuth: false,
-  loading: true, // 初始为 true，等待校验完成
+  loading: true,
 
   checkAuth: async () => {
-    // 先检查 cookie 是否存在
     const uid = document.cookie.match(/(?:^| )drop_user_uid=([^;]+)/)?.[1];
     if (!uid) {
       set({ isAuth: false, loading: false });
@@ -43,43 +43,32 @@ const useAuth = create<AuthState>((set) => ({
     }
   },
 
-  login: async (uid?: string, userName?: string) => {
-    // 调用后端登录端点获取 HMAC token
-    if (uid && userName) {
-      try {
-        const res: any = await loginApi(uid, userName);
-        if (res.code === 0) {
-          // 后端已通过 Set-Cookie 设置 cookie，前端也存一份 token
-          document.cookie = `drop_user_token=${res.data.token}; path=/; max-age=${7 * 86400}`;
-          set({ uid, userName, isAuth: true, loading: false });
-          return;
-        }
-      } catch {
-        // fallback: 直接设置 cookie（开发模式，无后端）
-      }
-      document.cookie = `drop_user_uid=${uid}; path=/`;
-      document.cookie = `drop_user_name=${encodeURIComponent(userName)}; path=/`;
-      set({ uid, userName, isAuth: true, loading: false });
-      return;
+  login: async (username: string, password: string) => {
+    const res: any = await loginApi(username, password);
+    if (res.code !== 0) {
+      throw new Error(res.message || 'login failed');
     }
+    document.cookie = `drop_user_token=${res.data.token}; path=/; max-age=${7 * 86400}`;
+    set({
+      uid: res.data.uid,
+      userName: res.data.user_name,
+      isAuth: true,
+      loading: false,
+    });
+  },
 
-    // 否则尝试调后端验证
-    set({ loading: true });
-    try {
-      const res: any = await authCheck();
-      if (res.code === 0) {
-        set({
-          uid: res.data.uid,
-          userName: res.data.user_name,
-          isAuth: true,
-          loading: false,
-        });
-      } else {
-        set({ isAuth: false, loading: false });
-      }
-    } catch {
-      set({ isAuth: false, loading: false });
+  register: async (username: string, password: string) => {
+    const res: any = await registerApi(username, password);
+    if (res.code !== 0) {
+      throw new Error(res.message || 'register failed');
     }
+    document.cookie = `drop_user_token=${res.data.token}; path=/; max-age=${7 * 86400}`;
+    set({
+      uid: res.data.uid,
+      userName: res.data.user_name,
+      isAuth: true,
+      loading: false,
+    });
   },
 
   logout: () => {

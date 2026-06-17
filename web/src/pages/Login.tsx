@@ -7,9 +7,13 @@ import useAuth from '@/store/useAuth';
 gsap.registerPlugin(useGSAP);
 
 export default function Login() {
-  const [userName, setUserName] = useState('');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [mode, setMode] = useState<'login' | 'register'>('login');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const login = useAuth((s) => s.login);
+  const [error, setError] = useState('');
+  const { login, register } = useAuth();
   const navigate = useNavigate();
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -22,14 +26,25 @@ export default function Login() {
       .from('.login-hint', { opacity: 0, duration: 0.5 }, 1.0);
   }, { scope: containerRef });
 
-  const handleLogin = async () => {
-    if (!userName.trim()) return;
+  const handleSubmit = async () => {
+    if (!username.trim() || !password) return;
     setLoading(true);
-    const uid = 'user-' + userName.trim();
-    await login(uid, userName.trim());
-    setLoading(false);
-    navigate('/index', { replace: true });
+    setError('');
+    try {
+      if (mode === 'login') {
+        await login(username.trim(), password);
+      } else {
+        await register(username.trim(), password);
+      }
+      navigate('/index', { replace: true });
+    } catch (e: any) {
+      setError(e?.message || (mode === 'login' ? '登录失败' : '注册失败'));
+    } finally {
+      setLoading(false);
+    }
   };
+
+  const canSubmit = username.trim().length >= 2 && password.length >= 4 && !loading;
 
   return (
     <div ref={containerRef} style={{
@@ -63,21 +78,16 @@ export default function Login() {
           maxWidth: 420,
           padding: '48px 40px',
           borderRadius: 20,
-
-          /* 纯透明毛玻璃 */
           background: 'transparent',
           backdropFilter: 'blur(25px)',
           WebkitBackdropFilter: 'blur(25px)',
           border: '0.5px solid transparent',
           backgroundClip: 'padding-box',
-
-          /* 多层阴影营造边框质感 */
           boxShadow:
             'inset 0 0 0 0.5px rgba(255,255,255,0.1), ' +
             'inset 0 1px 0 rgba(255,255,255,0.08), ' +
             '0 0 0 0.5px rgba(255,255,255,0.05), ' +
             '0 4px 24px rgba(0,0,0,0.1)',
-
           color: 'rgba(255,255,255,0.8)',
           overflow: 'hidden',
         }}
@@ -87,12 +97,6 @@ export default function Login() {
           position: 'absolute', top: 0, left: 16, right: 16, height: 1,
           background: 'linear-gradient(90deg, transparent 5%, rgba(255,255,255,0.15) 15%, rgba(255,255,255,0.25) 50%, rgba(255,255,255,0.15) 85%, transparent 95%)',
           borderRadius: '20px 20px 0 0',
-          pointerEvents: 'none',
-        }} />
-        {/* 左侧高光边 */}
-        <div style={{
-          position: 'absolute', top: 16, left: 0, bottom: 16, width: 1,
-          background: 'linear-gradient(180deg, transparent 5%, rgba(255,255,255,0.08) 20%, rgba(255,255,255,0.12) 50%, rgba(255,255,255,0.08) 80%, transparent 95%)',
           pointerEvents: 'none',
         }} />
 
@@ -118,17 +122,17 @@ export default function Login() {
           </p>
         </div>
 
-        {/* 输入框 */}
-        <div className="login-field" style={{ marginBottom: 20, position: 'relative' }}>
+        {/* 用户名 */}
+        <div className="login-field" style={{ marginBottom: 16, position: 'relative' }}>
           <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: 'rgba(255,255,255,0.5)', marginBottom: 8 }}>
             用户名
           </label>
           <input
             type="text"
-            placeholder="输入任意用户名即可登录"
-            value={userName}
-            onChange={(e) => setUserName(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
+            placeholder="2-32 个字符"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
             style={{
               width: '100%', padding: '14px 18px',
               background: 'rgba(255,255,255,0.05)',
@@ -148,40 +152,102 @@ export default function Login() {
           />
         </div>
 
-        {/* 登录按钮 */}
+        {/* 密码 */}
+        <div className="login-field" style={{ marginBottom: 20, position: 'relative' }}>
+          <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: 'rgba(255,255,255,0.5)', marginBottom: 8 }}>
+            密码
+          </label>
+          <div style={{ position: 'relative' }}>
+            <input
+              type={showPassword ? 'text' : 'password'}
+              placeholder="至少 4 个字符"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
+              style={{
+                width: '100%', padding: '14px 48px 14px 18px',
+                background: 'rgba(255,255,255,0.05)',
+                border: '1px solid rgba(255,255,255,0.1)',
+                borderRadius: 14,
+                color: '#fff', fontSize: 15, outline: 'none',
+                transition: 'all 0.2s', boxSizing: 'border-box',
+              }}
+              onFocus={(e) => {
+                e.target.style.borderColor = 'rgba(255,255,255,0.25)';
+                e.target.style.background = 'rgba(255,255,255,0.08)';
+              }}
+              onBlur={(e) => {
+                e.target.style.borderColor = 'rgba(255,255,255,0.1)';
+                e.target.style.background = 'rgba(255,255,255,0.05)';
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword(!showPassword)}
+              style={{
+                position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)',
+                background: 'none', border: 'none', cursor: 'pointer',
+                color: 'rgba(255,255,255,0.4)', fontSize: 13, padding: 4,
+              }}
+            >
+              {showPassword ? '隐藏' : '显示'}
+            </button>
+          </div>
+        </div>
+
+        {/* 错误提示 */}
+        {error && (
+          <div style={{
+            marginBottom: 16, padding: '10px 14px',
+            background: 'rgba(248,113,113,0.1)',
+            border: '1px solid rgba(248,113,113,0.2)',
+            borderRadius: 10, fontSize: 13, color: '#f87171',
+          }}>
+            {error}
+          </div>
+        )}
+
+        {/* 提交按钮 */}
         <button
           className="login-field"
-          onClick={handleLogin}
-          disabled={loading || !userName.trim()}
+          onClick={handleSubmit}
+          disabled={!canSubmit}
           style={{
             width: '100%', padding: '14px 0', marginTop: 4,
-            background: userName.trim() ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.04)',
+            background: canSubmit ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.04)',
             border: '0.5px solid rgba(255,255,255,0.15)',
             borderRadius: 14,
-            color: userName.trim() ? '#fff' : 'rgba(255,255,255,0.3)',
+            color: canSubmit ? '#fff' : 'rgba(255,255,255,0.3)',
             fontSize: 15, fontWeight: 600,
-            cursor: userName.trim() ? 'pointer' : 'not-allowed',
+            cursor: canSubmit ? 'pointer' : 'not-allowed',
             transition: 'all 0.2s',
           }}
           onMouseEnter={(e) => {
-            if (userName.trim()) {
-              e.currentTarget.style.background = 'rgba(255,255,255,0.18)';
-            }
+            if (canSubmit) e.currentTarget.style.background = 'rgba(255,255,255,0.18)';
           }}
           onMouseLeave={(e) => {
-            e.currentTarget.style.background = userName.trim() ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.04)';
+            e.currentTarget.style.background = canSubmit ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.04)';
           }}
         >
-          {loading ? '登录中...' : '登 录'}
+          {loading ? '处理中...' : mode === 'login' ? '登 录' : '注 册'}
         </button>
 
-        {/* 底部提示 */}
+        {/* 切换登录/注册 */}
         <p className="login-hint" style={{
-          textAlign: 'center', fontSize: 12,
-          color: 'rgba(255,255,255,0.3)', marginTop: 32, marginBottom: 0,
+          textAlign: 'center', fontSize: 13,
+          color: 'rgba(255,255,255,0.35)', marginTop: 20, marginBottom: 0,
           position: 'relative',
         }}>
-          开发模式 · 输入任意用户名即可进入
+          {mode === 'login' ? '还没有账号？' : '已有账号？'}
+          <button
+            onClick={() => { setMode(mode === 'login' ? 'register' : 'login'); setError(''); }}
+            style={{
+              background: 'none', border: 'none', color: 'rgba(96,165,250,0.8)',
+              cursor: 'pointer', fontSize: 13, marginLeft: 4,
+            }}
+          >
+            {mode === 'login' ? '去注册' : '去登录'}
+          </button>
         </p>
       </div>
     </div>

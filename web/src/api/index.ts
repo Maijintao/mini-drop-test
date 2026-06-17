@@ -70,8 +70,10 @@ function typedDelete<T>(url: string): Promise<ApiResponse<T>> {
 
 // Auth
 export const authCheck = () => typedGet<{ uid: string; user_name: string }>('/auth/check');
-export const loginApi = (uid: string, userName: string) =>
-  typedPost<{ uid: string; user_name: string; token: string }>('/auth/login', { uid, user_name: userName });
+export const loginApi = (username: string, password: string) =>
+  typedPost<{ uid: string; user_name: string; token: string }>('/auth/login', { username, password });
+export const registerApi = (username: string, password: string) =>
+  typedPost<{ uid: string; user_name: string; token: string }>('/auth/register', { username, password });
 export const getUsers = () => typedGet<any>('/users');
 
 // Agent

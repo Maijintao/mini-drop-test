@@ -176,6 +176,7 @@ func setupRouter(srv *server.APIServer, logger *zap.Logger, cfg config.Config) *
 			c.JSON(http.StatusOK, gin.H{"status": "ok"})
 		})
 		api.POST("/auth/login", srv.Login)
+		api.POST("/auth/register", srv.Register)
 
 		// 需要鉴权
 		auth := api.Group("")
