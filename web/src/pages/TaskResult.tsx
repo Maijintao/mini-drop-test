@@ -157,7 +157,7 @@ export default function TaskResult() {
   }, [loadTask]);
 
   useEffect(() => {
-    if (!task || task.status >= 2) return;
+    if (!task || task.status >= 3) return;
     const id = window.setInterval(loadTask, 3000);
     return () => window.clearInterval(id);
   }, [task, loadTask]);

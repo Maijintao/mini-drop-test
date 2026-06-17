@@ -101,9 +101,9 @@ export default function Agents() {
       {/* Stats Row */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 24 }}>
         {[
-          { label: '在线 Agent', value: String(onlineCount), color: '#4ade80' },
-          { label: '离线 Agent', value: String(offlineCount), color: 'rgba(255,255,255,0.4)' },
-          { label: '总 Agent', value: String(agents.length), color: '#60a5fa' },
+          { label: '在线 Agent', value: String(onlineCount), color: '#fff' },
+          { label: '离线 Agent', value: String(offlineCount), color: '#fff' },
+          { label: '总 Agent', value: String(agents.length), color: '#fff' },
         ].map((s, i) => (
           <div key={i} style={{ ...glassCard, padding: '20px 16px' }}>
             <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.45)', marginBottom: 12 }}>{s.label}</div>

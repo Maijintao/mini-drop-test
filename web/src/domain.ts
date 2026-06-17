@@ -141,8 +141,9 @@ export interface AgentStatData {
 export const statusMap: Record<number, { label: string; color: string }> = {
   0: { label: '新建', color: 'rgba(255,255,255,0.45)' },
   1: { label: '执行中', color: '#60a5fa' },
-  2: { label: '成功', color: '#4ade80' },
-  3: { label: '失败', color: '#f87171' },
+  2: { label: '上传中', color: '#fbbf24' },
+  3: { label: '成功', color: '#4ade80' },
+  4: { label: '失败', color: '#f87171' },
 };
 
 export const analysisMap: Record<number, { label: string; color: string }> = {

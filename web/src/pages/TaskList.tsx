@@ -115,8 +115,8 @@ export default function TaskList() {
   const stats = useMemo(() => ({
     total,
     running: tasks.filter(task => task.status === 1).length,
-    done: tasks.filter(task => task.status === 2).length,
-    failed: tasks.filter(task => task.status === 3).length,
+    done: tasks.filter(task => task.status === 3).length,
+    failed: tasks.filter(task => task.status === 4).length,
   }), [tasks, total]);
 
   const submitCreate = async () => {
@@ -170,9 +170,9 @@ export default function TaskList() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 24 }}>
         {[
           { label: '总任务', value: String(stats.total), color: '#fff' },
-          { label: '进行中', value: String(stats.running), color: '#60a5fa' },
-          { label: '已完成', value: String(stats.done), color: '#4ade80' },
-          { label: '失败', value: String(stats.failed), color: '#f87171' },
+          { label: '进行中', value: String(stats.running), color: '#fff' },
+          { label: '已完成', value: String(stats.done), color: '#fff' },
+          { label: '失败', value: String(stats.failed), color: '#fff' },
         ].map((s) => (
           <div key={s.label} style={{ ...glassCard, padding: '16px' }}>
             <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.35)', marginBottom: 6 }}>{s.label}</div>

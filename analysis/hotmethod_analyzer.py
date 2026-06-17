@@ -48,6 +48,7 @@ from analyzers.pprof_heap_parser import parse_heap_text, parse_heap_csv
 from analyzers.resource_analyzer import parse_pidstat_csv, analyze_resources, samples_to_json
 from analyzers.biotrace import parse_biosnoop_csv, analyze_biosnoop, stats_to_json as biotrace_to_json
 from analyzers.bw_sync_analyzer import analyze_bw_sync_csv, analyze_bw_sync_json
+from analyzers.tracing_analyzer import parse_tracing_json, parse_tracing_csv, analyze_tracing, tracing_to_json
 from analyzers.namespace_parse import parse_pid_namespaces, namespaces_to_json
 from analyzers.assembly_code_analyzer import parse_objdump, stats_to_json as asm_to_json
 from analyzers.memleak_analyzer import analyze_memleak
@@ -135,16 +136,23 @@ def main():
         has_collapsed = False
 
         for fname in candidate_files:
-            key = f"{tid}/{fname}"
             local_path = os.path.join(work_dir, fname)
-            if store.exists(key):
-                store.download(key, local_path)
-                log.info("downloaded %s", key)
-                if fname == "collapsed.txt":
-                    pre_collapsed_path = local_path
-                    has_collapsed = True
-                elif raw_path is None:
-                    raw_path = local_path
+            # 兼容两种前缀: {tid}/ (analysis 产出) 和 profiler/{tid}/ (agent 上传)
+            key = None
+            for prefix in [f"{tid}/", f"profiler/{tid}/"]:
+                candidate = prefix + fname
+                if store.exists(candidate):
+                    key = candidate
+                    break
+            if key is None:
+                continue
+            store.download(key, local_path)
+            log.info("downloaded %s", key)
+            if fname == "collapsed.txt":
+                pre_collapsed_path = local_path
+                has_collapsed = True
+            elif raw_path is None:
+                raw_path = local_path
 
         if raw_path is None and pre_collapsed_path is None:
             error_exit(f"no data found for task_type={task_type}, tried: {candidate_files}", ERR_NOT_FOUND)
@@ -315,29 +323,23 @@ def run_java_heap(hprof_path: str, work_dir: str, tid: str) -> dict:
 
 
 def run_tracing(data_path: str, work_dir: str, tid: str) -> dict:
-    """Tracing 分析（时序异常检测）"""
-    result_path = os.path.join(work_dir, "bw_sync.json")
+    """Tracing 分析（时序延迟统计）"""
+    result_path = os.path.join(work_dir, "tracing_stats.json")
     with open(data_path, "r") as f:
         content = f.read()
 
     # 根据文件扩展名选择解析器
     if data_path.endswith(".json"):
-        result = analyze_bw_sync_json(content)
+        events = parse_tracing_json(content)
     else:
-        result = analyze_bw_sync_csv(content)
+        events = parse_tracing_csv(content)
 
-    import json
+    result = analyze_tracing(events)
+
     with open(result_path, "w") as f:
-        json.dump({
-            "total_events": result.total_events,
-            "sync_events": len(result.sync_events),
-            "sync_ratio": result.sync_ratio,
-            "avg_latency_ms": result.avg_latency_ms,
-            "max_latency_ms": result.max_latency_ms,
-            "summary": result.summary,
-        }, f, indent=2)
-    log.info("bw_sync -> %s", result_path)
-    return {result_path: "bw_sync.json"}
+        f.write(tracing_to_json(result))
+    log.info("tracing -> %s (%d events)", result_path, len(events))
+    return {result_path: "tracing_stats.json"}
 
 
 def run_resource_analysis(data_path: str, work_dir: str, tid: str) -> dict:
