@@ -7,6 +7,7 @@ import {
   ClusterOutlined,
   ControlOutlined,
   DeploymentUnitOutlined,
+  FireOutlined,
   UnorderedListOutlined,
 } from '@ant-design/icons';
 import useAuth from '@/store/useAuth';
@@ -16,6 +17,7 @@ gsap.registerPlugin(useGSAP);
 const NAV_ITEMS = [
   { path: '/index', label: '概览', icon: AppstoreOutlined },
   { path: '/tasks', label: '任务列表', icon: UnorderedListOutlined },
+  { path: '/flame/diff', label: '火焰图对比', icon: FireOutlined },
   { path: '/agents', label: 'Agent 管理', icon: DeploymentUnitOutlined },
   { path: '/groups', label: '用户组', icon: ClusterOutlined },
   { path: '/settings', label: '设置', icon: ControlOutlined },

@@ -123,6 +123,22 @@ export interface TopFunction {
   total: number;
 }
 
+export interface DiffTreeNode {
+  name: string;
+  delta: number;
+  value: number;
+  children?: DiffTreeNode[];
+}
+
+export interface FlameDiffResult {
+  added: TopFunction[];
+  removed: TopFunction[];
+  changed: TopFunction[];
+  tree?: DiffTreeNode;
+  base_tid: string;
+  curr_tid: string;
+}
+
 export interface PidStats {
   pid?: number;
   cpu_percent?: number;

@@ -11,7 +11,7 @@ import (
 )
 
 // FlameDiff 火焰图 diff 计算 — POST /api/v1/flame/diff
-// 对比两次采集的折叠栈，找出新增/消失/变化的热点函数
+// 对比两次采集的折叠栈，返回层次化 diff 树（differential flame graph）
 func (s *APIServer) FlameDiff(c *gin.Context) {
 	var req struct {
 		TID1 string `json:"tid1" binding:"required"` // 基准任务
@@ -25,32 +25,54 @@ func (s *APIServer) FlameDiff(c *gin.Context) {
 		return
 	}
 
-	// 从存储获取两次的 TopN 数据
+	// 优先加载 collapsed.txt（层次数据）
+	collapsed1 := s.loadCollapsed(c, req.TID1)
+	collapsed2 := s.loadCollapsed(c, req.TID2)
+
+	// 回退到 top.json（扁平数据）
 	top1 := s.loadTopN(c, req.TID1)
 	top2 := s.loadTopN(c, req.TID2)
 
-	if top1 == nil || top2 == nil {
+	if top1 == nil && collapsed1 == "" {
 		c.JSON(http.StatusNotFound, gin.H{
 			"code":    CodeNotFound,
-			"message": "top.json not found for one or both tasks",
+			"message": "no profiling data found for task " + req.TID1,
+		})
+		return
+	}
+	if top2 == nil && collapsed2 == "" {
+		c.JSON(http.StatusNotFound, gin.H{
+			"code":    CodeNotFound,
+			"message": "no profiling data found for task " + req.TID2,
 		})
 		return
 	}
 
-	// 计算 diff
+	// 计算扁平 diff
 	added := diffAdded(top1, top2)
-	removed := diffAdded(top2, top1) // 反向就是 removed
+	removed := diffAdded(top2, top1)
 	changed := diffChanged(top1, top2)
+
+	// 计算层次 diff 树
+	var tree *DiffTreeNode
+	if collapsed1 != "" && collapsed2 != "" {
+		tree = buildDiffTree(collapsed1, collapsed2)
+	}
+
+	data := gin.H{
+		"added":    added,
+		"removed":  removed,
+		"changed":  changed,
+		"base_tid": req.TID1,
+		"curr_tid": req.TID2,
+	}
+	if tree != nil {
+		data["tree"] = tree
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"code": CodeSuccess,
-		"data": gin.H{
-			"added":    added,
-			"removed":  removed,
-			"changed":  changed,
-			"base_tid": req.TID1,
-			"curr_tid": req.TID2,
-		},
+		"data": data,
 	})
 }
 
@@ -201,4 +223,149 @@ func normalizeFunc(name string) string {
 		return name[:idx]
 	}
 	return name
+}
+
+// ============================================================
+// Differential Flame Graph — 层次 diff 树
+// ============================================================
+
+// DiffTreeNode 差异火焰图节点
+type DiffTreeNode struct {
+	Name     string          `json:"name"`
+	Delta    int64           `json:"delta"`    // 本节点自身 delta（叶子 = stack delta，非叶子 = 0）
+	Value    int64           `json:"value"`    // 子树 delta 绝对值总和（用于宽度）
+	Children []*DiffTreeNode `json:"children,omitempty"`
+}
+
+// loadCollapsed 从存储加载 collapsed.txt
+func (s *APIServer) loadCollapsed(c *gin.Context, tid string) string {
+	key := tid + "/collapsed.txt"
+	reader, err := s.Storage.Get(c, key)
+	if err != nil {
+		return ""
+	}
+	defer reader.Close()
+
+	data, err := io.ReadAll(reader)
+	if err != nil || len(data) == 0 {
+		return ""
+	}
+	return string(data)
+}
+
+// buildDiffTree 从两个 collapsed 文本计算差异火焰图树。
+// 算法（Brendan Gregg differential flame graph）：
+//  1. 解析两个 folded stacks 为 map[stack]count
+//  2. 对每个唯一 stack 计算 delta:
+//     - 两边都有: delta = count2 - count1
+//     - 只在 base: delta = -count1
+//     - 只在 compare: delta = +count2
+//  3. 从 delta stacks 构建层次树
+func buildDiffTree(collapsed1, collapsed2 string) *DiffTreeNode {
+	// 解析 folded stacks
+	stacks1 := parseFoldedStacks(collapsed1)
+	stacks2 := parseFoldedStacks(collapsed2)
+
+	// 合并 delta
+	type stackDelta struct {
+		frames []string
+		delta  int64
+	}
+	var deltas []stackDelta
+
+	visited := make(map[string]bool)
+	for stack, c1 := range stacks1 {
+		if c2, ok := stacks2[stack]; ok {
+			deltas = append(deltas, stackDelta{strings.Split(stack, ";"), c2 - c1})
+		} else {
+			deltas = append(deltas, stackDelta{strings.Split(stack, ";"), -c1})
+		}
+		visited[stack] = true
+	}
+	for stack, c2 := range stacks2 {
+		if !visited[stack] {
+			deltas = append(deltas, stackDelta{strings.Split(stack, ";"), c2})
+		}
+	}
+
+	if len(deltas) == 0 {
+		return nil
+	}
+
+	// 构建树
+	root := &DiffTreeNode{Name: "all"}
+	for _, d := range deltas {
+		node := root
+		for _, frame := range d.frames {
+			child := findOrCreateChild(node, frame)
+			node = child
+		}
+		node.Delta += d.delta
+	}
+
+	// 计算每个节点的 Value（子树 delta 绝对值总和）
+	computeTreeValue(root)
+
+	return root
+}
+
+// parseFoldedStacks 解析 folded 格式: "func1;func2;func3 count"
+func parseFoldedStacks(text string) map[string]int64 {
+	stacks := make(map[string]int64)
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		lastSpace := strings.LastIndex(line, " ")
+		if lastSpace <= 0 {
+			continue
+		}
+		stack := line[:lastSpace]
+		count := parseInt64(line[lastSpace+1:])
+		if count > 0 {
+			stacks[stack] += count
+		}
+	}
+	return stacks
+}
+
+func parseInt64(s string) int64 {
+	var n int64
+	for _, c := range s {
+		if c >= '0' && c <= '9' {
+			n = n*10 + int64(c-'0')
+		} else {
+			break
+		}
+	}
+	return n
+}
+
+func findOrCreateChild(node *DiffTreeNode, name string) *DiffTreeNode {
+	for _, child := range node.Children {
+		if child.Name == name {
+			return child
+		}
+	}
+	child := &DiffTreeNode{Name: name}
+	node.Children = append(node.Children, child)
+	return child
+}
+
+// computeTreeValue 递归计算每个节点的 Value = |Delta| + sum(children.Value)
+func computeTreeValue(node *DiffTreeNode) int64 {
+	total := abs(node.Delta)
+	for _, child := range node.Children {
+		total += computeTreeValue(child)
+	}
+	node.Value = total
+	return total
+}
+
+func abs(n int64) int64 {
+	if n < 0 {
+		return -n
+	}
+	return n
 }

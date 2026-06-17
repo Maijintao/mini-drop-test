@@ -7,6 +7,7 @@ import type {
   CosFile,
   CreateScheduleTaskParams,
   CreateTaskParams,
+  FlameDiffResult,
   GroupInfo,
   GroupMemberInfo,
   HotmethodTask,
@@ -95,6 +96,8 @@ export const triggerAnalysis = (tid: string) => typedPost<unknown>(`/tasks/${tid
 
 // Flame
 export const getFlameData = (tid: string) => typedGet<{ type: string; url: string }>(`/tasks/${tid}/flame`);
+export const flameDiff = (tid1: string, tid2: string) =>
+  typedPost<FlameDiffResult>('/flame/diff', { tid1, tid2 });
 
 export const fetchSignedJson = async <T>(url: string): Promise<T> => {
   const res = await axios.get<T>(url, { withCredentials: false, timeout: 30000 });

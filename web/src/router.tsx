@@ -9,6 +9,7 @@ import Agents from '@/pages/Agents';
 import Settings from '@/pages/Settings';
 import Groups from '@/pages/Groups';
 import AgentDetail from '@/pages/AgentDetail';
+import FlameDiff from '@/pages/FlameDiff';
 
 const router = createBrowserRouter([
   {
@@ -23,6 +24,7 @@ const router = createBrowserRouter([
       { path: 'index', element: <Home /> },
       { path: 'tasks', element: <TaskList /> },
       { path: 'task/result', element: <TaskResult /> },
+      { path: 'flame/diff', element: <FlameDiff /> },
       { path: 'agents', element: <Agents /> },
       { path: 'agents/:ip', element: <AgentDetail /> },
       { path: 'groups', element: <Groups /> },

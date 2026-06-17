@@ -4,7 +4,7 @@ import axios from 'axios';
 import { useGSAP } from '@gsap/react';
 import gsap from 'gsap';
 import { Button, Card, Table, Tabs, Typography, Space, message, Spin, Empty, Statistic, Row, Col } from 'antd';
-import { ReloadOutlined, PlayCircleOutlined, ArrowLeftOutlined } from '@ant-design/icons';
+import { ReloadOutlined, PlayCircleOutlined, ArrowLeftOutlined, FireOutlined } from '@ant-design/icons';
 import { fetchSignedJson, getCosFiles, getFlameData, getSuggestions, getTaskDetail, triggerAnalysis } from '@/api';
 import type { AnalysisSuggestion, CosFile, HotmethodTask, TopFunction } from '@/domain';
 import { analysisMap, basename, formatDate, formatDuration, parseTaskParams, profilerTypeMap, statusMap, taskTypeMap } from '@/domain';
@@ -312,6 +312,7 @@ export default function TaskResult() {
           </div>
           <Space>
             <Button icon={<ReloadOutlined />} onClick={loadTask}>刷新</Button>
+            <Button icon={<FireOutlined />} onClick={() => navigate(`/flame/diff?tid1=${tid}`)}>火焰图对比</Button>
             <Button type="primary" icon={<PlayCircleOutlined />} onClick={runAnalysis} disabled={!task || task.status !== 2}>触发分析</Button>
           </Space>
         </div>
