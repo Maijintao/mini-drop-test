@@ -217,11 +217,18 @@ func setupRouter(srv *server.APIServer, logger *zap.Logger, cfg config.Config) *
 			auth.POST("/group/:gid/members", srv.AddMember)
 			auth.DELETE("/group/:gid/members/:uid", srv.RemoveMember)
 			auth.GET("/group/:gid/members", srv.GetGroupMembers)
+			auth.POST("/group/:gid/agents", srv.AddAgent)
 
 			// Schedule
 			auth.POST("/schedule/task", srv.CreateScheduleTask)
 			auth.GET("/schedule/tasks", srv.GetScheduleTasks)
 			auth.DELETE("/schedule/task/:tid", srv.DeleteScheduleTask)
+
+			// Multi Tasks
+			auth.POST("/multi_tasks", srv.CreateMultiTask)
+			auth.GET("/multi_tasks", srv.ListMultiTasks)
+			auth.GET("/multi_tasks/:tid", srv.GetMultiTask)
+			auth.DELETE("/multi_tasks/:tid", srv.DeleteMultiTask)
 		}
 	}
 

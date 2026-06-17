@@ -236,3 +236,50 @@ func (s *APIServer) GetGroupMembers(c *gin.Context) {
 		"data": members,
 	})
 }
+
+// AddAgent 将 Agent 分配到组 — POST /api/v1/group/:gid/agents
+func (s *APIServer) AddAgent(c *gin.Context) {
+	uid := c.GetString(middleware.CtxUID)
+	gid := c.Param("gid")
+
+	var req AddAgentReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    CodeParamError,
+			"message": err.Error(),
+		})
+		return
+	}
+
+	// 校验是否 owner
+	var group model.Group
+	if err := s.Db.Where("gid = ? AND owner_id = ?", gid, uid).First(&group).Error; err != nil {
+		c.JSON(http.StatusForbidden, gin.H{
+			"code":    CodeForbidden,
+			"message": "not group owner",
+		})
+		return
+	}
+
+	// 更新 Agent 的 GID
+	result := s.Db.Model(&model.AgentInfo{}).Where("id = ?", req.AgentID).Update("gid", group.GID)
+	if result.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    CodeInternal,
+			"message": result.Error.Error(),
+		})
+		return
+	}
+	if result.RowsAffected == 0 {
+		c.JSON(http.StatusNotFound, gin.H{
+			"code":    CodeNotFound,
+			"message": "agent not found",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code":    CodeSuccess,
+		"message": "agent added to group",
+	})
+}

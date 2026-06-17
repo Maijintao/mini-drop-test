@@ -122,6 +122,16 @@ type TaskStateHistory struct {
 
 func (TaskStateHistory) TableName() string { return "task_state_history" }
 
+// 任务标签
+type Tag struct {
+	ID    uint   `gorm:"primaryKey;autoIncrement;column:id" json:"id"`
+	TID   string `gorm:"type:varchar(64);index;column:tid" json:"tid"`
+	Key   string `gorm:"type:varchar(128);column:key" json:"key"`
+	Value string `gorm:"type:varchar(256);column:value" json:"value"`
+}
+
+func (Tag) TableName() string { return "tag" }
+
 // AutoMigrate 自动建表
 func AutoMigrate(db *gorm.DB) error {
 	return db.AutoMigrate(
@@ -133,5 +143,6 @@ func AutoMigrate(db *gorm.DB) error {
 		&GroupMember{},
 		&AnalysisSuggestion{},
 		&TaskStateHistory{},
+		&Tag{},
 	)
 }

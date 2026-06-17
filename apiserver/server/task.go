@@ -308,6 +308,7 @@ func (s *APIServer) DeleteTask(c *gin.Context) {
 		}
 		tx.Where("tid = ?", tid).Delete(&model.AnalysisSuggestion{})
 		tx.Where("tid = ?", tid).Delete(&model.TaskStateHistory{})
+		tx.Where("tid = ?", tid).Delete(&model.Tag{})
 		return nil
 	})
 	if err != nil {
@@ -709,4 +710,99 @@ func (s *APIServer) checkTaskAccess(c *gin.Context, tid string) (*model.Hotmetho
 	}
 
 	return &task, true
+}
+
+// ---------- 组合任务 CRUD ----------
+
+type CreateMultiTaskReq struct {
+	TID         string   `json:"tid" binding:"required"`
+	SubTIDs     []string `json:"sub_tids" binding:"required,min=2"`
+	Type        int      `json:"type"`
+	TriggerType int      `json:"trigger_type"`
+}
+
+// CreateMultiTask 创建组合任务 — POST /api/v1/multi_tasks
+func (s *APIServer) CreateMultiTask(c *gin.Context) {
+	var req CreateMultiTaskReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    CodeParamError,
+			"message": err.Error(),
+		})
+		return
+	}
+
+	subTIDsJSON, _ := datatypes.NewJSONType(req.SubTIDs).MarshalJSON()
+	mt := &model.MultiTask{
+		TID:         req.TID,
+		SubTIDs:     subTIDsJSON,
+		Type:        req.Type,
+		TriggerType: req.TriggerType,
+	}
+	if err := s.Db.Create(mt).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    CodeInternal,
+			"message": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code": CodeSuccess,
+		"data": mt,
+	})
+}
+
+// GetMultiTask 获取组合任务 — GET /api/v1/multi_tasks/:tid
+func (s *APIServer) GetMultiTask(c *gin.Context) {
+	tid := c.Param("tid")
+	var mt model.MultiTask
+	if err := s.Db.Where("tid = ?", tid).First(&mt).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"code":    CodeNotFound,
+			"message": "multi task not found",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code": CodeSuccess,
+		"data": mt,
+	})
+}
+
+// ListMultiTasks 列出组合任务 — GET /api/v1/multi_tasks
+func (s *APIServer) ListMultiTasks(c *gin.Context) {
+	var tasks []model.MultiTask
+	s.Db.Order("created_at DESC").Find(&tasks)
+
+	c.JSON(http.StatusOK, gin.H{
+		"code": CodeSuccess,
+		"data": tasks,
+	})
+}
+
+// DeleteMultiTask 删除组合任务 — DELETE /api/v1/multi_tasks/:tid
+func (s *APIServer) DeleteMultiTask(c *gin.Context) {
+	tid := c.Param("tid")
+	result := s.Db.Where("tid = ?", tid).Delete(&model.MultiTask{})
+	if result.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    CodeInternal,
+			"message": result.Error.Error(),
+		})
+		return
+	}
+	if result.RowsAffected == 0 {
+		c.JSON(http.StatusNotFound, gin.H{
+			"code":    CodeNotFound,
+			"message": "multi task not found",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code":    CodeSuccess,
+		"message": "deleted",
+	})
 }

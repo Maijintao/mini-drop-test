@@ -34,13 +34,19 @@ api.interceptors.request.use((cfg) => {
   return cfg;
 });
 
-// 响应拦截器：401 跳转登录
+// 响应拦截器：401 跳转登录（双重判断：HTTP 401 + 业务码 4010001）
 api.interceptors.response.use(
   (r) => r.data,
   (err) => {
-    if (err.response?.status === 401) {
-      const location = err.response.data?.data?.location || '/login';
-      window.location.href = location;
+    if (err.response?.status === 401 && err.response.data?.code === 4010001) {
+      const raw = err.response.data.data?.location || '/login';
+      try {
+        const loc = new URL(raw, window.location.origin);
+        loc.searchParams.set('redirect_uri', window.location.href);
+        window.location.href = loc.toString();
+      } catch {
+        window.location.href = raw;
+      }
     }
     return Promise.reject(err);
   }

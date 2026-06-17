@@ -2,6 +2,7 @@
 import os
 import time
 import logging
+from abc import ABC, abstractmethod
 from minio import Minio
 from minio.error import S3Error
 
@@ -27,7 +28,23 @@ def _retry(fn, *args, **kwargs):
     raise last_exc
 
 
-class MinIOStorage:
+class Storage(ABC):
+    """存储抽象基类"""
+
+    @abstractmethod
+    def download(self, key: str, local_path: str) -> str:
+        """下载文件到本地"""
+
+    @abstractmethod
+    def upload(self, local_path: str, key: str) -> str:
+        """上传本地文件"""
+
+    @abstractmethod
+    def exists(self, key: str) -> bool:
+        """检查对象是否存在"""
+
+
+class MinIOStorage(Storage):
     """MinIO 存储客户端"""
 
     def __init__(self, endpoint: str, access_key: str, secret_key: str,

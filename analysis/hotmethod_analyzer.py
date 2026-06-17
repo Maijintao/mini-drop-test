@@ -45,6 +45,7 @@ from data_parser.collapsed_parser import (
 from analyzers.flamegraph import perf_script_to_collapsed, collapsed_to_svg
 from analyzers.topn import analyze_topn, topn_to_json
 from analyzers.advisor import load_rules, match_rules, suggestions_to_markdown
+from ai_advisor import generate_ai_suggestion
 from analyzers.pprof_data_parser import parse_pprof_text, parse_pprof_csv
 from analyzers.pprof_heap_parser import parse_heap_text, parse_heap_csv
 from analyzers.resource_analyzer import parse_pidstat_csv, analyze_resources, samples_to_json
@@ -606,10 +607,12 @@ def _write_suggestions_to_apiserver(api: APIServerClient, tid: str,
 
     for func, advice in matches:
         try:
+            ai_text = generate_ai_suggestion(func.strip(), advice.strip())
             api.create_suggestion(
                 tid=tid,
                 func=func.strip(),
                 suggestion=advice.strip(),
+                ai_suggestion=ai_text,
             )
         except Exception as e:
             log.warning("failed to write suggestion for %s: %s", func, e)
