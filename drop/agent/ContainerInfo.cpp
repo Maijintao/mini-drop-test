@@ -27,12 +27,33 @@ ContainerInfo ContainerInfo::Detect() {
   }
 
   if (info.is_container) {
-    // 读取容器 ID
+    // N20: 读取容器 ID，支持 docker / containerd / cgroup v2
     std::ifstream cgroup_self("/proc/self/cgroup");
     while (std::getline(cgroup_self, line)) {
+      // docker: .../docker-<id>
       size_t pos = line.find("docker-");
       if (pos != std::string::npos) {
         info.container_id = line.substr(pos + 7, 12);
+        break;
+      }
+      // containerd: .../cri-containerd-<id>
+      pos = line.find("cri-containerd-");
+      if (pos != std::string::npos) {
+        info.container_id = line.substr(pos + 15, 12);
+        break;
+      }
+      // cgroup v2: .../<id>.scope
+      pos = line.find(".scope");
+      if (pos != std::string::npos && pos >= 12) {
+        // 往前找 '/' 取 ID 部分
+        size_t slash = line.rfind('/', pos);
+        if (slash != std::string::npos) {
+          info.container_id = line.substr(slash + 1, pos - slash - 1);
+          // 截断到 12 字符
+          if (info.container_id.size() > 12) {
+            info.container_id = info.container_id.substr(0, 12);
+          }
+        }
         break;
       }
     }

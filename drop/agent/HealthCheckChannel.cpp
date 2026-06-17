@@ -83,8 +83,8 @@ void HealthCheckChannel::HeartbeatLoop() {
     children_agg.set_read_kb_per_sec(0.0);
     children_agg.set_write_kb_per_sec(0.0);
 
-    std::string children_path = "/proc/" + std::to_string(getpid()) + "/task/" +
-                                std::to_string(getpid()) + "/children";
+    // N18: 正确路径是 /proc/<pid>/children，不需要 /task/<pid>/
+    std::string children_path = "/proc/" + std::to_string(getpid()) + "/children";
     std::ifstream children_file(children_path);
     if (children_file.is_open()) {
       std::string child_pid_str;
@@ -107,7 +107,8 @@ void HealthCheckChannel::HeartbeatLoop() {
 
     HealthCheckResponse response;
     grpc::ClientContext context;
-    context.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(5));
+    // N17: deadline 3s，避免与 5s 心跳间隔重叠导致实际间隔翻倍
+    context.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(3));
 
     auto status = stub_->Do(&context, request, &response);
     if (status.ok()) {

@@ -11,6 +11,11 @@ namespace drop {
 
 int AsyncProfiler::Record(int pid, int duration_sec, int freq,
                            const std::string& output_path) {
+  // N15: 参数校验，防止除零
+  if (freq <= 0) {
+    freq = 99;
+  }
+
   // async-profiler 命令：
   // asprof -d <duration> -f <output> -e cpu -i <interval> <pid>
   std::vector<std::string> args = {

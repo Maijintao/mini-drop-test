@@ -143,8 +143,7 @@ END
 
 std::string BpftraceProfiler::GenerateSchedProbeScript(int pid, int duration) {
   // bpftrace 脚本：追踪调度延迟（从 wakeup 到被调度上 CPU 的等待时间）
-  // sched_wakeup: 进程被唤醒，记录时间
-  // sched_switch: 目标进程被调度上 CPU（next_pid），计算延迟
+  // N16: 用 curtask->tgid 替代 args->next_pid，正确匹配多线程进程的所有线程
   return R"(
 tracepoint:sched:sched_wakeup
 /args->pid == )" + std::to_string(pid) + R"( /
@@ -153,7 +152,7 @@ tracepoint:sched:sched_wakeup
 }
 
 tracepoint:sched:sched_switch
-/args->next_pid == )" + std::to_string(pid) + R"( && @start[args->next_pid]/
+/curtask->tgid == )" + std::to_string(pid) + R"( && @start[args->next_pid]/
 {
   @usecs = hist((nsecs - @start[args->next_pid]) / 1000);
   delete(@start[args->next_pid]);

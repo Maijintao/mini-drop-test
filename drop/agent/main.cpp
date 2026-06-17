@@ -106,10 +106,7 @@ int main(int argc, char* argv[]) {
     auto channel = grpc::CreateChannel(server_addr, grpc::InsecureChannelCredentials());
     auto init_stub = drop::Init::NewStub(channel);
 
-    // 注册
-    grpc::ClientContext ctx;
-    ctx.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(5));
-
+    // N19: 注册失败重试 3 次，仍失败则退出
     drop::RegisterAgentRequest req;
     char hostname[256];
     gethostname(hostname, sizeof(hostname));
@@ -118,13 +115,26 @@ int main(int argc, char* argv[]) {
     req.set_uid(config.uid);
     req.set_agent_version("0.1.0");
 
-    drop::RegisterAgentResponse resp;
-    auto status = init_stub->RegisterAgent(&ctx, req, &resp);
-    if (status.ok() && resp.code() == 0) {
-      LOG_INFO("[Register] Agent registered successfully");
-    } else {
-      LOG_ERROR("[Register] Agent registration failed: " +
+    bool registered = false;
+    for (int attempt = 1; attempt <= 3; attempt++) {
+      grpc::ClientContext ctx;
+      ctx.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(5));
+      drop::RegisterAgentResponse resp;
+      auto status = init_stub->RegisterAgent(&ctx, req, &resp);
+      if (status.ok() && resp.code() == 0) {
+        LOG_INFO("[Register] Agent registered successfully");
+        registered = true;
+        break;
+      }
+      LOG_ERROR("[Register] Attempt " + std::to_string(attempt) + "/3 failed: " +
                 (status.ok() ? resp.message() : status.error_message()));
+      if (attempt < 3) {
+        std::this_thread::sleep_for(std::chrono::seconds(2));
+      }
+    }
+    if (!registered) {
+      LOG_ERROR("[Register] All attempts failed, exiting");
+      return 1;
     }
 
     // 拉取服务端配置（存储配置等）
