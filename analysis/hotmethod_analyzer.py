@@ -136,21 +136,22 @@ def main():
     try:
         # 6. 按 task_type 下载对应的原始数据
         # 不同任务类型的输入文件不同
+        # NOTE: agent 上传路径为 profiler/{tid}/{tid}.ext，需兼容两种命名
         FILE_MAP = {
-            0:  ["perf.data", "collapsed.txt"],           # CPU 火焰图
-            1:  ["heap.hprof", "perf.data"],              # Java Heap / Profiling
-            2:  ["tracing.json", "tracing.csv"],          # Tracing
-            4:  ["memleak.xml", "memleak.txt", "memleak.json"],  # MemCheck
-            5:  ["pidstat.csv", "pidstat.json"],          # Resource Analysis
-            6:  ["biosnoop.csv", "biosnoop.json"],        # eBPF Biosnoop
-            7:  ["bw_sync.json", "bw_sync.csv"],          # BW Sync
-            8:  ["namespace.txt"],                        # Namespace
-            9:  ["assembly.txt", "objdump.txt"],          # Assembly
-            10: ["pprof.cpu", "pprof.pb.gz"],             # pprof CPU
-            11: ["pprof.heap", "pprof_heap.pb.gz"],       # pprof Heap
+            0:  ["perf.data", "collapsed.txt", f"{tid}.data", f"{tid}.txt"],  # CPU 火焰图
+            1:  ["heap.hprof", "perf.data", f"{tid}.hprof", f"{tid}.data"],   # Java Heap / Profiling
+            2:  ["tracing.json", "tracing.csv", f"{tid}.json", f"{tid}.csv"], # Tracing
+            4:  ["memleak.xml", "memleak.txt", "memleak.json"],              # MemCheck
+            5:  ["pidstat.csv", "pidstat.json"],                             # Resource Analysis
+            6:  ["biosnoop.csv", "biosnoop.json"],                           # eBPF Biosnoop
+            7:  ["bw_sync.json", "bw_sync.csv"],                             # BW Sync
+            8:  ["namespace.txt"],                                           # Namespace
+            9:  ["assembly.txt", "objdump.txt"],                             # Assembly
+            10: ["pprof.cpu", "pprof.pb.gz", f"{tid}.pb.gz"],               # pprof CPU
+            11: ["pprof.heap", "pprof_heap.pb.gz", f"{tid}.pb.gz"],         # pprof Heap
         }
 
-        candidate_files = FILE_MAP.get(task_type, ["perf.data", "collapsed.txt"])
+        candidate_files = FILE_MAP.get(task_type, ["perf.data", "collapsed.txt", f"{tid}.data", f"{tid}.txt"])
         raw_path = None
         pre_collapsed_path = None
         has_collapsed = False
@@ -168,7 +169,8 @@ def main():
                 continue
             store.download(key, local_path)
             log.info("downloaded %s", key)
-            if fname == "collapsed.txt":
+            # 判断是否为已处理的折叠栈文本
+            if fname in ("collapsed.txt", f"{tid}.txt"):
                 pre_collapsed_path = local_path
                 has_collapsed = True
             elif raw_path is None:

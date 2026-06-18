@@ -105,6 +105,18 @@ func (m *MockGRPCClient) ListAgents(ctx context.Context, req *pb.ListAgentsReque
 
 func (m *MockGRPCClient) Close() error { return nil }
 
+func (m *MockGRPCClient) StartContinuous(ctx context.Context, req *pb.StartContinuousRequest) (*pb.StartContinuousResponse, error) {
+	return &pb.StartContinuousResponse{Code: 0, Message: "ok", TaskId: "mock-continuous-tid"}, nil
+}
+
+func (m *MockGRPCClient) StopContinuous(ctx context.Context, req *pb.StopContinuousRequest) (*pb.StopContinuousResponse, error) {
+	return &pb.StopContinuousResponse{Code: 0, Message: "ok"}, nil
+}
+
+func (m *MockGRPCClient) ListWindows(ctx context.Context, req *pb.ListWindowsRequest) (*pb.ListWindowsResponse, error) {
+	return &pb.ListWindowsResponse{Code: 0, Message: "ok"}, nil
+}
+
 // SetupTestDB 创建内存 SQLite 测试数据库
 func SetupTestDB() *gorm.DB {
 	seq := atomic.AddUint64(&testDBSeq, 1)
@@ -150,6 +162,9 @@ func SetupTestRouter(srv *server.APIServer) *gin.Engine {
 			auth.DELETE("/tasks/:tid", srv.DeleteTask)
 			auth.POST("/tasks/:tid/retry", srv.RetryTask)
 			auth.GET("/cosfiles", srv.GetCOSFiles)
+			auth.POST("/tasks/continuous", srv.CreateContinuousTask)
+			auth.GET("/tasks/:tid/windows", srv.GetContinuousWindows)
+			auth.POST("/tasks/:tid/stop", srv.StopContinuousTask)
 			auth.GET("/tasks/:tid/suggestions", srv.GetSuggestions)
 			auth.POST("/tasks/:tid/suggestions", srv.CreateSuggestion)
 			auth.PUT("/tasks/:tid/analysis_status", srv.UpdateAnalysisStatus)

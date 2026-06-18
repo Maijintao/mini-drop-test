@@ -2,8 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useGSAP } from '@gsap/react';
 import gsap from 'gsap';
-import { createTask, deleteTask, getAgents, getTasks, retryTask } from '@/api';
-import type { AgentInfo, CreateTaskParams, HotmethodTask } from '@/domain';
+import { createTask, createContinuousTask, deleteTask, getAgents, getTasks, retryTask } from '@/api';
+import type { AgentInfo, CreateContinuousParams, CreateTaskParams, HotmethodTask } from '@/domain';
 import { analysisMap, formatDate, formatDuration, statusMap } from '@/domain';
 import { createTaskPoller } from '@/taskPolling';
 import CreateTaskModal from '@/components/CreateTaskModal';
@@ -65,6 +65,19 @@ export default function TaskList() {
   const [showCreate, setShowCreate] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState<CreateTaskParams>(defaultForm);
+  const [taskMode, setTaskMode] = useState<'oneshot' | 'continuous'>('oneshot');
+  const [continuousForm, setContinuousForm] = useState<CreateContinuousParams>({
+    target_ip: '',
+    pid: 0,
+    hz: 10,
+    window_sec: 300,
+    callgraph: 'dwarf',
+  });
+
+  // 同步 target_ip / pid 到 continuousForm
+  useEffect(() => {
+    setContinuousForm(prev => ({ ...prev, target_ip: form.target_ip, pid: form.pid }));
+  }, [form.target_ip, form.pid]);
   const [activeView, setActiveView] = useState<'tasks' | 'schedules'>('tasks');
   const pollerRef = useRef<ReturnType<typeof createTaskPoller> | null>(null);
 
@@ -123,6 +136,29 @@ export default function TaskList() {
     done: tasks.filter(task => task.status === 4).length,
     failed: tasks.filter(task => task.status === 5 || task.status === 6).length,
   }), [tasks, total]);
+
+  const handleContinuousSubmit = async () => {
+    if (!continuousForm.target_ip || !continuousForm.pid) return;
+    setSubmitting(true);
+    try {
+      const payload: CreateContinuousParams = {
+        ...continuousForm,
+        name: form.name || `常驻采集 - ${continuousForm.target_ip}`,
+        pid: Number(continuousForm.pid),
+        hz: Number(continuousForm.hz || 10),
+        window_sec: Number(continuousForm.window_sec || 300),
+      };
+      const res = await createContinuousTask(payload);
+      if (res.code !== 0) throw new Error(res.message || '创建常驻任务失败');
+      const tid = res.data?.tid;
+      setShowCreate(false);
+      if (tid) navigate(`/continuous?tid=${tid}`);
+    } catch (e: any) {
+      alert(e.message || '创建常驻任务失败');
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   const submitCreate = async () => {
     if (!form.target_ip || !form.pid || !form.duration) return;
@@ -316,9 +352,14 @@ export default function TaskList() {
               agents={agents}
               form={form}
               submitting={submitting}
+              mode={taskMode}
               onChange={(patch) => setForm(prev => ({ ...prev, ...patch }))}
               onCancel={() => setShowCreate(false)}
               onSubmit={submitCreate}
+              onModeChange={setTaskMode}
+              continuousForm={continuousForm}
+              onContinuousChange={(patch) => setContinuousForm(prev => ({ ...prev, ...patch }))}
+              onContinuousSubmit={handleContinuousSubmit}
             />
           )}
         </>

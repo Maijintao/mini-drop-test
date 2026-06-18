@@ -145,6 +145,22 @@ type Tag struct {
 
 func (Tag) TableName() string { return "tag" }
 
+// Continuous Profiling 窗口记录
+type ContinuousWindow struct {
+	ID        uint      `gorm:"primaryKey;autoIncrement;column:id" json:"id"`
+	ParentTID string    `gorm:"type:varchar(64);index;column:parent_tid" json:"parent_tid"`
+	WindowTID string    `gorm:"type:varchar(64);uniqueIndex;column:window_tid" json:"window_tid"`
+	Seq       int       `gorm:"column:seq" json:"seq"`
+	StartTime time.Time `gorm:"column:start_time" json:"start_time"`
+	EndTime   time.Time `gorm:"column:end_time" json:"end_time"`
+	Status    int       `gorm:"default:0;column:status" json:"status"` // 0=pending, 1=done, 2=failed
+	COSKey    string    `gorm:"type:varchar(512);column:cos_key" json:"cos_key"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func (ContinuousWindow) TableName() string { return "continuous_window" }
+
 // AutoMigrate 自动建表
 func AutoMigrate(db *gorm.DB) error {
 	return db.AutoMigrate(
@@ -158,5 +174,6 @@ func AutoMigrate(db *gorm.DB) error {
 		&AnalysisSuggestion{},
 		&TaskStateHistory{},
 		&Tag{},
+		&ContinuousWindow{},
 	)
 }

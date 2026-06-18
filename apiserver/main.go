@@ -198,6 +198,11 @@ func setupRouter(srv *server.APIServer, logger *zap.Logger, cfg config.Config) *
 			auth.POST("/tasks/:tid/retry", srv.RetryTask)
 			auth.GET("/cosfiles", srv.GetCOSFiles)
 
+			// Continuous Profiling
+			auth.POST("/tasks/continuous", srv.CreateContinuousTask)
+			auth.GET("/tasks/:tid/windows", srv.GetContinuousWindows)
+			auth.POST("/tasks/:tid/stop", srv.StopContinuousTask)
+
 			// Suggestion
 			auth.GET("/tasks/:tid/suggestions", srv.GetSuggestions)
 			auth.POST("/tasks/:tid/suggestions", srv.CreateSuggestion)

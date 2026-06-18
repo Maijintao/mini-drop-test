@@ -51,4 +51,6 @@ message RecordArgv {
   string callgraph = 4;
   bool subprocess = 5;
   string event = 6;
+  uint32 window_sec = 7;      // Continuous 模式：每个窗口时长（秒）
+  string parent_tid = 8;      // Continuous 模式：父任务 ID
 }

@@ -13,6 +13,9 @@ service Control {
   rpc FetchData(FetchDataRequest) returns (FetchDataResponse);
   rpc StatAgent(StatAgentRequest) returns (StatAgentResponse);
   rpc ListAgents(ListAgentsRequest) returns (ListAgentsResponse);
+  rpc StartContinuous(StartContinuousRequest) returns (StartContinuousResponse);
+  rpc StopContinuous(StopContinuousRequest) returns (StopContinuousResponse);
+  rpc ListWindows(ListWindowsRequest) returns (ListWindowsResponse);
 }
 
 message CreateTaskRequest {
@@ -65,4 +68,50 @@ message ListAgentsResponse {
   int32 code = 1;
   string message = 2;
   repeated AgentInfo agents = 3;
+}
+
+// Continuous Profiling 相关消息
+message StartContinuousRequest {
+  string target_ip = 1;
+  int32 pid = 2;
+  uint32 hz = 3;              // 采样频率，默认 10（低频）
+  uint32 window_sec = 4;      // 每个窗口时长，默认 300s（5 分钟）
+  uint32 profiler_type = 5;   // 采集器类型
+  string callgraph = 6;
+  string event = 7;
+  string name = 8;            // 任务名称
+}
+
+message StartContinuousResponse {
+  int32 code = 1;
+  string message = 2;
+  string task_id = 3;         // 父任务 ID
+}
+
+message StopContinuousRequest {
+  string task_id = 1;
+}
+
+message StopContinuousResponse {
+  int32 code = 1;
+  string message = 2;
+}
+
+message ListWindowsRequest {
+  string task_id = 1;
+}
+
+message ContinuousWindowInfo {
+  string window_tid = 1;      // 窗口子任务 ID
+  int32 seq = 2;              // 窗口序号
+  int64 start_time = 3;       // 开始时间 (unix timestamp)
+  int64 end_time = 4;         // 结束时间
+  int32 status = 5;           // 0=pending, 1=done, 2=failed
+  string cos_key = 6;         // MinIO 路径
+}
+
+message ListWindowsResponse {
+  int32 code = 1;
+  string message = 2;
+  repeated ContinuousWindowInfo windows = 3;
 }

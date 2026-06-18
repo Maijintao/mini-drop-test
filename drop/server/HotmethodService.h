@@ -8,6 +8,8 @@
 #include <vector>
 #include <mutex>
 #include <condition_variable>
+#include <memory>
+#include <string>
 #include <chrono>
 #include <sqlite3.h>
 
@@ -43,6 +45,29 @@ struct AgentStatus {
   PidStats children_pstats;
   std::chrono::steady_clock::time_point last_heartbeat;
   bool online = true;           // 是否在线
+};
+
+// Continuous Profiling 窗口信息
+struct ContinuousWindowInfo {
+  std::string window_tid;
+  int32_t seq = 0;
+  int64_t start_time = 0;
+  int64_t end_time = 0;
+  int32_t status = 0;  // 0=pending, 1=done, 2=failed
+  std::string cos_key;
+};
+
+// Continuous 任务配置
+struct ContinuousTaskConfig {
+  std::string parent_tid;
+  std::string target_ip;
+  int32_t pid = 0;
+  uint32_t hz = 10;
+  uint32_t window_sec = 300;
+  uint32_t profiler_type = 0;
+  std::string callgraph;
+  std::string event;
+  std::atomic<bool> running{true};
 };
 
 class HotmethodService final : public Hotmethod::Service {
@@ -85,6 +110,18 @@ public:
   // 超时清理：检查 DISPATCHED 超过 timeout_sec 的任务
   void CleanupTimeoutTasks(int timeout_sec = 30);
 
+  // Continuous Profiling
+  std::string StartContinuousTask(const std::string& target_ip, int32_t pid,
+                                   uint32_t hz, uint32_t window_sec,
+                                   uint32_t profiler_type,
+                                   const std::string& callgraph,
+                                   const std::string& event);
+  bool StopContinuousTask(const std::string& task_id);
+  void GetContinuousWindows(const std::string& task_id, std::vector<ContinuousWindowInfo>* windows);
+  void RecordContinuousWindow(const std::string& parent_tid, const std::string& window_tid,
+                               int32_t seq, int64_t start_time, int64_t end_time,
+                               int32_t status, const std::string& cos_key);
+
   grpc::Status Collect(grpc::ServerContext* context,
                        const CollectRequest* request,
                        CollectResponse* response) override;
@@ -106,6 +143,8 @@ private:
   std::map<std::string, TaskResult> results_;      // 缓存任务结果
   std::map<std::string, AgentStatus> agents_;      // Agent 心跳状态
   std::map<std::string, TaskStateInfo> tasks_state_;   // 任务状态跟踪
+  std::map<std::string, std::shared_ptr<ContinuousTaskConfig>> continuous_tasks_;  // 持续采集任务
+  std::map<std::string, std::vector<ContinuousWindowInfo>> continuous_windows_;    // 窗口记录
   std::mutex mutex_;
   std::condition_variable cv_;  // 用于 Collect 同步等待结果
 };

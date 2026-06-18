@@ -26,6 +26,18 @@ public:
                           const ListAgentsRequest* request,
                           ListAgentsResponse* response) override;
 
+  grpc::Status StartContinuous(grpc::ServerContext* context,
+                               const StartContinuousRequest* request,
+                               StartContinuousResponse* response) override;
+
+  grpc::Status StopContinuous(grpc::ServerContext* context,
+                              const StopContinuousRequest* request,
+                              StopContinuousResponse* response) override;
+
+  grpc::Status ListWindows(grpc::ServerContext* context,
+                           const ListWindowsRequest* request,
+                           ListWindowsResponse* response) override;
+
 private:
   HotmethodService* hotmethod_service_;
 };

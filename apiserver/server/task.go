@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"time"
@@ -804,5 +805,226 @@ func (s *APIServer) DeleteMultiTask(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"code":    CodeSuccess,
 		"message": "deleted",
+	})
+}
+
+// ---------- Continuous Profiling ----------
+
+type CreateContinuousReq struct {
+	Name         string `json:"name"`
+	TargetIP     string `json:"target_ip" binding:"required"`
+	PID          int32  `json:"pid" binding:"required"`
+	Hz           uint32 `json:"hz"`
+	WindowSec    uint32 `json:"window_sec"`
+	ProfilerType int    `json:"profiler_type"`
+	Callgraph    string `json:"callgraph"`
+	Event        string `json:"event"`
+}
+
+// CreateContinuousTask 创建常驻采集任务 — POST /api/v1/tasks/continuous
+func (s *APIServer) CreateContinuousTask(c *gin.Context) {
+	uid := c.GetString(middleware.CtxUID)
+	var req CreateContinuousReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    CodeParamError,
+			"message": err.Error(),
+		})
+		return
+	}
+
+	if req.Hz == 0 {
+		req.Hz = 10 // 低频默认 10Hz
+	}
+	if req.WindowSec == 0 {
+		req.WindowSec = 300 // 默认 5 分钟
+	}
+	if req.Callgraph == "" {
+		req.Callgraph = "dwarf"
+	}
+	if req.Event == "" {
+		req.Event = "cpu-cycles"
+	}
+	if req.Name == "" {
+		req.Name = fmt.Sprintf("continuous-pid%d", req.PID)
+	}
+
+	if s.GRPC == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"code":    CodeGRPCError,
+			"message": "drop_server unavailable",
+		})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	resp, err := s.GRPC.StartContinuous(ctx, &pb.StartContinuousRequest{
+		TargetIp:     req.TargetIP,
+		Pid:          req.PID,
+		Hz:           req.Hz,
+		WindowSec:    req.WindowSec,
+		ProfilerType: uint32(req.ProfilerType),
+		Callgraph:    req.Callgraph,
+		Event:        req.Event,
+		Name:         req.Name,
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    CodeGRPCError,
+			"message": err.Error(),
+		})
+		return
+	}
+	if resp.Code != 0 {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    CodeInternal,
+			"message": resp.Message,
+		})
+		return
+	}
+
+	tid := resp.TaskId
+
+	// 创建父任务记录
+	now := time.Now()
+	task := model.HotmethodTask{
+		TID:          tid,
+		Name:         req.Name,
+		Type:         2, // continuous
+		ProfilerType: req.ProfilerType,
+		TargetIP:     req.TargetIP,
+		RequestParams: mustMarshal(map[string]interface{}{
+			"pid":         req.PID,
+			"hz":          req.Hz,
+			"window_sec":  req.WindowSec,
+			"callgraph":   req.Callgraph,
+			"event":       req.Event,
+			"continuous":  true,
+		}),
+		Status:     2, // RUNNING
+		UID:        uid,
+		CreateTime: now,
+	}
+	if err := s.Db.Create(&task).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    CodeInternal,
+			"message": "db error: " + err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code": CodeSuccess,
+		"data": gin.H{
+			"tid": tid,
+		},
+	})
+}
+
+// GetContinuousWindows 获取连续任务窗口列表 — GET /api/v1/tasks/:tid/windows
+// 同时从 drop_server 同步窗口状态，发现新完成的窗口时自动触发分析
+func (s *APIServer) GetContinuousWindows(c *gin.Context) {
+	tid := c.Param("tid")
+	if _, ok := s.checkTaskAccess(c, tid); !ok {
+		return
+	}
+
+	// 从 drop_server 同步窗口数据
+	if s.GRPC != nil {
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+		defer cancel()
+		resp, err := s.GRPC.ListWindows(ctx, &pb.ListWindowsRequest{TaskId: tid})
+		if err == nil && resp != nil {
+			for _, w := range resp.GetWindows() {
+				var existing model.ContinuousWindow
+				err := s.Db.Where("window_tid = ?", w.GetWindowTid()).First(&existing).Error
+				if err == gorm.ErrRecordNotFound {
+					// 新窗口，写入 DB
+					startTime := time.Unix(w.GetStartTime(), 0)
+					endTime := time.Unix(w.GetEndTime(), 0)
+					record := model.ContinuousWindow{
+						ParentTID: tid,
+						WindowTID: w.GetWindowTid(),
+						Seq:       int(w.GetSeq()),
+						StartTime: startTime,
+						EndTime:   endTime,
+						Status:    int(w.GetStatus()),
+						COSKey:    w.GetCosKey(),
+					}
+					s.Db.Create(&record)
+
+					// 窗口完成且有数据时，自动触发分析（CPU type=0）
+					if w.GetStatus() == 1 && w.GetCosKey() != "" {
+						s.WG.Add(1)
+						go func(windowTid string) {
+							defer s.WG.Done()
+							s.runAnalysis(windowTid, 0) // 0 = CPU Profiling
+						}(w.GetWindowTid())
+					}
+				} else if err == nil {
+					// 更新已有窗口状态
+					updates := map[string]interface{}{
+						"status": int(w.GetStatus()),
+					}
+					if w.GetCosKey() != "" {
+						updates["cos_key"] = w.GetCosKey()
+					}
+					if w.GetEndTime() > 0 {
+						updates["end_time"] = time.Unix(w.GetEndTime(), 0)
+					}
+					s.Db.Model(&existing).Updates(updates)
+				}
+			}
+		}
+	}
+
+	var windows []model.ContinuousWindow
+	s.Db.Where("parent_tid = ?", tid).Order("seq ASC").Find(&windows)
+
+	c.JSON(http.StatusOK, gin.H{
+		"code": CodeSuccess,
+		"data": windows,
+	})
+}
+
+// StopContinuousTask 停止常驻采集 — POST /api/v1/tasks/:tid/stop
+func (s *APIServer) StopContinuousTask(c *gin.Context) {
+	tid := c.Param("tid")
+	if _, ok := s.checkTaskAccess(c, tid); !ok {
+		return
+	}
+
+	if s.GRPC == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"code":    CodeGRPCError,
+			"message": "drop_server unavailable",
+		})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	resp, err := s.GRPC.StopContinuous(ctx, &pb.StopContinuousRequest{TaskId: tid})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    CodeGRPCError,
+			"message": err.Error(),
+		})
+		return
+	}
+
+	// 更新任务状态为 DONE
+	s.Db.Model(&model.HotmethodTask{}).Where("tid = ?", tid).Updates(map[string]interface{}{
+		"status":      4, // DONE
+		"end_time":    time.Now(),
+		"status_info": "用户停止",
+	})
+
+	c.JSON(http.StatusOK, gin.H{
+		"code":    CodeSuccess,
+		"message": resp.Message,
 	})
 }

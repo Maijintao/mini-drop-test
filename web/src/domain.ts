@@ -182,7 +182,7 @@ export const profilerTypeMap: Record<number, string> = {
 export const taskTypeMap: Record<number, string> = {
   0: 'CPU Profiling',
   1: 'Java Profiling',
-  2: 'Tracing',
+  2: 'Continuous Profiling',
   4: 'MemCheck',
   5: 'Resource Analysis',
   6: 'Biosnoop (eBPF)',
@@ -192,6 +192,29 @@ export const taskTypeMap: Record<number, string> = {
   10: 'pprof CPU',
   11: 'pprof Heap',
 };
+
+export interface ContinuousWindow {
+  id: number;
+  parent_tid: string;
+  window_tid: string;
+  seq: number;
+  start_time: string;
+  end_time: string;
+  status: number;
+  cos_key: string;
+  created_at: string;
+}
+
+export interface CreateContinuousParams {
+  name?: string;
+  target_ip: string;
+  pid: number;
+  hz?: number;
+  window_sec?: number;
+  profiler_type?: number;
+  callgraph?: string;
+  event?: string;
+}
 
 export function parseTaskParams(params: HotmethodTask['request_params']): TaskParams {
   if (!params) return {};

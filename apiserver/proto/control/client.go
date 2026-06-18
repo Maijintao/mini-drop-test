@@ -58,5 +58,20 @@ func (c *ControlClient) Close() error {
 	return nil
 }
 
+// StartContinuous 创建常驻采集任务
+func (c *ControlClient) StartContinuous(ctx context.Context, req *pb.StartContinuousRequest) (*pb.StartContinuousResponse, error) {
+	return c.client.StartContinuous(ctx, req)
+}
+
+// StopContinuous 停止常驻采集任务
+func (c *ControlClient) StopContinuous(ctx context.Context, req *pb.StopContinuousRequest) (*pb.StopContinuousResponse, error) {
+	return c.client.StopContinuous(ctx, req)
+}
+
+// ListWindows 查询连续任务的窗口列表
+func (c *ControlClient) ListWindows(ctx context.Context, req *pb.ListWindowsRequest) (*pb.ListWindowsResponse, error) {
+	return c.client.ListWindows(ctx, req)
+}
+
 // 编译时接口校验（在 server 包中定义 GRPCClient 接口）
 // ControlClient 实现了 CreateTask/FetchData/StatAgent/Close，满足接口

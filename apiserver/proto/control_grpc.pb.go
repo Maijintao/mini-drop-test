@@ -26,6 +26,9 @@ type ControlClient interface {
 	FetchData(ctx context.Context, in *FetchDataRequest, opts ...grpc.CallOption) (*FetchDataResponse, error)
 	StatAgent(ctx context.Context, in *StatAgentRequest, opts ...grpc.CallOption) (*StatAgentResponse, error)
 	ListAgents(ctx context.Context, in *ListAgentsRequest, opts ...grpc.CallOption) (*ListAgentsResponse, error)
+	StartContinuous(ctx context.Context, in *StartContinuousRequest, opts ...grpc.CallOption) (*StartContinuousResponse, error)
+	StopContinuous(ctx context.Context, in *StopContinuousRequest, opts ...grpc.CallOption) (*StopContinuousResponse, error)
+	ListWindows(ctx context.Context, in *ListWindowsRequest, opts ...grpc.CallOption) (*ListWindowsResponse, error)
 }
 
 type controlClient struct {
@@ -72,6 +75,33 @@ func (c *controlClient) ListAgents(ctx context.Context, in *ListAgentsRequest, o
 	return out, nil
 }
 
+func (c *controlClient) StartContinuous(ctx context.Context, in *StartContinuousRequest, opts ...grpc.CallOption) (*StartContinuousResponse, error) {
+	out := new(StartContinuousResponse)
+	err := c.cc.Invoke(ctx, "/drop.Control/StartContinuous", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *controlClient) StopContinuous(ctx context.Context, in *StopContinuousRequest, opts ...grpc.CallOption) (*StopContinuousResponse, error) {
+	out := new(StopContinuousResponse)
+	err := c.cc.Invoke(ctx, "/drop.Control/StopContinuous", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *controlClient) ListWindows(ctx context.Context, in *ListWindowsRequest, opts ...grpc.CallOption) (*ListWindowsResponse, error) {
+	out := new(ListWindowsResponse)
+	err := c.cc.Invoke(ctx, "/drop.Control/ListWindows", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ControlServer is the server API for Control service.
 // All implementations must embed UnimplementedControlServer
 // for forward compatibility
@@ -80,6 +110,9 @@ type ControlServer interface {
 	FetchData(context.Context, *FetchDataRequest) (*FetchDataResponse, error)
 	StatAgent(context.Context, *StatAgentRequest) (*StatAgentResponse, error)
 	ListAgents(context.Context, *ListAgentsRequest) (*ListAgentsResponse, error)
+	StartContinuous(context.Context, *StartContinuousRequest) (*StartContinuousResponse, error)
+	StopContinuous(context.Context, *StopContinuousRequest) (*StopContinuousResponse, error)
+	ListWindows(context.Context, *ListWindowsRequest) (*ListWindowsResponse, error)
 	mustEmbedUnimplementedControlServer()
 }
 
@@ -98,6 +131,15 @@ func (UnimplementedControlServer) StatAgent(context.Context, *StatAgentRequest) 
 }
 func (UnimplementedControlServer) ListAgents(context.Context, *ListAgentsRequest) (*ListAgentsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListAgents not implemented")
+}
+func (UnimplementedControlServer) StartContinuous(context.Context, *StartContinuousRequest) (*StartContinuousResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method StartContinuous not implemented")
+}
+func (UnimplementedControlServer) StopContinuous(context.Context, *StopContinuousRequest) (*StopContinuousResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method StopContinuous not implemented")
+}
+func (UnimplementedControlServer) ListWindows(context.Context, *ListWindowsRequest) (*ListWindowsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListWindows not implemented")
 }
 func (UnimplementedControlServer) mustEmbedUnimplementedControlServer() {}
 
@@ -184,6 +226,60 @@ func _Control_ListAgents_Handler(srv interface{}, ctx context.Context, dec func(
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Control_StartContinuous_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(StartContinuousRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ControlServer).StartContinuous(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/drop.Control/StartContinuous",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ControlServer).StartContinuous(ctx, req.(*StartContinuousRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Control_StopContinuous_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(StopContinuousRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ControlServer).StopContinuous(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/drop.Control/StopContinuous",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ControlServer).StopContinuous(ctx, req.(*StopContinuousRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Control_ListWindows_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListWindowsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ControlServer).ListWindows(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/drop.Control/ListWindows",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ControlServer).ListWindows(ctx, req.(*ListWindowsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Control_ServiceDesc is the grpc.ServiceDesc for Control service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -206,6 +302,18 @@ var Control_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListAgents",
 			Handler:    _Control_ListAgents_Handler,
+		},
+		{
+			MethodName: "StartContinuous",
+			Handler:    _Control_StartContinuous_Handler,
+		},
+		{
+			MethodName: "StopContinuous",
+			Handler:    _Control_StopContinuous_Handler,
+		},
+		{
+			MethodName: "ListWindows",
+			Handler:    _Control_ListWindows_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

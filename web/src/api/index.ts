@@ -5,8 +5,10 @@ import type {
   AnalysisSuggestion,
   ApiResponse,
   CosFile,
+  CreateContinuousParams,
   CreateScheduleTaskParams,
   CreateTaskParams,
+  ContinuousWindow,
   FlameDiffResult,
   GroupInfo,
   GroupMemberInfo,
@@ -95,6 +97,14 @@ export const getTaskDetail = (tid: string) => typedGet<TaskDetailData>(`/tasks/$
 export const deleteTask = (tid: string) => typedDelete<unknown>(`/tasks/${tid}`);
 export const retryTask = (tid: string) => typedPost<{ tid: string }>(`/tasks/${tid}/retry`);
 export const getCosFiles = (tid: string) => typedGet<CosFile[]>('/cosfiles', { tid });
+
+// Continuous Profiling
+export const createContinuousTask = (data: CreateContinuousParams) =>
+  typedPost<{ tid: string }>('/tasks/continuous', data);
+export const getContinuousWindows = (tid: string) =>
+  typedGet<ContinuousWindow[]>(`/tasks/${tid}/windows`);
+export const stopContinuousTask = (tid: string) =>
+  typedPost<unknown>(`/tasks/${tid}/stop`);
 
 // Suggestion & Analysis
 export const getSuggestions = (tid: string) => typedGet<AnalysisSuggestion[]>(`/tasks/${tid}/suggestions`);

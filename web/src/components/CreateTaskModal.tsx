@@ -1,13 +1,18 @@
-import type { AgentInfo, CreateTaskParams } from '@/domain';
+import type { AgentInfo, CreateContinuousParams, CreateTaskParams } from '@/domain';
 
 interface CreateTaskModalProps {
   agents: AgentInfo[];
   form: CreateTaskParams;
   submitting: boolean;
   title?: string;
+  mode?: 'oneshot' | 'continuous';
   onChange: (patch: Partial<CreateTaskParams>) => void;
   onCancel: () => void;
   onSubmit: () => void;
+  onModeChange?: (mode: 'oneshot' | 'continuous') => void;
+  continuousForm?: CreateContinuousParams;
+  onContinuousChange?: (patch: Partial<CreateContinuousParams>) => void;
+  onContinuousSubmit?: () => void;
 }
 
 const panelStyle: React.CSSProperties = {
@@ -72,16 +77,25 @@ export default function CreateTaskModal({
   form,
   submitting,
   title = '新建采集任务',
+  mode = 'oneshot',
   onChange,
   onCancel,
   onSubmit,
+  onModeChange,
+  continuousForm,
+  onContinuousChange,
+  onContinuousSubmit,
 }: CreateTaskModalProps) {
   const onlineAgents = agents.filter(agent => agent.online);
+  const isContinuous = mode === 'continuous';
+
   // N21: 范围校验 — pid>0, duration 1~3600, hz 1~1000
   const pidValid = form.pid > 0 && Number.isInteger(form.pid);
   const durationValid = form.duration >= 1 && form.duration <= 3600;
   const hzValid = !form.hz || (form.hz >= 1 && form.hz <= 1000);
-  const canSubmit = Boolean(form.target_ip && pidValid && durationValid && hzValid && !submitting);
+  const canSubmit = isContinuous
+    ? Boolean(continuousForm?.target_ip && pidValid && hzValid && !submitting)
+    : Boolean(form.target_ip && pidValid && durationValid && hzValid && !submitting);
 
   return (
     <div
@@ -112,7 +126,9 @@ export default function CreateTaskModal({
         }}>
           <div>
             <h3 style={{ fontSize: 18, lineHeight: 1.2, fontWeight: 700, color: '#fff', margin: '0 0 6px' }}>{title}</h3>
-            <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.42)' }}>选择在线 Agent，配置采样目标和采集参数。</div>
+            <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.42)' }}>
+              {isContinuous ? '常驻低频采样，定时切割窗口，按时间轴回溯。' : '选择在线 Agent，配置采样目标和采集参数。'}
+            </div>
           </div>
           <button
             onClick={onCancel}
@@ -134,6 +150,30 @@ export default function CreateTaskModal({
         </div>
 
         <div style={{ padding: 24, display: 'grid', gap: 16 }}>
+          {/* 模式切换 */}
+          {onModeChange && (
+            <div style={{ display: 'flex', gap: 8 }}>
+              {(['oneshot', 'continuous'] as const).map(m => (
+                <button
+                  key={m}
+                  onClick={() => onModeChange(m)}
+                  style={{
+                    padding: '7px 16px',
+                    borderRadius: 8,
+                    border: '0.5px solid ' + (mode === m ? 'rgba(96,165,250,0.5)' : 'rgba(255,255,255,0.08)'),
+                    background: mode === m ? 'rgba(96,165,250,0.12)' : 'rgba(255,255,255,0.03)',
+                    color: mode === m ? '#60a5fa' : 'rgba(255,255,255,0.5)',
+                    cursor: 'pointer',
+                    fontWeight: 600,
+                    fontSize: 13,
+                  }}
+                >
+                  {m === 'oneshot' ? '单次采集' : '常驻采集'}
+                </button>
+              ))}
+            </div>
+          )}
+
           <div style={sectionStyle}>
             <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 14 }}>
               <Field label="任务名称">
@@ -206,28 +246,48 @@ export default function CreateTaskModal({
           </div>
 
           <div style={sectionStyle}>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14 }}>
-              <Field label="采样时长">
-                <div style={{ position: 'relative' }}>
-                  <input
-                    type="number"
-                    min={1}
-                    max={3600}
-                    value={form.duration}
-                    onChange={(event) => onChange({ duration: Math.max(1, Math.min(3600, Math.floor(Number(event.target.value)))) })}
-                    style={{ ...fieldStyle, paddingRight: 38 }}
-                  />
-                  <span style={{ position: 'absolute', right: 12, top: 11, color: 'rgba(255,255,255,0.34)', fontSize: 12 }}>s</span>
-                </div>
-              </Field>
+            <div style={{ display: 'grid', gridTemplateColumns: isContinuous ? 'repeat(3, 1fr)' : 'repeat(3, 1fr)', gap: 14 }}>
+              {isContinuous ? (
+                <Field label="窗口时长">
+                  <div style={{ position: 'relative' }}>
+                    <input
+                      type="number"
+                      min={60}
+                      max={3600}
+                      value={continuousForm?.window_sec || 300}
+                      onChange={(event) => onContinuousChange?.({ window_sec: Math.max(60, Math.min(3600, Math.floor(Number(event.target.value)))) })}
+                      style={{ ...fieldStyle, paddingRight: 38 }}
+                    />
+                    <span style={{ position: 'absolute', right: 12, top: 11, color: 'rgba(255,255,255,0.34)', fontSize: 12 }}>s</span>
+                  </div>
+                </Field>
+              ) : (
+                <Field label="采样时长">
+                  <div style={{ position: 'relative' }}>
+                    <input
+                      type="number"
+                      min={1}
+                      max={3600}
+                      value={form.duration}
+                      onChange={(event) => onChange({ duration: Math.max(1, Math.min(3600, Math.floor(Number(event.target.value)))) })}
+                      style={{ ...fieldStyle, paddingRight: 38 }}
+                    />
+                    <span style={{ position: 'absolute', right: 12, top: 11, color: 'rgba(255,255,255,0.34)', fontSize: 12 }}>s</span>
+                  </div>
+                </Field>
+              )}
               <Field label="采样频率">
                 <div style={{ position: 'relative' }}>
                   <input
                     type="number"
                     min={1}
                     max={1000}
-                    value={form.hz}
-                    onChange={(event) => onChange({ hz: Math.max(1, Math.min(1000, Math.floor(Number(event.target.value)))) })}
+                    value={isContinuous ? (continuousForm?.hz || 10) : form.hz}
+                    onChange={(event) => {
+                      const v = Math.max(1, Math.min(1000, Math.floor(Number(event.target.value))));
+                      if (isContinuous) onContinuousChange?.({ hz: v });
+                      else onChange({ hz: v });
+                    }}
                     style={{ ...fieldStyle, paddingRight: 42 }}
                   />
                   <span style={{ position: 'absolute', right: 12, top: 11, color: 'rgba(255,255,255,0.34)', fontSize: 12 }}>Hz</span>
@@ -235,8 +295,11 @@ export default function CreateTaskModal({
               </Field>
               <Field label="Callgraph">
                 <select
-                  value={form.callgraph}
-                  onChange={(event) => onChange({ callgraph: event.target.value })}
+                  value={isContinuous ? (continuousForm?.callgraph || 'dwarf') : form.callgraph}
+                  onChange={(event) => {
+                    if (isContinuous) onContinuousChange?.({ callgraph: event.target.value });
+                    else onChange({ callgraph: event.target.value });
+                  }}
                   style={selectStyle}
                 >
                   <option value="dwarf" style={{ background: '#151515' }}>dwarf</option>
@@ -276,7 +339,7 @@ export default function CreateTaskModal({
             </button>
             <button
               disabled={!canSubmit}
-              onClick={onSubmit}
+              onClick={isContinuous ? onContinuousSubmit : onSubmit}
               style={{
                 padding: '9px 18px',
                 background: canSubmit ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.04)',
@@ -287,7 +350,7 @@ export default function CreateTaskModal({
                 fontWeight: 700,
               }}
             >
-              {submitting ? '创建中...' : '创建任务'}
+              {submitting ? '创建中...' : (isContinuous ? '启动常驻采集' : '创建任务')}
             </button>
           </div>
         </div>

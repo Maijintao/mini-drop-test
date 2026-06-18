@@ -308,6 +308,46 @@ grpc::Status HotmethodService::NotifyResult(grpc::ServerContext* context,
 
   results_[task_id] = *request;
   cv_.notify_all();  // 通知等待中的 Collect
+
+  // Continuous Profiling: 检测窗口完成，派发下一个窗口
+  // 窗口 ID 格式: parent_tid_wN
+  auto wpos = task_id.rfind("_w");
+  if (wpos != std::string::npos && wpos > 0) {
+    std::string parent_tid = task_id.substr(0, wpos);
+    auto it = continuous_tasks_.find(parent_tid);
+    if (it != continuous_tasks_.end() && it->second->running) {
+      // 记录窗口
+      int32_t seq = 0;
+      try { seq = std::stoi(task_id.substr(wpos + 2)); } catch (...) {}
+      int64_t now_ts = std::chrono::system_clock::now().time_since_epoch().count() / 1000000000;
+      RecordContinuousWindow(parent_tid, task_id, seq, now_ts - it->second->window_sec,
+                              now_ts, error_msg.empty() ? 1 : 2,
+                              request->cos_key());
+
+      // 派发下一个窗口
+      std::string next_tid = parent_tid + "_w" + std::to_string(seq + 1);
+      TaskDesc next_task;
+      next_task.set_task_id(next_tid);
+      next_task.set_task_type(2);
+      next_task.set_profiler_type(it->second->profiler_type);
+      next_task.set_timeout_sec(it->second->window_sec + 60);
+      auto* argv = next_task.mutable_sample_argv();
+      argv->set_hz(it->second->hz);
+      argv->set_duration(it->second->window_sec);
+      argv->set_pid(it->second->pid);
+      argv->set_callgraph(it->second->callgraph);
+      argv->set_event(it->second->event);
+      argv->set_window_sec(it->second->window_sec);
+      argv->set_parent_tid(parent_tid);
+
+      auto& queue = tasks_[it->second->target_ip];
+      if (queue.size() < MAX_TASK_QUEUE_SIZE) {
+        queue.push_back(next_task);
+        LOG_INFO("Continuous next window dispatched: " + next_tid);
+      }
+    }
+  }
+
   return grpc::Status::OK;
 }
 
@@ -368,6 +408,96 @@ void HotmethodService::CleanupTimeoutTasks(int timeout_sec) {
     }
     ++it;
   }
+}
+
+// ---------- Continuous Profiling ----------
+
+std::string HotmethodService::StartContinuousTask(const std::string& target_ip, int32_t pid,
+                                                    uint32_t hz, uint32_t window_sec,
+                                                    uint32_t profiler_type,
+                                                    const std::string& callgraph,
+                                                    const std::string& event) {
+  std::lock_guard<std::mutex> lock(mutex_);
+
+  // 生成父任务 ID
+  std::string parent_tid = "cp_" + std::to_string(
+      std::chrono::steady_clock::now().time_since_epoch().count() % 1000000);
+
+  auto config = std::make_shared<ContinuousTaskConfig>();
+  config->parent_tid = parent_tid;
+  config->target_ip = target_ip;
+  config->pid = pid;
+  config->hz = hz;
+  config->window_sec = window_sec > 0 ? window_sec : 300;
+  config->profiler_type = profiler_type;
+  config->callgraph = callgraph;
+  config->event = event;
+  config->running = true;
+
+  continuous_tasks_[parent_tid] = config;
+  continuous_windows_[parent_tid] = {};
+
+  // 派发第一个窗口任务
+  std::string window_tid = parent_tid + "_w0";
+  TaskDesc task;
+  task.set_task_id(window_tid);
+  task.set_task_type(2);  // CONTINUOUS
+  task.set_profiler_type(profiler_type);
+  task.set_timeout_sec(config->window_sec + 60);
+
+  auto* argv = task.mutable_sample_argv();
+  argv->set_hz(hz);
+  argv->set_duration(config->window_sec);
+  argv->set_pid(pid);
+  argv->set_callgraph(callgraph);
+  argv->set_event(event);
+  argv->set_window_sec(config->window_sec);
+  argv->set_parent_tid(parent_tid);
+
+  auto& queue = tasks_[target_ip];
+  if (queue.size() >= MAX_TASK_QUEUE_SIZE) {
+    return "";
+  }
+  queue.push_back(task);
+
+  LOG_INFO("Continuous task started: parent=" + parent_tid + " first_window=" + window_tid);
+  return parent_tid;
+}
+
+bool HotmethodService::StopContinuousTask(const std::string& task_id) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  auto it = continuous_tasks_.find(task_id);
+  if (it == continuous_tasks_.end()) {
+    return false;
+  }
+  it->second->running = false;
+  LOG_INFO("Continuous task stopped: " + task_id);
+  return true;
+}
+
+void HotmethodService::GetContinuousWindows(const std::string& task_id,
+                                             std::vector<ContinuousWindowInfo>* windows) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  auto it = continuous_windows_.find(task_id);
+  if (it != continuous_windows_.end()) {
+    *windows = it->second;
+  }
+}
+
+void HotmethodService::RecordContinuousWindow(const std::string& parent_tid,
+                                               const std::string& window_tid,
+                                               int32_t seq, int64_t start_time,
+                                               int64_t end_time, int32_t status,
+                                               const std::string& cos_key) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  ContinuousWindowInfo info;
+  info.window_tid = window_tid;
+  info.seq = seq;
+  info.start_time = start_time;
+  info.end_time = end_time;
+  info.status = status;
+  info.cos_key = cos_key;
+  continuous_windows_[parent_tid].push_back(info);
 }
 
 }  // namespace drop

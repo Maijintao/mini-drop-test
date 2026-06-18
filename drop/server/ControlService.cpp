@@ -113,4 +113,77 @@ grpc::Status ControlService::ListAgents(grpc::ServerContext* context,
   return grpc::Status::OK;
 }
 
+grpc::Status ControlService::StartContinuous(grpc::ServerContext* context,
+                                              const StartContinuousRequest* request,
+                                              StartContinuousResponse* response) {
+  if (request->target_ip().empty()) {
+    response->set_code(-1);
+    response->set_message("target_ip is required");
+    return grpc::Status::OK;
+  }
+  if (request->pid() <= 0) {
+    response->set_code(-1);
+    response->set_message("pid is required");
+    return grpc::Status::OK;
+  }
+
+  std::string task_id = hotmethod_service_->StartContinuousTask(
+      request->target_ip(), request->pid(), request->hz(),
+      request->window_sec(), request->profiler_type(),
+      request->callgraph(), request->event());
+
+  if (task_id.empty()) {
+    response->set_code(-1);
+    response->set_message("Failed to start continuous task");
+    return grpc::Status::OK;
+  }
+
+  LOG_INFO("StartContinuous: task_id=" + task_id + " target=" + request->target_ip());
+  response->set_code(0);
+  response->set_message("OK");
+  response->set_task_id(task_id);
+  return grpc::Status::OK;
+}
+
+grpc::Status ControlService::StopContinuous(grpc::ServerContext* context,
+                                             const StopContinuousRequest* request,
+                                             StopContinuousResponse* response) {
+  if (request->task_id().empty()) {
+    response->set_code(-1);
+    response->set_message("task_id is required");
+    return grpc::Status::OK;
+  }
+
+  bool ok = hotmethod_service_->StopContinuousTask(request->task_id());
+  response->set_code(ok ? 0 : -1);
+  response->set_message(ok ? "OK" : "Task not found");
+  return grpc::Status::OK;
+}
+
+grpc::Status ControlService::ListWindows(grpc::ServerContext* context,
+                                          const ListWindowsRequest* request,
+                                          ListWindowsResponse* response) {
+  if (request->task_id().empty()) {
+    response->set_code(-1);
+    response->set_message("task_id is required");
+    return grpc::Status::OK;
+  }
+
+  std::vector<ContinuousWindowInfo> windows;
+  hotmethod_service_->GetContinuousWindows(request->task_id(), &windows);
+
+  response->set_code(0);
+  response->set_message("OK");
+  for (const auto& w : windows) {
+    auto* info = response->add_windows();
+    info->set_window_tid(w.window_tid);
+    info->set_seq(w.seq);
+    info->set_start_time(w.start_time);
+    info->set_end_time(w.end_time);
+    info->set_status(w.status);
+    info->set_cos_key(w.cos_key);
+  }
+  return grpc::Status::OK;
+}
+
 }  // namespace drop
