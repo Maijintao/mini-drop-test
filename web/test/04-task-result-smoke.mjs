@@ -14,6 +14,11 @@ const resultChecks = [
   '火焰图',
   'iframe',
   'top.json',
+  'pprof_cpu.json',
+  'pprof_heap.json',
+  'pprof 分析',
+  'CPU Top Functions',
+  'Heap Allocators',
 ];
 
 for (const needle of resultChecks) {

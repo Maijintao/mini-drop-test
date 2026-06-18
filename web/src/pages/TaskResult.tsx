@@ -43,6 +43,9 @@ export default function TaskResult() {
   const [error, setError] = useState('');
   const [eBpfData, setEBpfData] = useState<any>(null);
   const [eBpfLoading, setEBpfLoading] = useState(false);
+  const [pprofCpuData, setPprofCpuData] = useState<Record<string, number> | null>(null);
+  const [pprofHeapData, setPprofHeapData] = useState<any[] | null>(null);
+  const [pprofLoading, setPprofLoading] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const taskRef = useRef<HotmethodTask | null>(null);
   const navigate = useNavigate();
@@ -60,6 +63,11 @@ export default function TaskResult() {
       return;
     }
     setError('');
+    setEBpfData(null);
+    setEBpfLoading(false);
+    setPprofCpuData(null);
+    setPprofHeapData(null);
+    setPprofLoading(false);
 
     try {
       const detailRes = await getTaskDetail(tid);
@@ -149,6 +157,28 @@ export default function TaskResult() {
           setEBpfLoading(false);
         }
       }
+
+      // 加载用户态语言级采集器分析数据（pprof CPU / Heap）
+      const pprofCpuFile = allFiles.find(f => basename(f.key || f.name || '').toLowerCase() === 'pprof_cpu.json');
+      const pprofHeapFile = allFiles.find(f => basename(f.key || f.name || '').toLowerCase() === 'pprof_heap.json');
+      if (pprofCpuFile?.url || pprofHeapFile?.url) {
+        setPprofLoading(true);
+        try {
+          if (pprofCpuFile?.url) {
+            const data = await fetchSignedJson<Record<string, number>>(pprofCpuFile.url);
+            setPprofCpuData(data && typeof data === 'object' && !Array.isArray(data) ? data : null);
+          }
+          if (pprofHeapFile?.url) {
+            const data = await fetchSignedJson<any[]>(pprofHeapFile.url);
+            setPprofHeapData(Array.isArray(data) ? data : null);
+          }
+        } catch {
+          setPprofCpuData(null);
+          setPprofHeapData(null);
+        } finally {
+          setPprofLoading(false);
+        }
+      }
     } catch (e: any) {
       setError(e?.response?.data?.message || e?.message || '任务详情加载失败');
     } finally {
@@ -197,6 +227,25 @@ export default function TaskResult() {
   const totalSamples = topn.reduce((sum, item) => sum + (Number(item.self) || 0), 0);
   const status = task ? (statusMap[task.status] || statusMap[0]) : statusMap[0];
   const analysis = task ? (analysisMap[task.analysis_status] || analysisMap[0]) : analysisMap[0];
+  const pprofCpuRows = useMemo(() => {
+    if (!pprofCpuData) return [];
+    return Object.entries(pprofCpuData)
+      .map(([func, flat]) => ({ func, flat: Number(flat) || 0 }))
+      .sort((a, b) => b.flat - a.flat);
+  }, [pprofCpuData]);
+  const pprofCpuTotal = pprofCpuRows.reduce((sum, row) => sum + row.flat, 0);
+  const pprofHeapRows = useMemo(() => {
+    if (!pprofHeapData) return [];
+    return pprofHeapData
+      .map((row) => ({
+        func: String(row.func || '-'),
+        flat_space: Number(row.flat_space) || 0,
+        cum_space: Number(row.cum_space) || 0,
+        flat_objects: Number(row.flat_objects) || 0,
+        cum_objects: Number(row.cum_objects) || 0,
+      }))
+      .sort((a, b) => b.flat_space - a.flat_space || b.cum_space - a.cum_space);
+  }, [pprofHeapData]);
 
   // TopN 表格列定义
   const topnColumns = [
@@ -547,6 +596,73 @@ export default function TaskResult() {
                   ),
                 },
                 {
+                  key: 'pprof',
+                  label: 'pprof 分析',
+                  children: (
+                    pprofLoading ? (
+                      <Spin tip="加载 pprof 数据中..." />
+                    ) : (pprofCpuRows.length > 0 || pprofHeapRows.length > 0) ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+                        {pprofCpuRows.length > 0 && (
+                          <div>
+                            <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
+                              <Col span={6}>
+                                <Statistic title="CPU 样本函数" value={pprofCpuRows.length} />
+                              </Col>
+                              <Col span={6}>
+                                <Statistic title="累计 Flat" value={pprofCpuTotal} suffix="s" precision={3} />
+                              </Col>
+                            </Row>
+                            <Typography.Text strong style={{ display: 'block', marginBottom: 12 }}>CPU Top Functions</Typography.Text>
+                            <Table
+                              dataSource={pprofCpuRows}
+                              columns={[
+                                { title: '函数', dataIndex: 'func', key: 'func', render: (text: string) => <Text code style={{ color: 'rgba(255,255,255,0.85)' }}>{text}</Text> },
+                                { title: 'Flat(s)', dataIndex: 'flat', key: 'flat', width: 120, render: (value: number) => <Text style={{ color: '#f87171', fontWeight: 600 }}>{value.toFixed(6)}</Text> },
+                                { title: '占比', key: 'pct', width: 100, render: (_: any, record: { flat: number }) => <Text>{pprofCpuTotal ? `${((record.flat / pprofCpuTotal) * 100).toFixed(2)}%` : '-'}</Text> },
+                              ]}
+                              rowKey="func"
+                              pagination={{ pageSize: 10, size: 'small' }}
+                              size="small"
+                            />
+                          </div>
+                        )}
+                        {pprofHeapRows.length > 0 && (
+                          <div>
+                            <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
+                              <Col span={6}>
+                                <Statistic title="Heap 样本函数" value={pprofHeapRows.length} />
+                              </Col>
+                              <Col span={6}>
+                                <Statistic title="最大 Flat Space" value={formatBytes(pprofHeapRows[0]?.flat_space || 0)} />
+                              </Col>
+                            </Row>
+                            <Typography.Text strong style={{ display: 'block', marginBottom: 12 }}>Heap Allocators</Typography.Text>
+                            <Table
+                              dataSource={pprofHeapRows}
+                              columns={[
+                                { title: '函数', dataIndex: 'func', key: 'func', render: (text: string) => <Text code style={{ color: 'rgba(255,255,255,0.85)' }}>{text}</Text> },
+                                { title: 'Flat Space', dataIndex: 'flat_space', key: 'flat_space', width: 130, render: (value: number) => <Text style={{ color: '#f87171', fontWeight: 600 }}>{formatBytes(value)}</Text> },
+                                { title: 'Cum Space', dataIndex: 'cum_space', key: 'cum_space', width: 130, render: (value: number) => <Text>{formatBytes(value)}</Text> },
+                                { title: 'Flat Objects', dataIndex: 'flat_objects', key: 'flat_objects', width: 120 },
+                                { title: 'Cum Objects', dataIndex: 'cum_objects', key: 'cum_objects', width: 120 },
+                              ]}
+                              rowKey={(record) => `${record.func}-${record.flat_space}-${record.cum_space}`}
+                              pagination={{ pageSize: 10, size: 'small' }}
+                              size="small"
+                            />
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div style={{ padding: 60, textAlign: 'center' }}>
+                        <div style={{ fontSize: 15, color: 'rgba(255,255,255,0.35)' }}>这里空空如也</div>
+                        <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.2)', marginTop: 6 }}>暂无 pprof 分析数据（需使用 pprof 采集器并触发分析）</div>
+                      </div>
+                    )
+                  ),
+                },
+                {
                   key: 'files',
                   label: '文件下载',
                   children: (
@@ -567,4 +683,16 @@ export default function TaskResult() {
       )}
     </div>
   );
+}
+
+function formatBytes(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let size = value;
+  let unitIndex = 0;
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+  return `${size.toFixed(unitIndex === 0 ? 0 : 2)} ${units[unitIndex]}`;
 }
