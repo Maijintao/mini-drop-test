@@ -59,6 +59,7 @@ export default function TaskList() {
   const [pageSize] = useState(20);
   const [total, setTotal] = useState(0);
   const [tasks, setTasks] = useState<HotmethodTask[]>([]);
+  const [allTasks, setAllTasks] = useState<HotmethodTask[]>([]);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -94,11 +95,17 @@ export default function TaskList() {
     setLoading(true);
     setError('');
     try {
-      const res = await getTasks({ page: nextPage, size: pageSize, keyword: search || undefined });
-      if (res.code === 0) {
-        setTasks(res.data?.list || []);
-        setTotal(res.data?.total || 0);
-        setPage(res.data?.page || nextPage);
+      const [pageRes, statsRes] = await Promise.all([
+        getTasks({ page: nextPage, size: pageSize, keyword: search || undefined }),
+        getTasks({ page: 1, size: 10000 }),
+      ]);
+      if (pageRes.code === 0) {
+        setTasks(pageRes.data?.list || []);
+        setTotal(pageRes.data?.total || 0);
+        setPage(pageRes.data?.page || nextPage);
+      }
+      if (statsRes.code === 0) {
+        setAllTasks(statsRes.data?.list || []);
       }
     } catch (e: any) {
       setError(e?.response?.data?.message || e?.message || '任务列表加载失败');
@@ -132,10 +139,10 @@ export default function TaskList() {
 
   const stats = useMemo(() => ({
     total,
-    running: tasks.filter(task => task.status >= 1 && task.status <= 3).length,
-    done: tasks.filter(task => task.status === 4).length,
-    failed: tasks.filter(task => task.status === 5 || task.status === 6).length,
-  }), [tasks, total]);
+    running: allTasks.filter(task => task.status >= 1 && task.status <= 3).length,
+    done: allTasks.filter(task => task.status === 4).length,
+    failed: allTasks.filter(task => task.status === 5 || task.status === 6).length,
+  }), [allTasks, total]);
 
   const handleContinuousSubmit = async () => {
     if (!continuousForm.target_ip || !continuousForm.pid) return;
