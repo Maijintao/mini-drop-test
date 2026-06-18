@@ -107,8 +107,8 @@ void HealthCheckChannel::HeartbeatLoop() {
 
     HealthCheckResponse response;
     grpc::ClientContext context;
-    // N17: deadline 3s，避免与 1s 心跳间隔重叠导致实际间隔翻倍
-    context.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(3));
+    // N17: deadline 8s，留足余量（心跳间隔 5s）
+    context.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(8));
 
     auto status = stub_->Do(&context, request, &response);
     if (status.ok()) {
@@ -130,8 +130,8 @@ void HealthCheckChannel::HeartbeatLoop() {
       }
     }
 
-    // 心跳间隔 1 秒（1 Hz），分段 sleep 快速响应退出
-    for (int i = 0; i < 10 && running_; ++i) {
+    // 心跳间隔 5 秒，分段 sleep 快速响应退出
+    for (int i = 0; i < 50 && running_; ++i) {
       std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
   }

@@ -96,6 +96,22 @@ func (s *APIServer) syncAgentsFromDrop(ctx context.Context, ownerUID string) err
 		err := s.Db.Where("ip_addr = ?", ip).First(&agent).Error
 		switch {
 		case err == nil:
+			// 检测在线状态变更，写入审计日志
+			wasOnline := agent.Online
+			nowOnline := remote.GetOnline()
+			if wasOnline != nowOnline {
+				reason := "Agent 恢复上线"
+				if !nowOnline {
+					reason = "Agent 离线（心跳超时）"
+				}
+				s.Db.Create(&model.AgentStateHistory{
+					IPAddr:    ip,
+					Hostname:  hostname,
+					FromState: wasOnline,
+					ToState:   nowOnline,
+					Reason:    reason,
+				})
+			}
 			if err := s.Db.Model(&agent).Updates(updates).Error; err != nil {
 				return err
 			}

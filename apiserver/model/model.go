@@ -122,6 +122,19 @@ type TaskStateHistory struct {
 
 func (TaskStateHistory) TableName() string { return "task_state_history" }
 
+// Agent 状态变更审计日志
+type AgentStateHistory struct {
+	ID        uint      `gorm:"primaryKey;autoIncrement;column:id" json:"id"`
+	IPAddr    string    `gorm:"type:varchar(64);index;column:ip_addr" json:"ip_addr"`
+	Hostname  string    `gorm:"type:varchar(256);column:hostname" json:"hostname"`
+	FromState bool      `gorm:"column:from_state" json:"from_state"` // true=在线, false=离线
+	ToState   bool      `gorm:"column:to_state" json:"to_state"`
+	Reason    string    `gorm:"type:text;column:reason" json:"reason"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+func (AgentStateHistory) TableName() string { return "agent_state_history" }
+
 // 任务标签
 type Tag struct {
 	ID    uint   `gorm:"primaryKey;autoIncrement;column:id" json:"id"`
@@ -137,6 +150,7 @@ func AutoMigrate(db *gorm.DB) error {
 	return db.AutoMigrate(
 		&UserInfo{},
 		&AgentInfo{},
+		&AgentStateHistory{},
 		&HotmethodTask{},
 		&MultiTask{},
 		&Group{},

@@ -10,7 +10,7 @@ HealthCheckService::HealthCheckService(HotmethodService* hotmethod_service)
 grpc::Status HealthCheckService::Do(grpc::ServerContext* context,
                                      const HealthCheckRequest* request,
                                      HealthCheckResponse* response) {
-  // 心跳日志降级为 DEBUG，避免刷屏（每 5 秒一次）
+  // 心跳日志降级为 DEBUG，避免刷屏（每 5 秒一次心跳）
   LOG_DEBUG("Heartbeat from " + request->host_name() + " (" + request->ip_addr() + ")");
 
   // 更新 Agent 心跳状态（供 StatAgent 查询）
