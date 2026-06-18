@@ -166,6 +166,8 @@ func SetupTestRouter(srv *server.APIServer) *gin.Engine {
 		{
 			auth.GET("/auth/check", srv.AuthCheck)
 			auth.GET("/users", srv.GetUsers)
+			auth.GET("/settings/llm", srv.GetLLMSettings)
+			auth.PUT("/settings/llm", srv.UpdateLLMSettings)
 			auth.GET("/agents", srv.GetAgents)
 			auth.GET("/agent/stat", srv.StatAgent)
 			auth.GET("/agent/audit-log", srv.GetAgentAuditLog)
@@ -214,6 +216,8 @@ func SetupTestRouterNoAuth(srv *server.APIServer) *gin.Engine {
 	{
 		api.GET("/auth/check", srv.AuthCheck)
 		api.GET("/tasks", srv.GetTasks)
+		api.GET("/settings/llm", srv.GetLLMSettings)
+		api.PUT("/settings/llm", srv.UpdateLLMSettings)
 	}
 	return r
 }

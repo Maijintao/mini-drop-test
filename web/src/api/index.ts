@@ -13,6 +13,7 @@ import type {
   GroupInfo,
   GroupMemberInfo,
   HotmethodTask,
+  LLMSettings,
   TaskDetailData,
   TaskListData,
 } from '@/domain';
@@ -84,6 +85,9 @@ export const loginApi = (username: string, password: string) =>
 export const registerApi = (username: string, password: string) =>
   typedPost<{ uid: string; user_name: string; token: string }>('/auth/register', { username, password });
 export const getUsers = () => typedGet<any>('/users');
+export const getLLMSettings = () => typedGet<LLMSettings>('/settings/llm');
+export const updateLLMSettings = (data: Pick<LLMSettings, 'base_url' | 'model'> & { token?: string; clear_token?: boolean }) =>
+  api.put('/settings/llm', data) as unknown as Promise<ApiResponse<LLMSettings>>;
 
 // Agent
 export const getAgents = () => typedGet<AgentInfo[]>('/agents');

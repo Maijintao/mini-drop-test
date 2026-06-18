@@ -62,8 +62,8 @@ func main() {
 	}
 	sqlDB.SetMaxOpenConns(100)
 	sqlDB.SetMaxIdleConns(10)
-	sqlDB.SetConnMaxLifetime(3600e9)       // 1 hour
-	sqlDB.SetConnMaxIdleTime(300e9) // 5 min
+	sqlDB.SetConnMaxLifetime(3600e9) // 1 hour
+	sqlDB.SetConnMaxIdleTime(300e9)  // 5 min
 
 	// 4. 自动建表（表已存在时跳过）
 	if err := model.AutoMigrate(db); err != nil {
@@ -185,6 +185,8 @@ func setupRouter(srv *server.APIServer, logger *zap.Logger, cfg config.Config) *
 			// Auth & User
 			auth.GET("/auth/check", srv.AuthCheck)
 			auth.GET("/users", srv.GetUsers)
+			auth.GET("/settings/llm", srv.GetLLMSettings)
+			auth.PUT("/settings/llm", srv.UpdateLLMSettings)
 
 			// Agent
 			auth.GET("/agents", srv.GetAgents)

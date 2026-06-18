@@ -219,6 +219,14 @@ export interface CreateContinuousParams {
   event?: string;
 }
 
+export interface LLMSettings {
+  base_url: string;
+  model: string;
+  token?: string;
+  token_configured?: boolean;
+  token_masked?: string;
+}
+
 export function parseTaskParams(params: HotmethodTask['request_params']): TaskParams {
   if (!params) return {};
   if (typeof params === 'string') {

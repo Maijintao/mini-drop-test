@@ -117,5 +117,17 @@ func (s *APIServer) analysisProcessEnv(tid string) []string {
 	if s.AuthSecret != "" {
 		env = append(env, "DROP_USER_TOKEN="+middleware.ComputeHMAC(task.UID, s.AuthSecret))
 	}
+	llm := s.getLLMConfig(task.UID)
+	if llm.BaseURL != "" {
+		env = append(env, "LLM_BASE_URL="+llm.BaseURL)
+		env = append(env, "LLM_API_URL="+llm.BaseURL)
+	}
+	if llm.Token != "" {
+		env = append(env, "LLM_TOKEN="+llm.Token)
+		env = append(env, "LLM_API_KEY="+llm.Token)
+	}
+	if llm.Model != "" {
+		env = append(env, "LLM_MODEL="+llm.Model)
+	}
 	return env
 }

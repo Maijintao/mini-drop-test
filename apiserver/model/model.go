@@ -18,6 +18,18 @@ type UserInfo struct {
 
 func (UserInfo) TableName() string { return "user_info" }
 
+// 用户级系统配置（LLM 等敏感配置按用户隔离）
+type UserConfig struct {
+	ID        uint      `gorm:"primaryKey;autoIncrement;column:id" json:"id"`
+	UID       string    `gorm:"type:varchar(64);uniqueIndex:idx_user_config_uid_key;column:uid" json:"uid"`
+	Key       string    `gorm:"type:varchar(128);uniqueIndex:idx_user_config_uid_key;column:key" json:"key"`
+	Value     string    `gorm:"type:text;column:value" json:"value"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func (UserConfig) TableName() string { return "user_config" }
+
 // Agent 信息
 type AgentInfo struct {
 	ID            uint           `gorm:"primaryKey;autoIncrement;column:id" json:"id"`
@@ -165,6 +177,7 @@ func (ContinuousWindow) TableName() string { return "continuous_window" }
 func AutoMigrate(db *gorm.DB) error {
 	return db.AutoMigrate(
 		&UserInfo{},
+		&UserConfig{},
 		&AgentInfo{},
 		&AgentStateHistory{},
 		&HotmethodTask{},

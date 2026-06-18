@@ -45,7 +45,7 @@ from data_parser.collapsed_parser import (
 from analyzers.flamegraph import perf_script_to_collapsed, collapsed_to_svg
 from analyzers.topn import analyze_topn, topn_to_json
 from analyzers.advisor import load_rules, match_rules, suggestions_to_markdown
-from ai_advisor import generate_ai_suggestion, generate_ai_summary
+from ai_advisor import generate_ai_suggestion, generate_ai_summary, is_llm_enabled
 from analyzers.pprof_data_parser import parse_pprof_text, parse_pprof_csv
 from analyzers.pprof_heap_parser import parse_heap_text, parse_heap_csv
 from analyzers.resource_analyzer import ResourceSample, parse_pidstat_csv, analyze_resources, samples_to_json
@@ -434,12 +434,22 @@ def run_cpu_flamegraph(perf_data_path: str, work_dir: str, tid: str,
         f.write(suggestions_to_markdown(suggestions, tid=tid))
     log.info("suggestions -> %s (%d matches)", suggestions_path, len(suggestions))
 
-    return {
+    products = {
         collapsed_path: "collapsed.txt",
         svg_path: "flamegraph.svg",
         topn_path: "top.json",
         suggestions_path: "suggestions.md",
     }
+    if is_llm_enabled() and suggestions:
+        ai_summary = generate_ai_summary(suggestions, tid)
+        if ai_summary:
+            ai_path = os.path.join(work_dir, "ai_suggestion.md")
+            with open(ai_path, "w") as f:
+                f.write(ai_summary)
+            products[ai_path] = "ai_suggestion.md"
+            log.info("ai_suggestion -> %s", ai_path)
+
+    return products
 
 
 def run_java_heap(hprof_path: str, work_dir: str, tid: str) -> dict:
@@ -769,7 +779,7 @@ def _write_suggestions_to_apiserver(api: APIServerClient, tid: str,
 
     log.info("wrote %d suggestions to apiserver", len(matches))
 
-    # 生成整体 AI 摘要
+    # 生成整体 AI 摘要（CPU 主链路会作为 ai_suggestion.md 上传；这里保留日志兜底）
     if suggestion_list:
         try:
             summary = generate_ai_summary(suggestion_list, tid)
