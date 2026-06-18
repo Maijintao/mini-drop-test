@@ -340,7 +340,7 @@ export default function Home() {
                   borderRadius: 10,
                   cursor: 'pointer', transition: 'all 0.15s',
                 }}
-                  onClick={() => navigate(`/task/result?tid=${task.tid}`)}
+                  onClick={() => navigate(task.type === 2 ? `/continuous?tid=${task.tid}` : `/task/result?tid=${task.tid}`)}
                   onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.085)'}
                   onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.03)'}
                 >

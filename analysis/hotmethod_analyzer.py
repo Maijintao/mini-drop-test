@@ -45,7 +45,7 @@ from data_parser.collapsed_parser import (
 from analyzers.flamegraph import perf_script_to_collapsed, collapsed_to_svg
 from analyzers.topn import analyze_topn, topn_to_json
 from analyzers.advisor import load_rules, match_rules, suggestions_to_markdown
-from ai_advisor import generate_ai_suggestion
+from ai_advisor import generate_ai_suggestion, generate_ai_summary
 from analyzers.pprof_data_parser import parse_pprof_text, parse_pprof_csv
 from analyzers.pprof_heap_parser import parse_heap_text, parse_heap_csv
 from analyzers.resource_analyzer import parse_pidstat_csv, analyze_resources, samples_to_json
@@ -454,7 +454,26 @@ def run_biosnoop(data_path: str, work_dir: str, tid: str) -> dict:
 
 def run_bw_sync(data_path: str, work_dir: str, tid: str) -> dict:
     """带宽同步分析"""
-    return run_tracing(data_path, work_dir, tid)
+    result_path = os.path.join(work_dir, "bw_sync_stats.json")
+    with open(data_path, "r") as f:
+        content = f.read()
+
+    # 根据文件格式选择分析器
+    stripped = content.strip()
+    if stripped.startswith("[") or stripped.startswith("{"):
+        result = analyze_bw_sync_json(stripped)
+    else:
+        result = analyze_bw_sync_csv(stripped)
+
+    import dataclasses
+    output = dataclasses.asdict(result)
+    # sync_events 内部也是 dataclass，需要序列化
+    output["sync_events"] = [dataclasses.asdict(e) for e in result.sync_events]
+
+    with open(result_path, "w") as f:
+        json.dump(output, f, ensure_ascii=False, indent=2)
+    log.info("bw_sync -> %s", result_path)
+    return {result_path: "bw_sync_stats.json"}
 
 
 def run_namespace(data_path: str, work_dir: str, tid: str) -> dict:
@@ -607,6 +626,7 @@ def _write_suggestions_to_apiserver(api: APIServerClient, tid: str,
     pattern = re.compile(r'###\s+\d+\.\s+(.+?)\n.*?\*\*建议\*\*:\s*(.+?)(?:\n|$)')
     matches = pattern.findall(content)
 
+    suggestion_list = []
     for func, advice in matches:
         try:
             ai_text = generate_ai_suggestion(func.strip(), advice.strip())
@@ -616,10 +636,20 @@ def _write_suggestions_to_apiserver(api: APIServerClient, tid: str,
                 suggestion=advice.strip(),
                 ai_suggestion=ai_text,
             )
+            suggestion_list.append({"func": func.strip(), "suggestion": advice.strip()})
         except Exception as e:
             log.warning("failed to write suggestion for %s: %s", func, e)
 
     log.info("wrote %d suggestions to apiserver", len(matches))
+
+    # 生成整体 AI 摘要
+    if suggestion_list:
+        try:
+            summary = generate_ai_summary(suggestion_list, tid)
+            if summary:
+                log.info("AI summary for %s: %s", tid, summary)
+        except Exception as e:
+            log.warning("generate_ai_summary failed: %s", e)
 
 
 if __name__ == "__main__":

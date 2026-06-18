@@ -4,8 +4,15 @@ APIServer HTTP 客户端
 用于分析完成后回写状态和建议到 apiserver。
 """
 import json
+import logging
+import time
 import urllib.request
 import urllib.error
+
+logger = logging.getLogger(__name__)
+
+MAX_RETRIES = 3
+RETRY_BASE_DELAY = 1  # seconds
 
 
 class APIServerClient:
@@ -22,12 +29,27 @@ class APIServerClient:
         req.add_header("Drop_user_uid", "analysis-system")
         req.add_header("Drop_user_name", "analysis-system")
 
-        try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                return json.loads(resp.read().decode("utf-8"))
-        except urllib.error.HTTPError as e:
-            body = e.read().decode("utf-8", errors="replace")
-            raise RuntimeError(f"apiserver {method} {path} failed ({e.code}): {body}")
+        last_exc = None
+        for attempt in range(MAX_RETRIES):
+            try:
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    return json.loads(resp.read().decode("utf-8"))
+            except urllib.error.HTTPError as e:
+                resp_body = e.read().decode("utf-8", errors="replace")
+                # 4xx 客户端错误不重试
+                if 400 <= e.code < 500:
+                    raise RuntimeError(f"apiserver {method} {path} failed ({e.code}): {resp_body}")
+                last_exc = RuntimeError(f"apiserver {method} {path} failed ({e.code}): {resp_body}")
+            except Exception as e:
+                last_exc = e
+
+            if attempt < MAX_RETRIES - 1:
+                delay = RETRY_BASE_DELAY * (2 ** attempt)
+                logger.warning("apiserver %s %s failed (attempt %d/%d): %s, retrying in %ds",
+                               method, path, attempt + 1, MAX_RETRIES, last_exc, delay)
+                time.sleep(delay)
+
+        raise last_exc
 
     def update_analysis_status(self, tid: str, status: int, status_info: str = ""):
         """更新任务分析状态"""

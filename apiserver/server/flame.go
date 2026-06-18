@@ -4,10 +4,13 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+
+	"mini-drop/apiserver/model"
 )
 
 // FlameDiff 火焰图 diff 计算 — POST /api/v1/flame/diff
@@ -85,11 +88,28 @@ func (s *APIServer) FlameDiff(c *gin.Context) {
 }
 
 // GetFlameData 获取火焰图数据 — GET /api/v1/tasks/:tid/flame
+var windowTIDPattern = regexp.MustCompile(`^(.+)_w\d+$`)
+
 func (s *APIServer) GetFlameData(c *gin.Context) {
 	tid := c.Param("tid")
 
-	if _, ok := s.checkTaskAccess(c, tid); !ok {
-		return
+	// 检查是否是窗口 TID（如 parent_tid_w0）
+	if matches := windowTIDPattern.FindStringSubmatch(tid); len(matches) == 2 {
+		parentTID := matches[1]
+		var window model.ContinuousWindow
+		if err := s.Db.Where("window_tid = ?", tid).First(&window).Error; err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"code": CodeNotFound, "message": "window not found"})
+			return
+		}
+		// 验证父任务访问权限
+		if _, ok := s.checkTaskAccess(c, parentTID); !ok {
+			return
+		}
+	} else {
+		// 普通任务
+		if _, ok := s.checkTaskAccess(c, tid); !ok {
+			return
+		}
 	}
 
 	// 尝试获取 SVG

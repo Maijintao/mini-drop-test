@@ -326,7 +326,7 @@ export default function TaskList() {
                       <td style={{ padding: '14px 16px', fontSize: 13, color: 'rgba(255,255,255,0.45)' }}>{formatDate(task.create_time)}</td>
                       <td style={{ padding: '14px 16px' }}>
                         <div style={{ display: 'flex', gap: 8 }}>
-                          <button onClick={() => navigate(`/task/result?tid=${task.tid}`)} style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.55)', cursor: 'pointer' }}>详情</button>
+                          <button onClick={() => navigate(task.type === 2 ? `/continuous?tid=${task.tid}` : `/task/result?tid=${task.tid}`)} style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.55)', cursor: 'pointer' }}>详情</button>
                           <button onClick={() => retry(task.tid)} style={{ background: 'none', border: 'none', color: 'rgba(96,165,250,0.9)', cursor: 'pointer' }}>重试</button>
                           <button onClick={() => removeTask(task.tid)} style={{ background: 'none', border: 'none', color: 'rgba(248,113,113,0.85)', cursor: 'pointer' }}>删除</button>
                         </div>
