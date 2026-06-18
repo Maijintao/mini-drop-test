@@ -48,7 +48,7 @@ struct AgentStatus {
 };
 
 // Continuous Profiling 窗口信息
-struct ContinuousWindowInfo {
+struct ContinuousWindowRecord {
   std::string window_tid;
   int32_t seq = 0;
   int64_t start_time = 0;
@@ -117,7 +117,7 @@ public:
                                    const std::string& callgraph,
                                    const std::string& event);
   bool StopContinuousTask(const std::string& task_id);
-  void GetContinuousWindows(const std::string& task_id, std::vector<ContinuousWindowInfo>* windows);
+  void GetContinuousWindows(const std::string& task_id, std::vector<ContinuousWindowRecord>* windows);
   void RecordContinuousWindow(const std::string& parent_tid, const std::string& window_tid,
                                int32_t seq, int64_t start_time, int64_t end_time,
                                int32_t status, const std::string& cos_key);
@@ -144,7 +144,7 @@ private:
   std::map<std::string, AgentStatus> agents_;      // Agent 心跳状态
   std::map<std::string, TaskStateInfo> tasks_state_;   // 任务状态跟踪
   std::map<std::string, std::shared_ptr<ContinuousTaskConfig>> continuous_tasks_;  // 持续采集任务
-  std::map<std::string, std::vector<ContinuousWindowInfo>> continuous_windows_;    // 窗口记录
+  std::map<std::string, std::vector<ContinuousWindowRecord>> continuous_windows_;  // 窗口记录
   std::mutex mutex_;
   std::condition_variable cv_;  // 用于 Collect 同步等待结果
 };

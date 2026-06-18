@@ -218,20 +218,21 @@ func (sm *ScheduleManager) executeScheduledTask(task model.HotmethodTask) {
 
 	newTid := uuid.New().String()[:12]
 	newTask := &model.HotmethodTask{
-		TID:          newTid,
-		Name:         "[定时触发] " + task.Name,
-		Type:         task.Type,
-		ProfilerType: task.ProfilerType,
-		TargetIP:     task.TargetIP,
+		TID:           newTid,
+		Name:          "[定时触发] " + task.Name,
+		Type:          task.Type,
+		ProfilerType:  task.ProfilerType,
+		TargetIP:      task.TargetIP,
 		RequestParams: datatypes.JSON(task.RequestParams),
-		Status:       TaskStatusNew,
-		UID:          task.UID,
-		UserName:     task.UserName,
-		CreateTime:   time.Now(),
+		Status:        TaskStatusNew,
+		UID:           task.UID,
+		UserName:      task.UserName,
+		CreateTime:    time.Now(),
 	}
 	if err := s.Db.Create(newTask).Error; err != nil {
 		return
 	}
+	s.recordStateChange(newTid, -1, TaskStatusNew, "scheduled task created and pending dispatch", ChangeTypeTask)
 
 	if s.GRPC == nil {
 		s.Db.Model(newTask).Updates(map[string]interface{}{
@@ -278,12 +279,8 @@ func (sm *ScheduleManager) executeScheduledTask(task model.HotmethodTask) {
 		return
 	}
 
-	// N4: gRPC 下发成功，标记为已派发
-	s.Db.Model(newTask).Updates(map[string]interface{}{
-		"status":      TaskStatusDispatched,
-		"status_info": "dispatched to drop_server (cron)",
-	})
-	s.recordStateChange(newTid, TaskStatusNew, TaskStatusDispatched, "dispatched to drop_server (cron)", ChangeTypeTask)
+	// 下发成功后仍保持 PENDING，等待 drop_server/Agent 上报真实 RUNNING/UPLOADING 状态。
+	s.updateTaskStatusInfo(newTid, "queued in drop_server (cron)")
 
 	s.WG.Add(1)
 	go func() {

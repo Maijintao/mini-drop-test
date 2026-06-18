@@ -3,6 +3,7 @@
 #include <cstdio>
 #include "agent/Config.h"
 #include "common/Log.h"
+#include "server/HotmethodService.h"
 
 using namespace drop;
 

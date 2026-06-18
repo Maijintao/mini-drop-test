@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -85,6 +86,7 @@ func (s *APIServer) CreateTask(c *gin.Context) {
 		})
 		return
 	}
+	s.recordStateChange(tid, -1, TaskStatusNew, "task created and pending dispatch", ChangeTypeTask)
 
 	// 2) 调 drop_server 下发任务
 	pbReq := &pb.CreateTaskRequest{
@@ -149,12 +151,8 @@ func (s *APIServer) CreateTask(c *gin.Context) {
 		return
 	}
 
-	// N4: gRPC 下发成功，标记为已派发
-	s.Db.Model(task).Updates(map[string]interface{}{
-		"status":      TaskStatusDispatched,
-		"status_info": "dispatched to drop_server",
-	})
-	s.recordStateChange(tid, TaskStatusNew, TaskStatusDispatched, "dispatched to drop_server", ChangeTypeTask)
+	// 下发成功后仍保持 PENDING，等待 drop_server/Agent 上报真实 RUNNING/UPLOADING 状态。
+	s.updateTaskStatusInfo(tid, "queued in drop_server")
 
 	s.WG.Add(1)
 	go func() {
@@ -422,6 +420,7 @@ func (s *APIServer) RetryTask(c *gin.Context) {
 		})
 		return
 	}
+	s.recordStateChange(newTID, -1, TaskStatusNew, "retry task created and pending dispatch", ChangeTypeTask)
 
 	// gRPC 下发
 	pbReq := &pb.CreateTaskRequest{
@@ -480,12 +479,8 @@ func (s *APIServer) RetryTask(c *gin.Context) {
 		return
 	}
 
-	// N4: gRPC 下发成功，标记为已派发
-	s.Db.Model(newTask).Updates(map[string]interface{}{
-		"status":      TaskStatusDispatched,
-		"status_info": "dispatched to drop_server",
-	})
-	s.recordStateChange(newTID, TaskStatusNew, TaskStatusDispatched, "dispatched to drop_server", ChangeTypeTask)
+	// 下发成功后仍保持 PENDING，等待 drop_server/Agent 上报真实 RUNNING/UPLOADING 状态。
+	s.updateTaskStatusInfo(newTID, "queued in drop_server")
 
 	s.WG.Add(1)
 	go func() {
@@ -511,49 +506,39 @@ func (s *APIServer) waitTaskResult(ctx context.Context, tid string, timeoutSec u
 	ticker := time.NewTicker(3 * time.Second)
 	defer ticker.Stop()
 
-	s.Db.Model(&model.HotmethodTask{}).
-		Where("tid = ?", tid).
-		Updates(map[string]interface{}{
-			"status":      TaskStatusRunning,
-			"status_info": "agent is running",
-			"begin_time":   time.Now(),
-		})
-	s.recordStateChange(tid, TaskStatusDispatched, TaskStatusRunning, "agent is running", ChangeTypeTask)
-
 	for {
 		select {
 		case <-ctx.Done():
-			s.recordStateChange(tid, TaskStatusRunning, TaskStatusFailed, "cancelled: "+ctx.Err().Error(), ChangeTypeTask)
+			now := time.Now()
+			s.transitionTaskStatus(tid, TaskStatusFailed, "cancelled: "+ctx.Err().Error(), map[string]interface{}{"end_time": &now})
 			return
 		default:
 		}
 
 		if time.Now().After(deadline) {
 			now := time.Now()
-			s.Db.Model(&model.HotmethodTask{}).
-				Where("tid = ?", tid).
-				Updates(map[string]interface{}{
-					"status":      TaskStatusTimeout,
-					"status_info": "timeout waiting for drop_server result",
-					"end_time":    &now,
-				})
-			s.recordStateChange(tid, TaskStatusRunning, TaskStatusTimeout, "timeout waiting for drop_server result", ChangeTypeTask)
+			s.transitionTaskStatus(tid, TaskStatusFailed, "timeout waiting for drop_server result", map[string]interface{}{"end_time": &now})
 			return
 		}
 
 		fetchCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		resp, err := s.GRPC.FetchData(fetchCtx, &pb.FetchDataRequest{TaskId: tid})
 		cancel()
+		isStatusMessage := false
+		if err == nil {
+			if status, reason, ok := parseDropStatusMessage(resp.GetMessage()); ok {
+				isStatusMessage = true
+				s.syncDropTaskStatus(tid, status, reason)
+				if status == TaskStatusSuccess || status == TaskStatusFailed {
+					return
+				}
+			}
+		}
 		if err == nil && resp.GetCode() == 0 {
 			now := time.Now()
-			s.Db.Model(&model.HotmethodTask{}).
-				Where("tid = ?", tid).
-				Updates(map[string]interface{}{
-					"status":      TaskStatusSuccess,
-					"status_info": "collector result ready: " + resp.GetCosKey(),
-					"end_time":    &now,
-				})
-			s.recordStateChange(tid, TaskStatusRunning, TaskStatusSuccess, "collector result ready: "+resp.GetCosKey(), ChangeTypeTask)
+			s.ensureTaskReached(tid, TaskStatusRunning, "collector ran before result was fetched")
+			s.ensureTaskReached(tid, TaskStatusUploading, "collector uploaded result")
+			s.transitionTaskStatus(tid, TaskStatusSuccess, "collector result ready: "+resp.GetCosKey(), map[string]interface{}{"end_time": &now})
 
 			// 自动触发分析
 			var task model.HotmethodTask
@@ -566,16 +551,9 @@ func (s *APIServer) waitTaskResult(ctx context.Context, tid string, timeoutSec u
 			}
 			return
 		}
-		if err == nil && resp.GetMessage() != "" && resp.GetMessage() != "Result not found" {
+		if err == nil && !isStatusMessage && resp.GetMessage() != "" && resp.GetMessage() != "Result not found" {
 			now := time.Now()
-			s.Db.Model(&model.HotmethodTask{}).
-				Where("tid = ?", tid).
-				Updates(map[string]interface{}{
-					"status":      TaskStatusFailed,
-					"status_info": resp.GetMessage(),
-					"end_time":    &now,
-				})
-			s.recordStateChange(tid, TaskStatusRunning, TaskStatusFailed, resp.GetMessage(), ChangeTypeTask)
+			s.transitionTaskStatus(tid, TaskStatusFailed, resp.GetMessage(), map[string]interface{}{"end_time": &now})
 			return
 		}
 
@@ -675,6 +653,85 @@ func (s *APIServer) recordStateChange(tid string, fromState, toState int, reason
 		ChangeType: changeType,
 	}
 	s.Db.Create(history)
+}
+
+func (s *APIServer) updateTaskStatusInfo(tid string, reason string) {
+	s.Db.Model(&model.HotmethodTask{}).Where("tid = ?", tid).Update("status_info", reason)
+}
+
+func normalizeTaskStatus(status int) int {
+	switch status {
+	case TaskStatusDispatched:
+		return TaskStatusNew
+	case TaskStatusTimeout:
+		return TaskStatusFailed
+	default:
+		return status
+	}
+}
+
+func parseDropStatusMessage(message string) (int, string, bool) {
+	if !strings.HasPrefix(message, "STATUS:") {
+		return 0, "", false
+	}
+	parts := strings.SplitN(message, ":", 3)
+	if len(parts) != 3 {
+		return 0, "", false
+	}
+	status, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return 0, "", false
+	}
+	return normalizeTaskStatus(status), parts[2], true
+}
+
+func (s *APIServer) transitionTaskStatus(tid string, toState int, reason string, updates map[string]interface{}) {
+	toState = normalizeTaskStatus(toState)
+	var task model.HotmethodTask
+	if err := s.Db.Where("tid = ?", tid).First(&task).Error; err != nil {
+		return
+	}
+	if updates == nil {
+		updates = map[string]interface{}{}
+	}
+	updates["status"] = toState
+	updates["status_info"] = reason
+	if toState == TaskStatusRunning && task.BeginTime == nil {
+		now := time.Now()
+		updates["begin_time"] = &now
+	}
+	if err := s.Db.Model(&task).Updates(updates).Error; err != nil {
+		return
+	}
+	if task.Status != toState {
+		s.recordStateChange(tid, task.Status, toState, reason, ChangeTypeTask)
+	}
+}
+
+func (s *APIServer) syncDropTaskStatus(tid string, status int, reason string) {
+	status = normalizeTaskStatus(status)
+	if status == TaskStatusSuccess {
+		now := time.Now()
+		s.transitionTaskStatus(tid, status, reason, map[string]interface{}{"end_time": &now})
+		return
+	}
+	if status == TaskStatusFailed {
+		now := time.Now()
+		s.transitionTaskStatus(tid, status, reason, map[string]interface{}{"end_time": &now})
+		return
+	}
+	s.transitionTaskStatus(tid, status, reason, nil)
+}
+
+func (s *APIServer) ensureTaskReached(tid string, state int, reason string) {
+	state = normalizeTaskStatus(state)
+	var task model.HotmethodTask
+	if err := s.Db.Where("tid = ?", tid).First(&task).Error; err != nil {
+		return
+	}
+	if normalizeTaskStatus(task.Status) < state {
+		s.transitionTaskStatus(tid, state, reason, nil)
+	}
 }
 
 // checkTaskAccess 权限校验：自己的任务 或 组内成员的任务。
@@ -897,12 +954,12 @@ func (s *APIServer) CreateContinuousTask(c *gin.Context) {
 		ProfilerType: req.ProfilerType,
 		TargetIP:     req.TargetIP,
 		RequestParams: mustMarshal(map[string]interface{}{
-			"pid":         req.PID,
-			"hz":          req.Hz,
-			"window_sec":  req.WindowSec,
-			"callgraph":   req.Callgraph,
-			"event":       req.Event,
-			"continuous":  true,
+			"pid":        req.PID,
+			"hz":         req.Hz,
+			"window_sec": req.WindowSec,
+			"callgraph":  req.Callgraph,
+			"event":      req.Event,
+			"continuous": true,
 		}),
 		Status:     2, // RUNNING
 		UID:        uid,

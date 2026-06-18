@@ -1,8 +1,22 @@
 #include "ControlService.h"
 #include "Log.h"
 #include <iostream>
+#include <string>
 
 namespace drop {
+
+namespace {
+int PublicTaskStatus(TaskStatus status) {
+  switch (status) {
+    case TaskStatus::DISPATCHED:
+      return static_cast<int>(TaskStatus::PENDING);
+    case TaskStatus::TIMEOUT:
+      return static_cast<int>(TaskStatus::FAILED);
+    default:
+      return static_cast<int>(status);
+  }
+}
+}
 
 ControlService::ControlService(HotmethodService* hotmethod_service)
     : hotmethod_service_(hotmethod_service) {}
@@ -60,8 +74,14 @@ grpc::Status ControlService::FetchData(grpc::ServerContext* context,
     }
     response->set_cos_key(result.cos_key());
   } else {
-    response->set_code(-1);
-    response->set_message("Result not found");
+    TaskStateInfo state;
+    if (hotmethod_service_->GetTaskStatus(request->task_id(), &state)) {
+      response->set_code(1);
+      response->set_message("STATUS:" + std::to_string(PublicTaskStatus(state.status)) + ":" + state.reason);
+    } else {
+      response->set_code(-1);
+      response->set_message("Result not found");
+    }
   }
   return grpc::Status::OK;
 }
@@ -169,7 +189,7 @@ grpc::Status ControlService::ListWindows(grpc::ServerContext* context,
     return grpc::Status::OK;
   }
 
-  std::vector<ContinuousWindowInfo> windows;
+  std::vector<ContinuousWindowRecord> windows;
   hotmethod_service_->GetContinuousWindows(request->task_id(), &windows);
 
   response->set_code(0);

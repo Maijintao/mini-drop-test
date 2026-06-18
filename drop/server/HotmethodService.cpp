@@ -98,8 +98,8 @@ bool HotmethodService::PopTask(const std::string& target_ip, TaskDesc* task) {
     tasks_.erase(it);  // 清理空条目
   }
 
-  // 状态迁移：DISPATCHED（任务派发给 Agent）
-  UpdateTaskStatus(task->task_id(), TaskStatus::DISPATCHED, "任务派发给 Agent " + target_ip);
+  // 内部保留 DISPATCHED 做派发超时保护；FetchData 对外映射为 PENDING。
+  UpdateTaskStatus(task->task_id(), TaskStatus::DISPATCHED, "任务已派发给 Agent " + target_ip);
 
   return true;
 }
@@ -379,19 +379,18 @@ void HotmethodService::CleanupTimeoutTasks(int timeout_sec) {
   std::lock_guard<std::mutex> lock(mutex_);
   auto now = std::chrono::steady_clock::now();
 
-  // 超时检测：DISPATCHED/RUNNING 超时标记为 TIMEOUT
+  // 超时检测：仅处理已派发但 Agent 未开始执行的任务，RUNNING 由 Agent 自身超时保护负责。
   for (auto& [task_id, state] : tasks_state_) {
-    if (state.status != TaskStatus::DISPATCHED &&
-        state.status != TaskStatus::RUNNING) {
+    if (state.status != TaskStatus::DISPATCHED) {
       continue;
     }
     auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - state.timestamp).count();
     if (elapsed > timeout_sec) {
-      state.status = TaskStatus::TIMEOUT;
-      state.reason = "任务超时，Agent 可能已掉线";
+      state.status = TaskStatus::FAILED;
+      state.reason = "任务派发超时，Agent 未开始执行";
       state.timestamp = now;
-      PersistTaskStatus(task_id, TaskStatus::TIMEOUT, state.reason);
-      LOG_INFO("[STATE] Task " + task_id + " -> TIMEOUT (reason: 超时 " + std::to_string(elapsed) + "s) [persisted]");
+      PersistTaskStatus(task_id, TaskStatus::FAILED, state.reason);
+      LOG_INFO("[STATE] Task " + task_id + " -> FAILED (reason: 派发超时 " + std::to_string(elapsed) + "s) [persisted]");
     }
   }
 
@@ -478,7 +477,7 @@ bool HotmethodService::StopContinuousTask(const std::string& task_id) {
 }
 
 void HotmethodService::GetContinuousWindows(const std::string& task_id,
-                                             std::vector<ContinuousWindowInfo>* windows) {
+                                             std::vector<ContinuousWindowRecord>* windows) {
   std::lock_guard<std::mutex> lock(mutex_);
   auto it = continuous_windows_.find(task_id);
   if (it != continuous_windows_.end()) {
@@ -492,7 +491,7 @@ void HotmethodService::RecordContinuousWindow(const std::string& parent_tid,
                                                int64_t end_time, int32_t status,
                                                const std::string& cos_key) {
   std::lock_guard<std::mutex> lock(mutex_);
-  ContinuousWindowInfo info;
+  ContinuousWindowRecord info;
   info.window_tid = window_tid;
   info.seq = seq;
   info.start_time = start_time;

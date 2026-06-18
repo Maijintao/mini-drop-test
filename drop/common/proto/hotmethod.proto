@@ -5,6 +5,7 @@ package drop;
 option go_package = "mini-drop/proto";
 
 import "common.proto";
+import "healthcheck.proto";
 import "google/protobuf/empty.proto";
 
 // Server → Agent 任务下发服务

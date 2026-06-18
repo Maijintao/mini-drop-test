@@ -47,6 +47,7 @@ echo ""
 
 HEADER="$PROJECT_DIR/server/HotmethodService.h"
 IMPL="$PROJECT_DIR/server/HotmethodService.cpp"
+AGENT_IMPL="$PROJECT_DIR/agent/HotmethodChannel.cpp"
 
 # ============================================
 # 状态枚举定义检查
@@ -93,9 +94,14 @@ echo "[状态迁移点]"
 assert_contains "CreateTask → PENDING" 'TaskStatus::PENDING' "$IMPL"
 assert_contains "PENDING reason" '任务创建' "$IMPL"
 
-# RUNNING：任务派发时
-assert_contains "PopTask → RUNNING" 'TaskStatus::RUNNING' "$IMPL"
-assert_contains "RUNNING reason" '任务派发给 Agent' "$IMPL"
+# DISPATCHED：仅作为 drop_server 内部派发超时保护，对外映射为 PENDING
+assert_contains "PopTask → DISPATCHED" 'TaskStatus::DISPATCHED' "$IMPL"
+assert_contains "DISPATCHED reason" '任务已派发给 Agent' "$IMPL"
+
+# RUNNING：Agent 开始执行时通过 UpdateTaskStatus 上报
+assert_contains "Agent 上报 TASK_RUNNING" 'TASK_RUNNING' "$AGENT_IMPL"
+assert_contains "RUNNING reason" 'Agent 开始执行采集任务' "$AGENT_IMPL"
+assert_contains "服务端接收 TASK_RUNNING" 'case TASK_RUNNING' "$IMPL"
 
 # DONE：采集成功时
 assert_contains "NotifyResult → DONE" 'TaskStatus::DONE' "$IMPL"

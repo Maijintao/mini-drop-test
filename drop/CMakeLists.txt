@@ -18,8 +18,10 @@ enable_testing()
 
 # Find dependencies
 set(protobuf_MODULE_COMPATIBLE ON)
-find_package(Protobuf CONFIG REQUIRED)
-find_package(gRPC CONFIG REQUIRED)
+find_package(Protobuf REQUIRED)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(GRPCPP REQUIRED IMPORTED_TARGET grpc++)
+find_program(GRPC_CPP_PLUGIN_EXECUTABLE grpc_cpp_plugin REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(Threads REQUIRED)
 
@@ -50,10 +52,10 @@ foreach(PROTO_FILE ${PROTO_FILES})
     OUTPUT ${GRPC_SRC} ${GRPC_HDR}
     COMMAND protobuf::protoc
     --grpc_out=${CMAKE_CURRENT_BINARY_DIR}
-    --plugin=protoc-gen-grpc=$<TARGET_FILE:gRPC::grpc_cpp_plugin>
+    --plugin=protoc-gen-grpc=${GRPC_CPP_PLUGIN_EXECUTABLE}
     -I ${PROTO_IMPORT_DIR}
     ${PROTO_ABS}
-    DEPENDS ${PROTO_ABS} gRPC::grpc_cpp_plugin
+    DEPENDS ${PROTO_ABS}
     COMMENT "Generating gRPC code for ${PROTO_NAME}"
   )
 endforeach()
@@ -69,7 +71,7 @@ target_include_directories(drop_proto PUBLIC
 )
 target_link_libraries(drop_proto PUBLIC
   protobuf::libprotobuf
-  gRPC::grpc++
+  PkgConfig::GRPCPP
 )
 
 # Agent binary
@@ -116,7 +118,7 @@ target_include_directories(drop_tests PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}
   ${CMAKE_CURRENT_SOURCE_DIR}/common
 )
-target_link_libraries(drop_tests PRIVATE gtest gtest_main Threads::Threads nlohmann_json::nlohmann_json)
+target_link_libraries(drop_tests PRIVATE drop_proto gtest gtest_main Threads::Threads nlohmann_json::nlohmann_json)
 
 include(GoogleTest)
 gtest_discover_tests(drop_tests)
