@@ -138,6 +138,31 @@ func (s *APIServer) syncAgentsFromDrop(ctx context.Context, ownerUID string) err
 }
 
 // StatAgent 查询 Agent 当前资源占用 — GET /api/v1/agent/stat?ip=xxx
+
+// GetAgentAuditLog 查询 Agent 状态变更审计日志 — GET /api/v1/agent/audit-log?ip=xxx&limit=50
+func (s *APIServer) GetAgentAuditLog(c *gin.Context) {
+	ip := c.Query("ip")
+	limit := 50
+	if l, err := fmt.Sscanf(c.DefaultQuery("limit", "50"), "%d", &limit); err != nil || l != 1 || limit <= 0 {
+		limit = 50
+	}
+	if limit > 200 {
+		limit = 200
+	}
+
+	query := s.Db.Model(&model.AgentStateHistory{}).Order("created_at DESC").Limit(limit)
+	if ip != "" {
+		query = query.Where("ip_addr = ?", ip)
+	}
+
+	var logs []model.AgentStateHistory
+	query.Find(&logs)
+
+	c.JSON(http.StatusOK, gin.H{
+		"code": CodeSuccess,
+		"data": logs,
+	})
+}
 func (s *APIServer) StatAgent(c *gin.Context) {
 	ip := c.Query("ip")
 	if ip == "" {

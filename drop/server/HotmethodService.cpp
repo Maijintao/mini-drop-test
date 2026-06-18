@@ -150,7 +150,8 @@ bool HotmethodService::GetAgentStatus(const std::string& ip_addr, AgentStatus* s
   // 检查是否离线（30s 无心跳）
   auto now = std::chrono::steady_clock::now();
   auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - it->second.last_heartbeat).count();
-  if (elapsed > 30) {
+  if (elapsed > 30 && it->second.online) {
+    LOG_INFO("[AUDIT] Agent " + it->second.host_name + " (" + ip_addr + ") 离线，无心跳 " + std::to_string(elapsed) + " 秒");
     it->second.online = false;
   }
 
@@ -165,7 +166,8 @@ void HotmethodService::GetAllAgentStatus(std::vector<AgentStatus>* agents) {
   for (auto& [ip, agent] : agents_) {
     // 检查是否离线（30s 无心跳）
     auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - agent.last_heartbeat).count();
-    if (elapsed > 30) {
+    if (elapsed > 30 && agent.online) {
+      LOG_INFO("[AUDIT] Agent " + agent.host_name + " (" + ip + ") 离线，无心跳 " + std::to_string(elapsed) + " 秒");
       agent.online = false;
     }
     agents->push_back(agent);

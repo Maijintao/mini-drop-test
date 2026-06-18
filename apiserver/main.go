@@ -189,6 +189,7 @@ func setupRouter(srv *server.APIServer, logger *zap.Logger, cfg config.Config) *
 			// Agent
 			auth.GET("/agents", srv.GetAgents)
 			auth.GET("/agent/stat", srv.StatAgent)
+			auth.GET("/agent/audit-log", srv.GetAgentAuditLog)
 
 			// Task CRUD
 			auth.POST("/tasks", srv.CreateTask)
