@@ -917,6 +917,7 @@ type CreateContinuousReq struct {
 // CreateContinuousTask 创建常驻采集任务 — POST /api/v1/tasks/continuous
 func (s *APIServer) CreateContinuousTask(c *gin.Context) {
 	uid := c.GetString(middleware.CtxUID)
+	userName := c.GetString(middleware.CtxUserName)
 	var req CreateContinuousReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -996,17 +997,24 @@ func (s *APIServer) CreateContinuousTask(c *gin.Context) {
 			"event":      req.Event,
 			"continuous": true,
 		}),
-		Status:     2, // RUNNING
+		Status:     TaskStatusRunning,
+		StatusInfo: "continuous profiling running",
 		UID:        uid,
+		UserName:   userName,
 		CreateTime: now,
+		BeginTime:  &now,
 	}
 	if err := s.Db.Create(&task).Error; err != nil {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cleanupCancel()
+		_, _ = s.GRPC.StopContinuous(cleanupCtx, &pb.StopContinuousRequest{TaskId: tid})
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    CodeInternal,
 			"message": "db error: " + err.Error(),
 		})
 		return
 	}
+	s.recordStateChange(tid, -1, TaskStatusRunning, "continuous profiling started", ChangeTypeTask)
 
 	c.JSON(http.StatusOK, gin.H{
 		"code": CodeSuccess,
@@ -1020,7 +1028,8 @@ func (s *APIServer) CreateContinuousTask(c *gin.Context) {
 // 同时从 drop_server 同步窗口状态，发现新完成的窗口时自动触发分析
 func (s *APIServer) GetContinuousWindows(c *gin.Context) {
 	tid := c.Param("tid")
-	if _, ok := s.checkTaskAccess(c, tid); !ok {
+	parentTask, ok := s.checkTaskAccess(c, tid)
+	if !ok {
 		return
 	}
 
@@ -1029,10 +1038,12 @@ func (s *APIServer) GetContinuousWindows(c *gin.Context) {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
 		defer cancel()
 		resp, err := s.GRPC.ListWindows(ctx, &pb.ListWindowsRequest{TaskId: tid})
-		if err == nil && resp != nil {
+		if err == nil && resp != nil && resp.GetCode() == 0 {
 			for _, w := range resp.GetWindows() {
 				var existing model.ContinuousWindow
 				err := s.Db.Where("window_tid = ?", w.GetWindowTid()).First(&existing).Error
+				previousStatus := -1
+				windowCreated := false
 				if err == gorm.ErrRecordNotFound {
 					// 新窗口，写入 DB
 					startTime := time.Unix(w.GetStartTime(), 0)
@@ -1047,17 +1058,10 @@ func (s *APIServer) GetContinuousWindows(c *gin.Context) {
 						COSKey:    w.GetCosKey(),
 					}
 					s.Db.Create(&record)
-
-					// 窗口完成且有数据时，自动触发分析（CPU type=0）
-					if w.GetStatus() == 1 && w.GetCosKey() != "" {
-						s.WG.Add(1)
-						go func(windowTid string) {
-							defer s.WG.Done()
-							s.runAnalysis(windowTid, 0) // 0 = CPU Profiling
-						}(w.GetWindowTid())
-					}
+					windowCreated = true
 				} else if err == nil {
 					// 更新已有窗口状态
+					previousStatus = existing.Status
 					updates := map[string]interface{}{
 						"status": int(w.GetStatus()),
 					}
@@ -1068,6 +1072,14 @@ func (s *APIServer) GetContinuousWindows(c *gin.Context) {
 						updates["end_time"] = time.Unix(w.GetEndTime(), 0)
 					}
 					s.Db.Model(&existing).Updates(updates)
+				} else {
+					continue
+				}
+
+				childTask, childCreated := s.ensureContinuousWindowTask(*parentTask, w)
+				if childTask != nil && w.GetStatus() == 1 && w.GetCosKey() != "" &&
+					(childCreated || windowCreated || previousStatus != 1) {
+					s.triggerWindowAnalysisIfReady(childTask)
 				}
 			}
 		}
@@ -1098,10 +1110,129 @@ func (s *APIServer) GetContinuousWindows(c *gin.Context) {
 	})
 }
 
+func (s *APIServer) ensureContinuousWindowTask(parent model.HotmethodTask, w *pb.ContinuousWindowInfo) (*model.HotmethodTask, bool) {
+	if w == nil || w.GetWindowTid() == "" {
+		return nil, false
+	}
+	if w.GetStatus() != 1 && w.GetStatus() != 2 {
+		return nil, false
+	}
+
+	taskStatus := TaskStatusSuccess
+	statusInfo := "continuous window completed"
+	if w.GetStatus() == 2 {
+		taskStatus = TaskStatusFailed
+		statusInfo = "continuous window failed"
+	}
+
+	startTime := time.Unix(w.GetStartTime(), 0)
+	endTime := time.Unix(w.GetEndTime(), 0)
+	params, _ := unmarshalParams(parent.RequestParams)
+	if params == nil {
+		params = map[string]interface{}{}
+	}
+	params["continuous_window"] = true
+	params["parent_tid"] = parent.TID
+	params["window_tid"] = w.GetWindowTid()
+	params["window_seq"] = w.GetSeq()
+	if w.GetCosKey() != "" {
+		params["cos_key"] = w.GetCosKey()
+	}
+
+	var existing model.HotmethodTask
+	err := s.Db.Where("tid = ?", w.GetWindowTid()).First(&existing).Error
+	if err == gorm.ErrRecordNotFound {
+		name := fmt.Sprintf("%s #%d", parent.Name, w.GetSeq()+1)
+		if parent.Name == "" {
+			name = w.GetWindowTid()
+		}
+		child := model.HotmethodTask{
+			TID:            w.GetWindowTid(),
+			Name:           name,
+			Type:           0,
+			ProfilerType:   parent.ProfilerType,
+			TargetIP:       parent.TargetIP,
+			RequestParams:  mustMarshal(params),
+			Status:         taskStatus,
+			AnalysisStatus: AnalysisStatusPending,
+			StatusInfo:     statusInfo,
+			UID:            parent.UID,
+			UserName:       parent.UserName,
+			CreateTime:     startTime,
+			BeginTime:      &startTime,
+			EndTime:        &endTime,
+			MasterTaskTID:  parent.TID,
+		}
+		if dbErr := s.Db.Create(&child).Error; dbErr != nil {
+			return nil, false
+		}
+		s.recordStateChange(child.TID, -1, taskStatus, statusInfo, ChangeTypeTask)
+		return &child, true
+	}
+	if err != nil {
+		return nil, false
+	}
+
+	updates := map[string]interface{}{
+		"profiler_type":   parent.ProfilerType,
+		"target_ip":       parent.TargetIP,
+		"request_params":  mustMarshal(params),
+		"status":          taskStatus,
+		"status_info":     statusInfo,
+		"master_task_tid": parent.TID,
+	}
+	if existing.UID == "" {
+		updates["uid"] = parent.UID
+	}
+	if existing.UserName == "" {
+		updates["user_name"] = parent.UserName
+	}
+	if existing.BeginTime == nil {
+		updates["begin_time"] = &startTime
+	}
+	if w.GetEndTime() > 0 || existing.EndTime == nil {
+		updates["end_time"] = &endTime
+	}
+	if err := s.Db.Model(&existing).Updates(updates).Error; err != nil {
+		return nil, false
+	}
+	if existing.Status != taskStatus {
+		s.recordStateChange(existing.TID, existing.Status, taskStatus, statusInfo, ChangeTypeTask)
+	}
+	existing.ProfilerType = parent.ProfilerType
+	existing.TargetIP = parent.TargetIP
+	existing.RequestParams = mustMarshal(params)
+	existing.Status = taskStatus
+	existing.StatusInfo = statusInfo
+	existing.MasterTaskTID = parent.TID
+	if existing.UID == "" {
+		existing.UID = parent.UID
+	}
+	if existing.UserName == "" {
+		existing.UserName = parent.UserName
+	}
+	return &existing, false
+}
+
+func (s *APIServer) triggerWindowAnalysisIfReady(task *model.HotmethodTask) {
+	if task.AnalysisStatus != AnalysisStatusPending {
+		return
+	}
+	if s.AnalysisCmd.Command == "" || s.AnalysisCmd.ScriptPath == "" {
+		return
+	}
+	s.WG.Add(1)
+	go func(windowTid string) {
+		defer s.WG.Done()
+		s.runAnalysis(windowTid, 0)
+	}(task.TID)
+}
+
 // StopContinuousTask 停止常驻采集 — POST /api/v1/tasks/:tid/stop
 func (s *APIServer) StopContinuousTask(c *gin.Context) {
 	tid := c.Param("tid")
-	if _, ok := s.checkTaskAccess(c, tid); !ok {
+	task, ok := s.checkTaskAccess(c, tid)
+	if !ok {
 		return
 	}
 
@@ -1124,13 +1255,24 @@ func (s *APIServer) StopContinuousTask(c *gin.Context) {
 		})
 		return
 	}
+	if resp.GetCode() != 0 {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    CodeGRPCError,
+			"message": resp.GetMessage(),
+		})
+		return
+	}
 
 	// 更新任务状态为 DONE
+	now := time.Now()
 	s.Db.Model(&model.HotmethodTask{}).Where("tid = ?", tid).Updates(map[string]interface{}{
-		"status":      4, // DONE
-		"end_time":    time.Now(),
+		"status":      TaskStatusSuccess,
+		"end_time":    &now,
 		"status_info": "用户停止",
 	})
+	if task.Status != TaskStatusSuccess {
+		s.recordStateChange(tid, task.Status, TaskStatusSuccess, "用户停止", ChangeTypeTask)
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"code":    CodeSuccess,

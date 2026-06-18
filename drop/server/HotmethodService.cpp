@@ -311,20 +311,29 @@ grpc::Status HotmethodService::NotifyResult(grpc::ServerContext* context,
   results_[task_id] = *request;
   cv_.notify_all();  // 通知等待中的 Collect
 
-  // Continuous Profiling: 检测窗口完成，派发下一个窗口
+  // Continuous Profiling: 检测窗口完成，记录窗口并按需派发下一个窗口。
   // 窗口 ID 格式: parent_tid_wN
   auto wpos = task_id.rfind("_w");
   if (wpos != std::string::npos && wpos > 0) {
     std::string parent_tid = task_id.substr(0, wpos);
     auto it = continuous_tasks_.find(parent_tid);
-    if (it != continuous_tasks_.end() && it->second->running) {
-      // 记录窗口
+    if (it != continuous_tasks_.end()) {
       int32_t seq = 0;
       try { seq = std::stoi(task_id.substr(wpos + 2)); } catch (...) {}
       int64_t now_ts = std::chrono::system_clock::now().time_since_epoch().count() / 1000000000;
-      RecordContinuousWindow(parent_tid, task_id, seq, now_ts - it->second->window_sec,
-                              now_ts, error_msg.empty() ? 1 : 2,
-                              request->cos_key());
+
+      ContinuousWindowRecord info;
+      info.window_tid = task_id;
+      info.seq = seq;
+      info.start_time = now_ts - it->second->window_sec;
+      info.end_time = now_ts;
+      info.status = error_msg.empty() ? 1 : 2;
+      info.cos_key = request->cos_key();
+      continuous_windows_[parent_tid].push_back(info);
+
+      if (!it->second->running) {
+        return grpc::Status::OK;
+      }
 
       // 派发下一个窗口
       std::string next_tid = parent_tid + "_w" + std::to_string(seq + 1);
