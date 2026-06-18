@@ -36,8 +36,9 @@ interface FlameNode {
 }
 
 interface FlameGraphProps {
-  data: { func: string; self: number; total?: number }[];
+  data?: { func: string; self: number; total?: number }[];
   collapsedText?: string;
+  url?: string;
   width?: number;
   height?: number;
 }
@@ -99,7 +100,7 @@ function flatDataToTree(data: { func: string; self: number }[]): FlameNode {
   };
 }
 
-export default function FlameGraph({ data, collapsedText, width = 960, height = 400 }: FlameGraphProps) {
+export default function FlameGraph({ data, collapsedText, url, width = 960, height = 400 }: FlameGraphProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<any>(null);
   const rootRef = useRef<FlameNode | null>(null);
@@ -182,6 +183,22 @@ export default function FlameGraph({ data, collapsedText, width = 960, height = 
       chartRef.current.clear();
     }
   }, [searchTerm]);
+
+  if (url) {
+    return (
+      <iframe
+        src={url}
+        title="flamegraph"
+        style={{
+          width: '100%',
+          height,
+          border: 0,
+          background: 'rgba(0,0,0,0.2)',
+          borderRadius: 8,
+        }}
+      />
+    );
+  }
 
   if ((!data || data.length === 0) && !collapsedText) {
     return (

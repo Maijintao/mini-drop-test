@@ -38,6 +38,8 @@ func TestBug1_CORS_AllowCredentials(t *testing.T) {
 func TestBug2_LoadTopN_LargeJSON(t *testing.T) {
 	db := SetupTestDB()
 	SeedTestData(db)
+	db.Create(&model.HotmethodTask{TID: "tid-1", Name: "base", UID: "test-user-1", UserName: "TestUser1", TargetIP: "10.0.0.1", Status: 4})
+	db.Create(&model.HotmethodTask{TID: "tid-2", Name: "curr", UID: "test-user-1", UserName: "TestUser1", TargetIP: "10.0.0.1", Status: 4})
 	srv, _, mockStore := CreateTestAPIServer(db)
 	r := SetupTestRouter(srv)
 

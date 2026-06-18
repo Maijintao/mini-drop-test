@@ -7,7 +7,6 @@ const layout = compact(await readFile('src/layouts/AppLayout.tsx'));
 const api = compact(await readFile('src/api/index.ts'));
 const domain = compact(await readFile('src/domain.ts'));
 const groups = compact(await readFile('src/pages/Groups.tsx'));
-const schedules = compact(await readFile('src/pages/Schedules.tsx'));
 const taskList = compact(await readFile('src/pages/TaskList.tsx'));
 const schedulePanel = compact(await readFile('src/components/ScheduleTasksPanel.tsx'));
 const agents = compact(await readFile('src/pages/Agents.tsx'));
@@ -30,16 +29,16 @@ const checks = [
   [api, 'createScheduleTask = (data: CreateScheduleTaskParams)'],
   [api, 'getScheduleTasks = ()'],
   [api, 'deleteScheduleTask = (tid: string)'],
-  [api, "api.post('/schedule/task', data)"],
-  [api, "api.get('/schedule/tasks')"],
-  [api, 'api.delete(`/schedule/task/${tid}`)'],
+  [api, "typedPost<{ tid: string; cron_expr: string; message: string }>('/schedule/task', data)"],
+  [api, "typedGet<HotmethodTask[]>('/schedule/tasks')"],
+  [api, 'typedDelete<unknown>(`/schedule/task/${tid}`)'],
   [groups, 'getGroups()'],
   [groups, 'getGroupMembers(gid)'],
   [groups, 'createGroup({ name: groupName.trim() })'],
   [groups, 'addMember(selectedGroup.gid, memberUid.trim())'],
   [groups, 'removeMember(selectedGroup.gid, uid)'],
   [groups, 'deleteGroup(group.gid)'],
-  [schedules, '<Navigate to="/tasks?view=schedules" replace />'],
+  [router, '<Navigate to="/tasks?view=schedules" replace />'],
   [taskList, '<ScheduleTasksPanel agents={agents} />'],
   [taskList, "viewParam === 'schedules'"],
   [schedulePanel, 'getScheduleTasks()'],

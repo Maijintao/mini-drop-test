@@ -15,10 +15,10 @@ const checks = [
   ['CreateTaskModal', modal, 'Callgraph'],
   ['Home', home, '<CreateTaskModal'],
   ['Home', home, 'createTask(payload)'],
-  ['Home', home, 'waitForTaskResult(tid)'],
+  ['Home', home, 'createTaskPoller(tid)'],
   ['TaskList', taskList, '<CreateTaskModal'],
   ['TaskList', taskList, 'createTask({'],
-  ['TaskList', taskList, 'waitForTaskResult(tid)'],
+  ['TaskList', taskList, 'createTaskPoller(tid)'],
 ];
 
 for (const [name, source, needle] of checks) {

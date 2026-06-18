@@ -5,7 +5,7 @@ import gsap from 'gsap';
 import flamegraph, { colorMapper } from 'd3-flame-graph';
 import { select as d3Select } from 'd3-selection';
 import { flameDiff, getTasks } from '@/api';
-import type { DiffTreeNode, FlameDiffResult } from '@/domain';
+import type { FlameDiffResult } from '@/domain';
 
 gsap.registerPlugin(useGSAP);
 

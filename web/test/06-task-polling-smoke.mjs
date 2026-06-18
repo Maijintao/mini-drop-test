@@ -7,13 +7,13 @@ const source = compact(await readFile('src/taskPolling.ts'));
 const checks = [
   'async function loadTask',
   'analysisTriggered = true',
-  'if (task.status === 3)',
-  'if (task.status < 2)',
-  'options.onUpdate?.(task, \'collecting\')',
-  'options.onUpdate?.(task, \'analyzing\')',
+  'if (task.status === 5 || task.status === 6)',
+  'if (task.status < 4)',
+  'onUpdate?.(task, \'collecting\')',
+  'onUpdate?.(task, \'analyzing\')',
   'if (task.analysis_status === 2 || task.analysis_status === 3)',
   'await triggerAnalysis(tid)',
-  'await wait(POLL_INTERVAL_MS)',
+  'await wait(POLL_INTERVAL_MS, signal)',
 ];
 
 for (const needle of checks) {
