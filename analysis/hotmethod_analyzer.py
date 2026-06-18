@@ -12,7 +12,6 @@ import fcntl
 import json
 import logging
 import os
-import re
 import subprocess
 import sys
 import tempfile
@@ -23,6 +22,7 @@ from apiserver_client import APIServerClient
 from config import Config
 from error import ErrorInfo, ERR_STORAGE, ERR_NOT_FOUND, ERR_ANALYZER, ERR_UNSUPPORTED, ERR_ANALYSIS
 from storage import MinIOStorage
+from suggestion_parser import parse_suggestions_markdown
 
 
 def setup_logging():
@@ -138,7 +138,7 @@ def main():
         # 不同任务类型的输入文件不同
         # NOTE: agent 上传路径为 profiler/{tid}/{tid}.ext，需兼容两种命名
         FILE_MAP = {
-            0:  ["perf.data", "collapsed.txt", f"{tid}.data", f"{tid}.txt"],  # CPU 火焰图
+            0:  ["perf.data", "collapsed.txt", f"{tid}.data", f"{tid}.txt", f"{tid}.collapsed"],  # CPU 火焰图
             1:  ["heap.hprof", "perf.data", f"{tid}.hprof", f"{tid}.data"],   # Java Heap / Profiling
             2:  ["tracing.json", "tracing.csv", f"{tid}.json", f"{tid}.csv"], # Tracing
             4:  ["memleak.xml", "memleak.txt", "memleak.json"],              # MemCheck
@@ -170,7 +170,7 @@ def main():
             store.download(key, local_path)
             log.info("downloaded %s", key)
             # 判断是否为已处理的折叠栈文本
-            if fname in ("collapsed.txt", f"{tid}.txt"):
+            if fname in ("collapsed.txt", f"{tid}.txt", f"{tid}.collapsed"):
                 pre_collapsed_path = local_path
                 has_collapsed = True
             elif raw_path is None:
@@ -622,21 +622,20 @@ def _write_suggestions_to_apiserver(api: APIServerClient, tid: str,
     with open(suggestions_path, "r") as f:
         content = f.read()
 
-    # 解析 markdown 格式: "### N. func" + "**建议**: advice"
-    pattern = re.compile(r'###\s+\d+\.\s+(.+?)\n.*?\*\*建议\*\*:\s*(.+?)(?:\n|$)')
-    matches = pattern.findall(content)
-
     suggestion_list = []
-    for func, advice in matches:
+    matches = parse_suggestions_markdown(content)
+    for item in matches:
+        func = item["func"]
+        advice = item["suggestion"]
         try:
-            ai_text = generate_ai_suggestion(func.strip(), advice.strip())
+            ai_text = generate_ai_suggestion(func, advice)
             api.create_suggestion(
                 tid=tid,
-                func=func.strip(),
-                suggestion=advice.strip(),
+                func=func,
+                suggestion=advice,
                 ai_suggestion=ai_text,
             )
-            suggestion_list.append({"func": func.strip(), "suggestion": advice.strip()})
+            suggestion_list.append(item)
         except Exception as e:
             log.warning("failed to write suggestion for %s: %s", func, e)
 

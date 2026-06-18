@@ -53,8 +53,36 @@ def test_config_partial_file():
     os.rmdir(d)
 
 
+def test_empty_file_values_do_not_override_environment():
+    """空配置项不覆盖环境变量"""
+    d = tempfile.mkdtemp()
+    ini = os.path.join(d, "test.ini")
+    old_access = os.environ.get("MINIO_ACCESS_KEY")
+    old_secret = os.environ.get("MINIO_SECRET_KEY")
+    os.environ["MINIO_ACCESS_KEY"] = "env-ak"
+    os.environ["MINIO_SECRET_KEY"] = "env-sk"
+    try:
+        with open(ini, "w") as f:
+            f.write("[minio]\naccess_key =\nsecret_key =\n")
+        cfg = Config(ini)
+        assert cfg.minio_access_key == "env-ak"
+        assert cfg.minio_secret_key == "env-sk"
+    finally:
+        if old_access is None:
+            os.environ.pop("MINIO_ACCESS_KEY", None)
+        else:
+            os.environ["MINIO_ACCESS_KEY"] = old_access
+        if old_secret is None:
+            os.environ.pop("MINIO_SECRET_KEY", None)
+        else:
+            os.environ["MINIO_SECRET_KEY"] = old_secret
+        os.unlink(ini)
+        os.rmdir(d)
+
+
 if __name__ == "__main__":
     test_config_defaults()
     test_config_from_file()
     test_config_partial_file()
+    test_empty_file_values_do_not_override_environment()
     print("ALL PASSED")

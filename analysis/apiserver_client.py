@@ -5,6 +5,7 @@ APIServer HTTP 客户端
 """
 import json
 import logging
+import os
 import time
 import urllib.request
 import urllib.error
@@ -20,14 +21,19 @@ class APIServerClient:
 
     def __init__(self, base_url: str):
         self.base_url = base_url.rstrip("/")
+        self.uid = os.environ.get("DROP_USER_UID", "analysis-system")
+        self.user_name = os.environ.get("DROP_USER_NAME", self.uid)
+        self.token = os.environ.get("DROP_USER_TOKEN", "")
 
     def _request(self, method: str, path: str, data: dict = None) -> dict:
         url = f"{self.base_url}{path}"
         body = json.dumps(data).encode("utf-8") if data else None
         req = urllib.request.Request(url, data=body, method=method)
         req.add_header("Content-Type", "application/json")
-        req.add_header("Drop_user_uid", "analysis-system")
-        req.add_header("Drop_user_name", "analysis-system")
+        req.add_header("Drop_user_uid", self.uid)
+        req.add_header("Drop_user_name", self.user_name)
+        if self.token:
+            req.add_header("Drop_user_token", self.token)
 
         last_exc = None
         for attempt in range(MAX_RETRIES):

@@ -20,11 +20,11 @@ const (
 // secret 非空时，额外验证 HMAC 签名（Drop_user_token header 或 drop_user_token cookie）
 func CheckLogin(secret string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		uid := c.GetHeader("Drop_user_uid")
+		uid := firstHeader(c, "Drop_user_uid", "Drop_User_Uid", "Drop-User-Uid")
 		if uid == "" {
 			uid, _ = c.Cookie("drop_user_uid")
 		}
-		userName := c.GetHeader("Drop_user_name")
+		userName := firstHeader(c, "Drop_user_name", "Drop_User_Name", "Drop-User-Name")
 		if userName == "" {
 			userName, _ = c.Cookie("drop_user_name")
 		}
@@ -40,7 +40,7 @@ func CheckLogin(secret string) gin.HandlerFunc {
 
 		// HMAC 签名验证
 		if secret != "" {
-			token := c.GetHeader("Drop_user_token")
+			token := firstHeader(c, "Drop_user_token", "Drop_User_Token", "Drop-User-Token")
 			if token == "" {
 				token, _ = c.Cookie("drop_user_token")
 			}
@@ -58,6 +58,15 @@ func CheckLogin(secret string) gin.HandlerFunc {
 		c.Set(CtxUserName, userName)
 		c.Next()
 	}
+}
+
+func firstHeader(c *gin.Context, keys ...string) string {
+	for _, key := range keys {
+		if value := c.GetHeader(key); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 // ComputeHMAC 计算 uid 的 HMAC-SHA256 签名

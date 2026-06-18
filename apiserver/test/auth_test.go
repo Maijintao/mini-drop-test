@@ -26,6 +26,21 @@ func TestAuthCheck_OK(t *testing.T) {
 	}
 }
 
+func TestAuthCheck_UrllibCanonicalHeaders(t *testing.T) {
+	db := SetupTestDB()
+	SeedTestData(db)
+	srv, _, _ := CreateTestAPIServer(db)
+	r := SetupTestRouter(srv)
+
+	w := DoRequest(r, "GET", "/api/v1/auth/check", nil, map[string]string{
+		"Drop_User_Uid":  "test-user-1",
+		"Drop_User_Name": "TestUser1",
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+}
+
 // 测试未鉴权访问返回 401
 func TestAuthCheck_Unauthorized(t *testing.T) {
 	db := SetupTestDB()

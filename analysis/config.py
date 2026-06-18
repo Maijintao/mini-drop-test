@@ -25,11 +25,16 @@ class Config:
         self.cfg.read(path)
 
         if self.cfg.has_section("minio"):
-            self.minio_endpoint = self.cfg.get("minio", "endpoint", fallback=self.minio_endpoint)
-            self.minio_access_key = self.cfg.get("minio", "access_key", fallback=self.minio_access_key)
-            self.minio_secret_key = self.cfg.get("minio", "secret_key", fallback=self.minio_secret_key)
-            self.minio_bucket = self.cfg.get("minio", "bucket", fallback=self.minio_bucket)
+            self.minio_endpoint = self._get_non_empty("minio", "endpoint", self.minio_endpoint)
+            self.minio_access_key = self._get_non_empty("minio", "access_key", self.minio_access_key)
+            self.minio_secret_key = self._get_non_empty("minio", "secret_key", self.minio_secret_key)
+            self.minio_bucket = self._get_non_empty("minio", "bucket", self.minio_bucket)
             self.minio_secure = self.cfg.getboolean("minio", "secure", fallback=self.minio_secure)
 
         if self.cfg.has_section("apiserver"):
-            self.apiserver_url = self.cfg.get("apiserver", "url", fallback=self.apiserver_url)
+            self.apiserver_url = self._get_non_empty("apiserver", "url", self.apiserver_url)
+
+    def _get_non_empty(self, section: str, option: str, fallback: str) -> str:
+        value = self.cfg.get(section, option, fallback=fallback)
+        value = value.strip() if isinstance(value, str) else value
+        return value or fallback

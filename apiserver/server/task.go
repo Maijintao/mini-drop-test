@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log"
@@ -536,9 +537,18 @@ func (s *APIServer) waitTaskResult(ctx context.Context, tid string, timeoutSec u
 		}
 		if err == nil && resp.GetCode() == 0 {
 			now := time.Now()
+			cosKey, storeErr := s.persistFetchedResultFile(context.Background(), tid, resp)
+			if storeErr != nil {
+				s.transitionTaskStatus(tid, TaskStatusFailed, storeErr.Error(), map[string]interface{}{"end_time": &now})
+				return
+			}
 			s.ensureTaskReached(tid, TaskStatusRunning, "collector ran before result was fetched")
 			s.ensureTaskReached(tid, TaskStatusUploading, "collector uploaded result")
-			s.transitionTaskStatus(tid, TaskStatusSuccess, "collector result ready: "+resp.GetCosKey(), map[string]interface{}{"end_time": &now})
+			reason := "collector result ready"
+			if cosKey != "" {
+				reason += ": " + cosKey
+			}
+			s.transitionTaskStatus(tid, TaskStatusSuccess, reason, map[string]interface{}{"end_time": &now})
 
 			// 自动触发分析
 			var task model.HotmethodTask
@@ -559,6 +569,31 @@ func (s *APIServer) waitTaskResult(ctx context.Context, tid string, timeoutSec u
 
 		<-ticker.C
 	}
+}
+
+func (s *APIServer) persistFetchedResultFile(ctx context.Context, tid string, resp *pb.FetchDataResponse) (string, error) {
+	if resp.GetCosKey() != "" {
+		return resp.GetCosKey(), nil
+	}
+
+	file := resp.GetFile()
+	if file == nil || len(file.GetContent()) == 0 {
+		return "", nil
+	}
+	if s.Storage == nil {
+		return "", fmt.Errorf("collector returned embedded file but storage is not configured")
+	}
+
+	name := file.GetName()
+	if name == "" {
+		name = tid + ".data"
+	}
+	key := "profiler/" + tid + "/" + name
+	content := file.GetContent()
+	if err := s.Storage.Put(ctx, key, bytes.NewReader(content), int64(len(content)), "application/octet-stream"); err != nil {
+		return "", fmt.Errorf("store embedded collector result failed: %w", err)
+	}
+	return key, nil
 }
 
 // GetCOSFiles 列任务产出文件并签名 — GET /api/v1/cosfiles?tid=xxx

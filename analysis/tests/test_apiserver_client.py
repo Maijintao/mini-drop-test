@@ -15,6 +15,7 @@ class MockHandler(http.server.BaseHTTPRequestHandler):
         MockHandler.requests.append({
             "method": "PUT", "path": self.path,
             "body": json.loads(body) if body else {},
+            "headers": dict(self.headers),
         })
         self.send_response(200)
         self.end_headers()
@@ -26,6 +27,7 @@ class MockHandler(http.server.BaseHTTPRequestHandler):
         MockHandler.requests.append({
             "method": "POST", "path": self.path,
             "body": json.loads(body) if body else {},
+            "headers": dict(self.headers),
         })
         self.send_response(200)
         self.end_headers()
@@ -85,6 +87,10 @@ def test_create_suggestion():
 def test_auth_headers():
     """请求携带认证 header"""
     MockHandler.requests = []
+    old_env = {k: os.environ.get(k) for k in ("DROP_USER_UID", "DROP_USER_NAME", "DROP_USER_TOKEN")}
+    os.environ["DROP_USER_UID"] = "test-user-1"
+    os.environ["DROP_USER_NAME"] = "TestUser1"
+    os.environ["DROP_USER_TOKEN"] = "signed-token"
     server = http.server.HTTPServer(("127.0.0.1", 0), MockHandler)
     port = server.server_address[1]
     t = threading.Thread(target=server.serve_forever)
@@ -94,10 +100,18 @@ def test_auth_headers():
     try:
         client = APIServerClient(f"http://127.0.0.1:{port}")
         client.update_analysis_status("t", 1)
-        # 不报错即通过，handler 端能收到请求
         assert len(MockHandler.requests) == 1
+        headers = MockHandler.requests[0]["headers"]
+        assert headers["Drop_User_Uid"] == "test-user-1"
+        assert headers["Drop_User_Name"] == "TestUser1"
+        assert headers["Drop_User_Token"] == "signed-token"
     finally:
         server.shutdown()
+        for key, value in old_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
 
 
 if __name__ == "__main__":
