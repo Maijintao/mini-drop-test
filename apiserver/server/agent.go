@@ -29,13 +29,16 @@ func (s *APIServer) GetAgents(c *gin.Context) {
 	var gids []uint
 	s.Db.Model(&model.GroupMember{}).Where("uid = ?", uid).Pluck("gid", &gids)
 
-	// 查自己 + 组内成员的 Agent
+	// 查自己 + 组内成员 + 未分配的本地 Agent
 	var agents []model.AgentInfo
-	query := s.Db.Where("uid = ?", uid)
+	query := s.Db.Where("uid = ? OR gid = 0", uid)
 	if len(gids) > 0 {
 		query = query.Or("uid IN (SELECT uid FROM group_members WHERE gid IN ?)", gids)
 	}
-	query.Order("online DESC, updated_at DESC").Find(&agents)
+	if err := query.Order("online DESC, updated_at DESC").Find(&agents).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": CodeInternal, "message": err.Error()})
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"code": CodeSuccess,
@@ -138,9 +141,25 @@ func (s *APIServer) syncAgentsFromDrop(ctx context.Context, ownerUID string) err
 }
 
 // StatAgent 查询 Agent 当前资源占用 — GET /api/v1/agent/stat?ip=xxx
+func (s *APIServer) canAccessAgentIP(uid, ip string) bool {
+	if ip == "" {
+		return false
+	}
+	var gids []uint
+	_ = s.Db.Model(&model.GroupMember{}).Where("uid = ?", uid).Pluck("gid", &gids).Error
+
+	query := s.Db.Model(&model.AgentInfo{}).Where("ip_addr = ? AND (uid = ? OR gid = 0)", ip, uid)
+	if len(gids) > 0 {
+		query = query.Or("ip_addr = ? AND gid IN ?", ip, gids)
+	}
+	var count int64
+	query.Count(&count)
+	return count > 0
+}
 
 // GetAgentAuditLog 查询 Agent 状态变更审计日志 — GET /api/v1/agent/audit-log?ip=xxx&limit=50
 func (s *APIServer) GetAgentAuditLog(c *gin.Context) {
+	uid := c.GetString(middleware.CtxUID)
 	ip := c.Query("ip")
 	limit := 50
 	if l, err := fmt.Sscanf(c.DefaultQuery("limit", "50"), "%d", &limit); err != nil || l != 1 || limit <= 0 {
@@ -152,7 +171,29 @@ func (s *APIServer) GetAgentAuditLog(c *gin.Context) {
 
 	query := s.Db.Model(&model.AgentStateHistory{}).Order("created_at DESC").Limit(limit)
 	if ip != "" {
+		if !s.canAccessAgentIP(uid, ip) {
+			c.JSON(http.StatusNotFound, gin.H{"code": CodeNotFound, "message": "agent not found"})
+			return
+		}
 		query = query.Where("ip_addr = ?", ip)
+	} else {
+		var agents []model.AgentInfo
+		agentQuery := s.Db.Where("uid = ? OR gid = 0", uid)
+		var gids []uint
+		_ = s.Db.Model(&model.GroupMember{}).Where("uid = ?", uid).Pluck("gid", &gids).Error
+		if len(gids) > 0 {
+			agentQuery = agentQuery.Or("gid IN ?", gids)
+		}
+		agentQuery.Find(&agents)
+		ips := make([]string, 0, len(agents))
+		for _, agent := range agents {
+			ips = append(ips, agent.IPAddr)
+		}
+		if len(ips) == 0 {
+			c.JSON(http.StatusOK, gin.H{"code": CodeSuccess, "data": []model.AgentStateHistory{}})
+			return
+		}
+		query = query.Where("ip_addr IN ?", ips)
 	}
 
 	var logs []model.AgentStateHistory
@@ -183,6 +224,16 @@ func (s *APIServer) StatAgent(c *gin.Context) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	uid := c.GetString(middleware.CtxUID)
+	_ = s.syncAgentsFromDrop(ctx, uid)
+	if !s.canAccessAgentIP(uid, ip) {
+		var totalAgents int64
+		_ = s.Db.Model(&model.AgentInfo{}).Count(&totalAgents).Error
+		if totalAgents > 0 {
+			c.JSON(http.StatusNotFound, gin.H{"code": CodeNotFound, "message": "agent not found"})
+			return
+		}
+	}
 
 	resp, err := s.GRPC.StatAgent(ctx, &pb.StatAgentRequest{IpAddr: ip})
 	if err != nil {

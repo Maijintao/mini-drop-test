@@ -59,6 +59,10 @@ func (s *APIServer) CreateTask(c *gin.Context) {
 	if req.Callgraph == "" {
 		req.Callgraph = "dwarf"
 	}
+	if !s.canAccessAgentIP(uid, req.TargetIP) {
+		c.JSON(http.StatusNotFound, gin.H{"code": CodeNotFound, "message": "agent not found"})
+		return
+	}
 
 	// 1) 写库
 	task := &model.HotmethodTask{
@@ -266,6 +270,9 @@ func (s *APIServer) GetTaskDetail(c *gin.Context) {
 		for _, prefix := range []string{"profiler/" + tid + "/", tid + "/"} {
 			objects = append(objects, s.listStorageObjects(c, prefix)...)
 		}
+		if key := extractCollectorResultKey(task.StatusInfo); key != "" {
+			objects = appendUnique(objects, key)
+		}
 		for _, obj := range objects {
 			url, err := s.Storage.PreSign(c, obj, 1*time.Hour)
 			if err != nil {
@@ -296,7 +303,7 @@ func (s *APIServer) DeleteTask(c *gin.Context) {
 		return
 	}
 
-	// 事务：软删 task + 硬删 suggestion + 硬删 state_history
+	// 事务：软删 task + 硬删 suggestion/tag；状态迁移历史保留用于审计。
 	var rowsAffected int64
 	err := s.Db.Transaction(func(tx *gorm.DB) error {
 		result := tx.Where("tid = ?", tid).Delete(&model.HotmethodTask{})
@@ -307,9 +314,12 @@ func (s *APIServer) DeleteTask(c *gin.Context) {
 		if rowsAffected == 0 {
 			return nil // 由外层处理 not found
 		}
-		tx.Where("tid = ?", tid).Delete(&model.AnalysisSuggestion{})
-		tx.Where("tid = ?", tid).Delete(&model.TaskStateHistory{})
-		tx.Where("tid = ?", tid).Delete(&model.Tag{})
+		if err := tx.Where("tid = ?", tid).Delete(&model.AnalysisSuggestion{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("tid = ?", tid).Delete(&model.Tag{}).Error; err != nil {
+			return err
+		}
 		return nil
 	})
 	if err != nil {
@@ -636,6 +646,9 @@ func (s *APIServer) GetCOSFiles(c *gin.Context) {
 	for _, prefix := range []string{"profiler/" + tid + "/", tid + "/"} {
 		objects = append(objects, s.listStorageObjects(c, prefix)...)
 	}
+	if key := extractCollectorResultKey(task.StatusInfo); key != "" {
+		objects = appendUnique(objects, key)
+	}
 
 	var files []gin.H
 	for _, obj := range objects {
@@ -658,6 +671,9 @@ func (s *APIServer) GetCOSFiles(c *gin.Context) {
 // ---------- 工具函数 ----------
 
 func (s *APIServer) listStorageObjects(c context.Context, prefix string) []string {
+	if s.Storage == nil {
+		return nil
+	}
 	keys, err := s.Storage.List(c, prefix)
 	if err != nil {
 		// fallback: 探测常见文件名
@@ -676,6 +692,28 @@ func (s *APIServer) listStorageObjects(c context.Context, prefix string) []strin
 		}
 	}
 	return keys
+}
+
+func extractCollectorResultKey(statusInfo string) string {
+	const marker = "collector result ready: "
+	idx := strings.LastIndex(statusInfo, marker)
+	if idx < 0 {
+		return ""
+	}
+	key := strings.TrimSpace(statusInfo[idx+len(marker):])
+	if key == "" || strings.ContainsAny(key, "\r\n") {
+		return ""
+	}
+	return key
+}
+
+func appendUnique(items []string, item string) []string {
+	for _, existing := range items {
+		if existing == item {
+			return items
+		}
+	}
+	return append(items, item)
 }
 
 // recordStateChange 记录状态迁移历史
@@ -735,12 +773,24 @@ func (s *APIServer) transitionTaskStatus(tid string, toState int, reason string,
 		now := time.Now()
 		updates["begin_time"] = &now
 	}
-	if err := s.Db.Model(&task).Updates(updates).Error; err != nil {
-		return
-	}
-	if task.Status != toState {
-		s.recordStateChange(tid, task.Status, toState, reason, ChangeTypeTask)
-	}
+	_ = s.Db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&task).Updates(updates).Error; err != nil {
+			return err
+		}
+		if task.Status != toState {
+			history := &model.TaskStateHistory{
+				TID:        tid,
+				FromState:  task.Status,
+				ToState:    toState,
+				Reason:     reason,
+				ChangeType: ChangeTypeTask,
+			}
+			if err := tx.Create(history).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func (s *APIServer) syncDropTaskStatus(tid string, status int, reason string) {
@@ -941,6 +991,10 @@ func (s *APIServer) CreateContinuousTask(c *gin.Context) {
 	}
 	if req.Name == "" {
 		req.Name = fmt.Sprintf("continuous-pid%d", req.PID)
+	}
+	if !s.canAccessAgentIP(uid, req.TargetIP) {
+		c.JSON(http.StatusNotFound, gin.H{"code": CodeNotFound, "message": "agent not found"})
+		return
 	}
 
 	if s.GRPC == nil {

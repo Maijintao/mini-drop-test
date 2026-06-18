@@ -138,14 +138,14 @@ tracepoint:block:block_rq_complete
 /@start[args->dev, args->sector]/
 {
   $lat_ns = nsecs - @start[args->dev, args->sector];
-  printf("%lld,%s,%d,%s,%s,%d,%lld\n",
-    nsecs,
-    comm,
-    pid,
-    str(args->dev),
-    "R",
-    0,
-    $lat_ns
+	  printf("%lld,%s,%d,%d,%s,%d,%lld\n",
+	    nsecs,
+	    comm,
+	    pid,
+	    args->dev,
+	    "R",
+	    0,
+	    $lat_ns
   );
   delete(@start[args->dev, args->sector]);
 }

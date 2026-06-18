@@ -2,6 +2,7 @@ package server
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -97,11 +98,22 @@ func (s *APIServer) UpdateAnalysisStatus(c *gin.Context) {
 	var currentTask model.HotmethodTask
 	s.Db.Where("tid = ?", tid).First(&currentTask)
 
+	statusInfo := req.StatusInfo
+	if currentTask.StatusInfo != "" &&
+		strings.Contains(currentTask.StatusInfo, "collector result ready: ") &&
+		!strings.Contains(statusInfo, "collector result ready: ") {
+		if statusInfo == "" {
+			statusInfo = currentTask.StatusInfo
+		} else {
+			statusInfo = currentTask.StatusInfo + "; " + statusInfo
+		}
+	}
+
 	result := s.Db.Model(&model.HotmethodTask{}).
 		Where("tid = ?", tid).
 		Updates(map[string]interface{}{
 			"analysis_status": req.AnalysisStatus,
-			"status_info":     req.StatusInfo,
+			"status_info":     statusInfo,
 		})
 
 	// 记录分析状态变更审计

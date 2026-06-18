@@ -107,7 +107,7 @@ public:
   // 更新任务状态（带 reason）
   void UpdateTaskStatus(const std::string& task_id, TaskStatus status, const std::string& reason);
 
-  // 超时清理：检查 DISPATCHED 超过 timeout_sec 的任务
+  // 超时清理：检查 PENDING/DISPATCHED 超过 timeout_sec 的任务
   void CleanupTimeoutTasks(int timeout_sec = 30);
 
   // Continuous Profiling
@@ -136,7 +136,7 @@ public:
 
 private:
   void InitDB();
-  void PersistTaskStatus(const std::string& task_id, TaskStatus status, const std::string& reason);
+  bool PersistTaskStatus(const std::string& task_id, TaskStatus status, const std::string& reason);
 
   sqlite3* db_ = nullptr;
   std::map<std::string, std::deque<TaskDesc>> tasks_;

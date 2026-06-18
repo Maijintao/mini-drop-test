@@ -48,8 +48,8 @@ from analyzers.advisor import load_rules, match_rules, suggestions_to_markdown
 from ai_advisor import generate_ai_suggestion, generate_ai_summary
 from analyzers.pprof_data_parser import parse_pprof_text, parse_pprof_csv
 from analyzers.pprof_heap_parser import parse_heap_text, parse_heap_csv
-from analyzers.resource_analyzer import parse_pidstat_csv, analyze_resources, samples_to_json
-from analyzers.biotrace import parse_biosnoop_csv, analyze_biosnoop, stats_to_json as biotrace_to_json
+from analyzers.resource_analyzer import ResourceSample, parse_pidstat_csv, analyze_resources, samples_to_json
+from analyzers.biotrace import BioEvent, parse_biosnoop_csv, analyze_biosnoop, stats_to_json as biotrace_to_json
 from analyzers.bw_sync_analyzer import analyze_bw_sync_csv, analyze_bw_sync_json
 from analyzers.tracing_analyzer import parse_tracing_json, parse_tracing_csv, analyze_tracing, tracing_to_json
 from analyzers.namespace_parse import parse_pid_namespaces, namespaces_to_json
@@ -111,9 +111,11 @@ def main():
     except OSError as e:
         log.warning("failed to acquire lock %s: %s", lock_path, e)
 
+    cos_keys = []
     try:
         resp = api._request("GET", f"/api/v1/tasks/{tid}")
         task = resp.get("data", {}).get("task", {})
+        cos_keys = _extract_cos_keys(resp.get("data", {}))
         if task.get("analysis_status") == 2:  # 已成功
             log.info("task %s already analyzed, skipping", tid)
             sys.exit(0)
@@ -125,7 +127,7 @@ def main():
 
     # 5. 标记分析开始（持锁状态下，其他进程会阻塞在步骤 4）
     try:
-        api.update_analysis_status(tid, 1)  # AnalysisStatusRunning
+        api.update_analysis_status(tid, 1, "analysis started")  # AnalysisStatusRunning
         log.info("analysis_status -> 1 (running)")
     except Exception as e:
         log.warning("failed to update status: %s", e)
@@ -138,7 +140,7 @@ def main():
         # 不同任务类型的输入文件不同
         # NOTE: agent 上传路径为 profiler/{tid}/{tid}.ext，需兼容两种命名
         FILE_MAP = {
-            0:  ["perf.data", "collapsed.txt", f"{tid}.data", f"{tid}.txt", f"{tid}.collapsed"],  # CPU 火焰图
+            0:  ["collapsed.txt", f"{tid}.collapsed", "perf.script.txt", f"{tid}.txt", "perf.data", f"{tid}.data"],  # CPU 火焰图
             1:  ["heap.hprof", "perf.data", f"{tid}.hprof", f"{tid}.data"],   # Java Heap / Profiling
             2:  ["tracing.json", "tracing.csv", f"{tid}.json", f"{tid}.csv"], # Tracing
             4:  ["memleak.xml", "memleak.txt", "memleak.json"],              # MemCheck
@@ -149,12 +151,29 @@ def main():
             9:  ["assembly.txt", "objdump.txt"],                             # Assembly
             10: ["pprof.cpu", "pprof.pb.gz", f"{tid}.pb.gz"],               # pprof CPU
             11: ["pprof.heap", "pprof_heap.pb.gz", f"{tid}.pb.gz"],         # pprof Heap
+            12: ["heap.hprof", f"{tid}.hprof"],                              # Java Heap
         }
 
         candidate_files = FILE_MAP.get(task_type, ["perf.data", "collapsed.txt", f"{tid}.data", f"{tid}.txt"])
         raw_path = None
         pre_collapsed_path = None
         has_collapsed = False
+
+        for key in cos_keys:
+            if _is_analysis_product_key(key):
+                continue
+            local_path = os.path.join(work_dir, os.path.basename(key) or "collector.data")
+            try:
+                store.download(key, local_path)
+            except Exception as e:
+                log.warning("failed to download reported cos key %s: %s", key, e)
+                continue
+            log.info("downloaded reported cos key %s", key)
+            raw_path, pre_collapsed_path, has_collapsed = _select_downloaded_input(
+                local_path, key, raw_path, pre_collapsed_path, has_collapsed
+            )
+            if raw_path is not None or pre_collapsed_path is not None:
+                break
 
         for fname in candidate_files:
             local_path = os.path.join(work_dir, fname)
@@ -169,12 +188,9 @@ def main():
                 continue
             store.download(key, local_path)
             log.info("downloaded %s", key)
-            # 判断是否为已处理的折叠栈文本
-            if fname in ("collapsed.txt", f"{tid}.txt", f"{tid}.collapsed"):
-                pre_collapsed_path = local_path
-                has_collapsed = True
-            elif raw_path is None:
-                raw_path = local_path
+            raw_path, pre_collapsed_path, has_collapsed = _select_downloaded_input(
+                local_path, fname, raw_path, pre_collapsed_path, has_collapsed
+            )
 
         if raw_path is None and pre_collapsed_path is None:
             error_exit(f"no data found for task_type={task_type}, tried: {candidate_files}", ERR_NOT_FOUND, api=api, tid=tid)
@@ -183,7 +199,7 @@ def main():
         if task_type == 0:
             result = run_cpu_flamegraph(raw_path, work_dir, tid,
                                         pre_collapsed_path if has_collapsed else None)
-        elif task_type == 1:
+        elif task_type in (1, 12):
             if raw_path is None:
                 error_exit("no hprof/perf data found for Java task", ERR_NOT_FOUND, api=api, tid=tid)
             result = run_java_heap(raw_path, work_dir, tid)
@@ -240,7 +256,7 @@ def main():
 
         # 10. 标记分析完成（失败不阻塞，产物已上传）
         try:
-            api.update_analysis_status(tid, 2)  # AnalysisStatusSuccess
+            api.update_analysis_status(tid, 2, "analysis completed")  # AnalysisStatusSuccess
             log.info("analysis_status -> 2 (success)")
         except Exception as e:
             log.warning("failed to update final status: %s (products already uploaded)", e)
@@ -264,6 +280,47 @@ def main():
 
 MAX_COLLAPSED_LINES = 200000   # 最大折叠栈行数
 MAX_STACK_DEPTH = 50           # 最大调用栈深度
+
+
+def _extract_cos_keys(data: dict) -> list:
+    """从任务详情提取 apiserver 返回的真实对象 key。"""
+    keys = []
+    for item in data.get("cos_files") or []:
+        if not isinstance(item, dict):
+            continue
+        key = item.get("key")
+        if isinstance(key, str) and key:
+            keys.append(key)
+    return keys
+
+
+def _is_analysis_product_key(key: str) -> bool:
+    name = os.path.basename(key)
+    return name in {
+        "flamegraph.svg",
+        "top.json",
+        "suggestions.md",
+        "ai_suggestion.md",
+        "heap_stats.json",
+        "tracing_stats.json",
+        "resource_stats.json",
+        "biosnoop_stats.json",
+        "pprof_cpu.json",
+        "pprof_heap.json",
+    }
+
+
+def _select_downloaded_input(local_path: str, source_name: str, raw_path,
+                             pre_collapsed_path, has_collapsed: bool):
+    """根据下载文件名判断是否为折叠栈、perf script 或原始采集文件。"""
+    name = os.path.basename(source_name)
+    if name in ("collapsed.txt",) or name.endswith(".collapsed"):
+        return raw_path, local_path, True
+    if name in ("perf.script.txt",) or name.endswith(".txt"):
+        return local_path, pre_collapsed_path, has_collapsed
+    if raw_path is None:
+        raw_path = local_path
+    return raw_path, pre_collapsed_path, has_collapsed
 
 
 def _truncate_collapsed(collapsed_path: str):
@@ -330,20 +387,23 @@ def run_cpu_flamegraph(perf_data_path: str, work_dir: str, tid: str,
         shutil.copy2(pre_collapsed_path, collapsed_path)
         log.info("using pre-processed collapsed stack")
     else:
-        # perf.data → perf script 文本
-        try:
-            proc = subprocess.run(
-                ["perf", "script", "-i", perf_data_path, "--header"],
-                capture_output=True, text=True, timeout=300,
-            )
-            if proc.returncode != 0:
-                raise RuntimeError(f"perf script failed: {proc.stderr}")
-            with open(script_path, "w") as f:
-                f.write(proc.stdout)
-            log.info("perf script -> %s", script_path)
-        except FileNotFoundError:
-            log.warning("perf not found, falling back to pre-processed data")
-            raise RuntimeError("perf command not found, need pre-processed collapsed stack")
+        if _looks_like_text_stack(perf_data_path):
+            shutil.copy2(perf_data_path, script_path)
+            log.info("using pre-processed perf script text")
+        else:
+            # perf.data → perf script 文本
+            try:
+                with open(script_path, "w") as out:
+                    proc = subprocess.run(
+                        ["perf", "script", "-i", perf_data_path, "--header"],
+                        stdout=out, stderr=subprocess.PIPE, text=True, timeout=300,
+                    )
+                if proc.returncode != 0:
+                    raise RuntimeError(f"perf script failed: {proc.stderr}")
+                log.info("perf script -> %s", script_path)
+            except FileNotFoundError:
+                log.warning("perf not found, falling back to pre-processed data")
+                raise RuntimeError("perf command not found, need pre-processed collapsed stack")
 
         # perf script → 折叠栈
         perf_script_to_collapsed(script_path, collapsed_path)
@@ -392,12 +452,14 @@ def run_java_heap(hprof_path: str, work_dir: str, tid: str) -> dict:
 
     result_path = os.path.join(work_dir, "heap_stats.json")
     proc = subprocess.run(
-        ["go", "run", ".", hprof_path, "--output", result_path],
+        ["go", "run", ".", "--output", result_path, hprof_path],
         capture_output=True, text=True, timeout=600,
         cwd=os.path.join(os.path.dirname(__file__), "java_heap_analyzer"),
     )
     if proc.returncode != 0:
         raise RuntimeError(f"java_heap_analyzer failed: {proc.stderr}")
+    if not os.path.exists(result_path):
+        raise RuntimeError("java_heap_analyzer completed without heap_stats.json")
     log.info("java_heap -> %s", result_path)
     return {result_path: "heap_stats.json"}
 
@@ -428,7 +490,30 @@ def run_resource_analysis(data_path: str, work_dir: str, tid: str) -> dict:
     with open(data_path, "r") as f:
         content = f.read()
 
-    samples = parse_pidstat_csv(content)
+    stripped = content.strip()
+    if stripped.startswith("{") or stripped.startswith("["):
+        parsed = json.loads(stripped)
+        if isinstance(parsed, dict) and "timeseries" in parsed:
+            parsed = parsed["timeseries"]
+        elif isinstance(parsed, dict) and "summary" in parsed:
+            with open(result_path, "w") as f:
+                json.dump(parsed, f, indent=2, ensure_ascii=False)
+            log.info("resource (precomputed json) -> %s", result_path)
+            return {result_path: "resource_stats.json"}
+        samples = [
+            ResourceSample(
+                timestamp=float(item.get("timestamp", 0)),
+                cpu_pct=float(item.get("cpu_pct", item.get("cpu_percent", 0))),
+                mem_rss_kb=int(float(item.get("mem_rss_kb", item.get("rss_kb", 0)))),
+                mem_vsz_kb=int(float(item.get("mem_vsz_kb", 0))),
+                io_read_bytes=int(float(item.get("io_read_bytes", item.get("read_bytes", 0)))),
+                io_write_bytes=int(float(item.get("io_write_bytes", item.get("write_bytes", 0)))),
+                threads=int(item.get("threads", 0)),
+            )
+            for item in parsed if isinstance(item, dict)
+        ]
+    else:
+        samples = parse_pidstat_csv(content)
     stats = analyze_resources(samples)
 
     with open(result_path, "w") as f:
@@ -443,7 +528,31 @@ def run_biosnoop(data_path: str, work_dir: str, tid: str) -> dict:
     with open(data_path, "r") as f:
         content = f.read()
 
-    events = parse_biosnoop_csv(content)
+    stripped = content.strip()
+    if stripped.startswith("{") or stripped.startswith("["):
+        parsed = json.loads(stripped)
+        if isinstance(parsed, dict) and "total_events" in parsed:
+            with open(result_path, "w") as f:
+                json.dump(parsed, f, indent=2, ensure_ascii=False)
+            log.info("biosnoop (precomputed json) -> %s", result_path)
+            return {result_path: "biosnoop_stats.json"}
+        if isinstance(parsed, dict):
+            parsed = parsed.get("events", [])
+        events = [
+            BioEvent(
+                timestamp=float(item.get("timestamp", item.get("time", 0))),
+                comm=str(item.get("comm", item.get("process", ""))),
+                pid=int(item.get("pid", 0)),
+                disk=str(item.get("disk", item.get("device", ""))),
+                direction=str(item.get("direction", item.get("type", "R"))).upper()[:1],
+                io_size=int(item.get("io_size", item.get("bytes", 0))),
+                latency_us=float(item.get("latency_us", item.get("latency_ns", 0) / 1000 if isinstance(item.get("latency_ns", 0), (int, float)) else 0)),
+                sector=int(item.get("sector", 0)),
+            )
+            for item in parsed if isinstance(item, dict)
+        ]
+    else:
+        events = parse_biosnoop_csv(content)
     stats = analyze_biosnoop(events)
 
     with open(result_path, "w") as f:
@@ -536,6 +645,21 @@ def _read_pprof_file(data_path: str) -> str:
         return f.read()
 
 
+def _looks_like_text_stack(path: str) -> bool:
+    try:
+        with open(path, "rb") as f:
+            sample = f.read(4096)
+    except OSError:
+        return False
+    if b"\x00" in sample:
+        return False
+    try:
+        text = sample.decode("utf-8", errors="strict")
+    except UnicodeDecodeError:
+        return False
+    return ";" in text or "\n" in text
+
+
 def run_pprof_cpu(data_path: str, work_dir: str, tid: str) -> dict:
     """pprof CPU 分析"""
     result_path = os.path.join(work_dir, "pprof_cpu.json")
@@ -544,6 +668,8 @@ def run_pprof_cpu(data_path: str, work_dir: str, tid: str) -> dict:
     # 尝试 CSV 格式，fallback 到文本格式
     try:
         samples = parse_pprof_csv(content)
+        if not samples:
+            raise ValueError("empty csv pprof result")
     except Exception:
         samples = parse_pprof_text(content)
 
@@ -561,6 +687,8 @@ def run_pprof_heap(data_path: str, work_dir: str, tid: str) -> dict:
     # 尝试 CSV 格式，fallback 到文本格式
     try:
         samples = parse_heap_csv(content)
+        if not samples:
+            raise ValueError("empty csv heap result")
     except Exception:
         samples = parse_heap_text(content)
 

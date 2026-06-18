@@ -21,15 +21,27 @@ static int ExecCommand(const std::vector<std::string>& args, int timeout_sec = 3
   }
   c_args.push_back(nullptr);
 
+  int sync_pipe[2];
+  if (pipe(sync_pipe) < 0) {
+    LOG_ERROR("pipe failed: " + std::string(strerror(errno)));
+    return -1;
+  }
+
   pid_t pid = fork();
   if (pid == -1) {
     LOG_ERROR("fork failed: " + std::string(strerror(errno)));
+    close(sync_pipe[0]);
+    close(sync_pipe[1]);
     return -1;
   }
 
   if (pid == 0) {
     // 子进程：创建独立进程组，便于超时杀整组
     setpgid(0, 0);
+    close(sync_pipe[0]);
+    char ready = 1;
+    write(sync_pipe[1], &ready, 1);
+    close(sync_pipe[1]);
 
     // 关闭多余 fd（避免泄漏父进程 socket）
     for (int fd = 3; fd < 1024; fd++) {
@@ -41,6 +53,11 @@ static int ExecCommand(const std::vector<std::string>& args, int timeout_sec = 3
     write(STDERR_FILENO, err, strlen(err));
     _exit(127);  // 命令不存在
   }
+
+  close(sync_pipe[1]);
+  char ready = 0;
+  read(sync_pipe[0], &ready, 1);
+  close(sync_pipe[0]);
 
   // 父进程：等待子进程，带超时
   int elapsed = 0;
@@ -66,12 +83,12 @@ static int ExecCommand(const std::vector<std::string>& args, int timeout_sec = 3
   if (elapsed >= timeout_sec) {
     timeout = true;
     LOG_ERROR("Command timed out after " + std::to_string(timeout_sec) + "s, sending SIGTERM");
-    killpg(getpgid(pid), SIGTERM);
+    killpg(pid, SIGTERM);
     sleep(3);
     // 还活着就 SIGKILL
     if (kill(pid, 0) == 0) {
       LOG_ERROR("Sending SIGKILL to pid=" + std::to_string(pid));
-      killpg(getpgid(pid), SIGKILL);
+      killpg(pid, SIGKILL);
     }
     waitpid(pid, nullptr, 0);  // 回收僵尸
     return -2;

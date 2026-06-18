@@ -12,6 +12,7 @@
 #include <chrono>
 #include <fstream>
 #include <memory>
+#include <algorithm>
 
 namespace drop {
 
@@ -87,16 +88,23 @@ void HotmethodChannel::ReportResult(const TaskResult& result) {
 }
 
 void HotmethodChannel::ReportStatus(const std::string& task_id, TaskState state, const std::string& reason) {
-  grpc::ClientContext context;
-  context.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(5));
-  TaskStatusUpdate update;
-  update.set_task_id(task_id);
-  update.set_status(state);
-  update.set_reason(reason);
-  google::protobuf::Empty empty;
-  auto status = stub_->UpdateTaskStatus(&context, update, &empty);
-  if (!status.ok()) {
-    LOG_ERROR("Failed to report status for task " + task_id + ": " + status.error_message());
+  for (int attempt = 1; attempt <= 3; attempt++) {
+    grpc::ClientContext context;
+    context.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(5));
+    TaskStatusUpdate update;
+    update.set_task_id(task_id);
+    update.set_status(state);
+    update.set_reason(reason);
+    google::protobuf::Empty empty;
+    auto status = stub_->UpdateTaskStatus(&context, update, &empty);
+    if (status.ok()) {
+      return;
+    }
+    LOG_ERROR("UpdateTaskStatus attempt " + std::to_string(attempt) + "/3 failed for task " +
+              task_id + ": " + status.error_message());
+    if (attempt < 3) {
+      std::this_thread::sleep_for(std::chrono::seconds(1));
+    }
   }
 }
 
@@ -134,12 +142,16 @@ void HotmethodChannel::WorkerLoop() {
 
     // 使用 TaskDesc.timeout_sec 作为超时保护
     int timeout_sec = task.timeout_sec() > 0 ? task.timeout_sec() : 60;
+    int duration_sec = static_cast<int>(task.sample_argv().duration());
+    if (timeout_sec > 5 && duration_sec > timeout_sec - 5) {
+      duration_sec = std::max(1, timeout_sec - 5);
+    }
 
     LOG_INFO("Executing task " + task.task_id() +
              " type=" + std::to_string(task.task_type()) +
              " profiler_type=" + std::to_string(task.profiler_type()) +
              " pid=" + std::to_string(task.sample_argv().pid()) +
-             " duration=" + std::to_string(task.sample_argv().duration()) + "s" +
+             " duration=" + std::to_string(duration_sec) + "s" +
              " timeout=" + std::to_string(timeout_sec) + "s");
 
     // 状态迁移：RUNNING（Agent 开始执行采集）
@@ -171,7 +183,7 @@ void HotmethodChannel::WorkerLoop() {
         sf << task.script_content();
       }
       LOG_INFO("Executing script task " + task.task_id() + ": " + script_path);
-      ret = ScriptRunner::Execute(script_path, {});
+      ret = ScriptRunner::Execute(script_path, {}, timeout_sec);
       std::remove(script_path.c_str());
     } else {
       // 选择采集器执行（统一走 IProfiler 多态接口）
@@ -179,7 +191,7 @@ void HotmethodChannel::WorkerLoop() {
       if (profiler) {
         ret = profiler->Record(
           task.sample_argv().pid(),
-          task.sample_argv().duration(),
+          duration_sec,
           task.sample_argv().hz(),
           output_path
         );
@@ -198,11 +210,15 @@ void HotmethodChannel::WorkerLoop() {
 
       // 后处理：格式转换（如 perf script、memray flamegraph）
       std::string upload_path = output_path;
+      std::string upload_ext = ext;
       if (profiler) {
         std::string result_path = "/tmp/result_" + task.task_id() + ext;
         int post_ret = profiler->collect_result(output_path, result_path);
         if (post_ret == 0) {
           upload_path = result_path;
+          if (task.profiler_type() == PROFILER_PERF) {
+            upload_ext = ".txt";  // perf script 文本，analyzer 按预折叠/脚本文本处理
+          }
           LOG_INFO("Task " + task.task_id() + " post-processed: " + result_path);
         }
       }
@@ -213,7 +229,7 @@ void HotmethodChannel::WorkerLoop() {
       // 上传采集结果到 MinIO
       if (storage_) {
         LOG_INFO("Task " + task.task_id() + " uploading...");
-        std::string remote_key = "profiler/" + task.task_id() + "/" + task.task_id() + ext;
+        std::string remote_key = "profiler/" + task.task_id() + "/" + task.task_id() + upload_ext;
         int upload_ret = storage_->Upload(upload_path, remote_key);
         if (upload_ret == 0) {
           LOG_INFO("Task " + task.task_id() + " uploaded to " + remote_key);
@@ -233,7 +249,7 @@ void HotmethodChannel::WorkerLoop() {
               std::string content(size, '\0');
               ifs.read(content.data(), size);
               auto* file = result.mutable_file();
-              file->set_name(task.task_id() + ext);
+              file->set_name(task.task_id() + upload_ext);
               file->set_content(content);
               file->set_size(size);
               result.set_error_message("");

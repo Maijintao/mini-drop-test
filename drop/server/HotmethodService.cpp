@@ -47,15 +47,15 @@ void HotmethodService::InitDB() {
   }
 }
 
-void HotmethodService::PersistTaskStatus(const std::string& task_id, TaskStatus status, const std::string& reason) {
-  if (!db_) return;
+bool HotmethodService::PersistTaskStatus(const std::string& task_id, TaskStatus status, const std::string& reason) {
+  if (!db_) return false;
 
   const char* sql = "INSERT INTO task_states (task_id, status, reason, updated_at) VALUES (?, ?, ?, datetime('now'))";
   sqlite3_stmt* stmt = nullptr;
   int rc = sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr);
   if (rc != SQLITE_OK) {
     LOG_ERROR("SQLite prepare failed: " + std::string(sqlite3_errmsg(db_)));
-    return;
+    return false;
   }
 
   sqlite3_bind_text(stmt, 1, task_id.c_str(), -1, SQLITE_TRANSIENT);
@@ -65,9 +65,12 @@ void HotmethodService::PersistTaskStatus(const std::string& task_id, TaskStatus 
   rc = sqlite3_step(stmt);
   if (rc != SQLITE_DONE) {
     LOG_ERROR("SQLite insert failed: " + std::string(sqlite3_errmsg(db_)));
+    sqlite3_finalize(stmt);
+    return false;
   }
 
   sqlite3_finalize(stmt);
+  return true;
 }
 
 bool HotmethodService::PushTask(const std::string& target_ip, const TaskDesc& task) {
@@ -214,7 +217,7 @@ void HotmethodService::UpdateTaskStatus(const std::string& task_id, TaskStatus s
   state.timestamp = std::chrono::steady_clock::now();
 
   // 落库：写入 SQLite
-  PersistTaskStatus(task_id, status, reason);
+  bool persisted = PersistTaskStatus(task_id, status, reason);
 
   std::string status_str;
   switch (status) {
@@ -226,7 +229,8 @@ void HotmethodService::UpdateTaskStatus(const std::string& task_id, TaskStatus s
     case TaskStatus::FAILED:     status_str = "FAILED"; break;
     case TaskStatus::TIMEOUT:    status_str = "TIMEOUT"; break;
   }
-  LOG_INFO("[STATE] Task " + task_id + " -> " + status_str + " (reason: " + reason + ") [persisted]");
+  LOG_INFO("[STATE] Task " + task_id + " -> " + status_str + " (reason: " + reason + ") [" +
+           (persisted ? "persisted" : "persist_failed") + "]");
 }
 
 grpc::Status HotmethodService::Collect(grpc::ServerContext* context,
@@ -354,6 +358,7 @@ grpc::Status HotmethodService::NotifyResult(grpc::ServerContext* context,
       auto& queue = tasks_[it->second->target_ip];
       if (queue.size() < MAX_TASK_QUEUE_SIZE) {
         queue.push_back(next_task);
+        UpdateTaskStatus(next_tid, TaskStatus::PENDING, "continuous window created, waiting dispatch");
         LOG_INFO("Continuous next window dispatched: " + next_tid);
       }
     }
@@ -388,18 +393,44 @@ void HotmethodService::CleanupTimeoutTasks(int timeout_sec) {
   std::lock_guard<std::mutex> lock(mutex_);
   auto now = std::chrono::steady_clock::now();
 
-  // 超时检测：仅处理已派发但 Agent 未开始执行的任务，RUNNING 由 Agent 自身超时保护负责。
+  // 超时检测：处理未被 Agent 拉走的 PENDING 和已派发但未开始执行的 DISPATCHED。
+  // RUNNING 由 Agent 自身超时保护负责。
   for (auto& [task_id, state] : tasks_state_) {
-    if (state.status != TaskStatus::DISPATCHED) {
+    if (state.status != TaskStatus::PENDING && state.status != TaskStatus::DISPATCHED) {
       continue;
     }
     auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - state.timestamp).count();
     if (elapsed > timeout_sec) {
+      TaskStatus old_status = state.status;
       state.status = TaskStatus::FAILED;
-      state.reason = "任务派发超时，Agent 未开始执行";
+      if (old_status == TaskStatus::PENDING) {
+        state.reason = "任务等待超时，Agent 未拉取或不存在";
+      } else {
+        state.reason = "任务派发超时，Agent 未开始执行";
+      }
       state.timestamp = now;
       PersistTaskStatus(task_id, TaskStatus::FAILED, state.reason);
-      LOG_INFO("[STATE] Task " + task_id + " -> FAILED (reason: 派发超时 " + std::to_string(elapsed) + "s) [persisted]");
+
+      // 如果任务仍在待派发队列中，移除它，避免离线 Agent 恢复后执行已失败任务。
+      for (auto queue_it = tasks_.begin(); queue_it != tasks_.end(); ) {
+        auto& queue = queue_it->second;
+        for (auto task_it = queue.begin(); task_it != queue.end(); ) {
+          if (task_it->task_id() == task_id) {
+            task_it = queue.erase(task_it);
+          } else {
+            ++task_it;
+          }
+        }
+        if (queue.empty()) {
+          queue_it = tasks_.erase(queue_it);
+        } else {
+          ++queue_it;
+        }
+      }
+
+      LOG_INFO("[STATE] Task " + task_id + " -> FAILED (reason: " + state.reason +
+               "，elapsed=" + std::to_string(elapsed) + "s) [persisted]");
+      cv_.notify_all();
     }
   }
 
@@ -469,6 +500,7 @@ std::string HotmethodService::StartContinuousTask(const std::string& target_ip, 
     return "";
   }
   queue.push_back(task);
+  UpdateTaskStatus(window_tid, TaskStatus::PENDING, "continuous first window created, waiting dispatch");
 
   LOG_INFO("Continuous task started: parent=" + parent_tid + " first_window=" + window_tid);
   return parent_tid;

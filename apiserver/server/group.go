@@ -261,19 +261,28 @@ func (s *APIServer) AddAgent(c *gin.Context) {
 		return
 	}
 
+	var agent model.AgentInfo
+	if err := s.Db.Where("id = ?", req.AgentID).First(&agent).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"code":    CodeNotFound,
+			"message": "agent not found",
+		})
+		return
+	}
+	if !s.canAccessAgentIP(uid, agent.IPAddr) {
+		c.JSON(http.StatusForbidden, gin.H{
+			"code":    CodeForbidden,
+			"message": "agent is not accessible",
+		})
+		return
+	}
+
 	// 更新 Agent 的 GID
-	result := s.Db.Model(&model.AgentInfo{}).Where("id = ?", req.AgentID).Update("gid", group.GID)
+	result := s.Db.Model(&agent).Update("gid", group.GID)
 	if result.Error != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    CodeInternal,
 			"message": result.Error.Error(),
-		})
-		return
-	}
-	if result.RowsAffected == 0 {
-		c.JSON(http.StatusNotFound, gin.H{
-			"code":    CodeNotFound,
-			"message": "agent not found",
 		})
 		return
 	}

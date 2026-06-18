@@ -9,6 +9,8 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <cstring>
+#include <cstdio>
+#include <iterator>
 
 namespace drop {
 
@@ -92,11 +94,24 @@ int Perf::ExecCommand(const std::vector<std::string>& args,
     return -1;
   }
 
+  char stderr_template[] = "/tmp/drop_cmd_stderr_XXXXXX";
+  int stderr_fd = mkstemp(stderr_template);
+  std::string stderr_path;
+  if (stderr_fd >= 0) {
+    stderr_path = stderr_template;
+  } else {
+    LOG_WARN("mkstemp for command stderr failed: " + std::string(strerror(errno)));
+  }
+
   pid_t pid = fork();
   if (pid == -1) {
     LOG_ERROR("fork failed: " + std::string(strerror(errno)));
     close(sync_pipe[0]);
     close(sync_pipe[1]);
+    if (stderr_fd >= 0) {
+      close(stderr_fd);
+      std::remove(stderr_path.c_str());
+    }
     return -1;
   }
 
@@ -118,6 +133,10 @@ int Perf::ExecCommand(const std::vector<std::string>& args,
       dup2(fd, STDOUT_FILENO);
       close(fd);
     }
+    if (stderr_fd >= 0) {
+      dup2(stderr_fd, STDERR_FILENO);
+      close(stderr_fd);
+    }
 
     // 关闭不需要的文件描述符（保留 stdin/stdout/stderr）
     for (int fd = 3; fd < 1024; fd++) {
@@ -135,6 +154,9 @@ int Perf::ExecCommand(const std::vector<std::string>& args,
   char ready = 0;
   read(sync_pipe[0], &ready, 1);
   close(sync_pipe[0]);
+  if (stderr_fd >= 0) {
+    close(stderr_fd);
+  }
 
   // 启动超时监控
   ProcessKiller killer(pid, pid, timeout_sec);
@@ -154,8 +176,22 @@ int Perf::ExecCommand(const std::vector<std::string>& args,
     int exit_code = WEXITSTATUS(status);
     if (exit_code != 0) {
       LOG_ERROR("Process exited with code " + std::to_string(exit_code));
+      if (!stderr_path.empty()) {
+        std::ifstream err_file(stderr_path);
+        std::string stderr_text((std::istreambuf_iterator<char>(err_file)),
+                                std::istreambuf_iterator<char>());
+        if (!stderr_text.empty()) {
+          LOG_ERROR("Command stderr: " + stderr_text);
+        }
+      }
+    }
+    if (!stderr_path.empty()) {
+      std::remove(stderr_path.c_str());
     }
     return exit_code;
+  }
+  if (!stderr_path.empty()) {
+    std::remove(stderr_path.c_str());
   }
   return -1;
 }

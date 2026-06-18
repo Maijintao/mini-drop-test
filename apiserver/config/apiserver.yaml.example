@@ -33,3 +33,9 @@ analysis:
   command: "python3"
   script_path: "/app/analysis/hotmethod_analyzer.py"
   config_path: "/app/analysis/config.ini"
+
+auth:
+  secret: "mini-drop-demo-secret"
+
+cors:
+  allowed_origins: []

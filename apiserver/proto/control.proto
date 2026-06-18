@@ -13,6 +13,9 @@ service Control {
   rpc FetchData(FetchDataRequest) returns (FetchDataResponse);
   rpc StatAgent(StatAgentRequest) returns (StatAgentResponse);
   rpc ListAgents(ListAgentsRequest) returns (ListAgentsResponse);
+  rpc StartContinuous(StartContinuousRequest) returns (StartContinuousResponse);
+  rpc StopContinuous(StopContinuousRequest) returns (StopContinuousResponse);
+  rpc ListWindows(ListWindowsRequest) returns (ListWindowsResponse);
 }
 
 message CreateTaskRequest {
@@ -65,4 +68,49 @@ message ListAgentsResponse {
   int32 code = 1;
   string message = 2;
   repeated AgentInfo agents = 3;
+}
+
+message StartContinuousRequest {
+  string target_ip = 1;
+  int32 pid = 2;
+  uint32 hz = 3;
+  uint32 window_sec = 4;
+  uint32 profiler_type = 5;
+  string callgraph = 6;
+  string event = 7;
+  string name = 8;
+}
+
+message StartContinuousResponse {
+  int32 code = 1;
+  string message = 2;
+  string task_id = 3;
+}
+
+message StopContinuousRequest {
+  string task_id = 1;
+}
+
+message StopContinuousResponse {
+  int32 code = 1;
+  string message = 2;
+}
+
+message ListWindowsRequest {
+  string task_id = 1;
+}
+
+message ContinuousWindowInfo {
+  string window_tid = 1;
+  int32 seq = 2;
+  int64 start_time = 3;
+  int64 end_time = 4;
+  int32 status = 5;
+  string cos_key = 6;
+}
+
+message ListWindowsResponse {
+  int32 code = 1;
+  string message = 2;
+  repeated ContinuousWindowInfo windows = 3;
 }

@@ -5,6 +5,7 @@
 #include <atomic>
 #include <thread>
 #include <chrono>
+#include <vector>
 #include <grpcpp/grpcpp.h>
 #include "HealthCheckService.h"
 #include "HotmethodService.h"
@@ -71,6 +72,8 @@ int main(int argc, char* argv[]) {
   std::thread cleanup_thread([&hotmethod_service]() {
     while (g_running) {
       hotmethod_service.CleanupTimeoutTasks(30);  // DISPATCHED 超过 30 秒未报开始视为掉线
+      std::vector<drop::AgentStatus> agents;
+      hotmethod_service.GetAllAgentStatus(&agents);  // 主动触发 30s 离线判定与审计日志
       std::this_thread::sleep_for(std::chrono::seconds(10));  // 每 10 秒检查一次
     }
   });

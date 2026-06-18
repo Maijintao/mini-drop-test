@@ -80,6 +80,10 @@ func (s *APIServer) CreateScheduleTask(c *gin.Context) {
 	if req.Callgraph == "" {
 		req.Callgraph = "dwarf"
 	}
+	if !s.canAccessAgentIP(uid, req.TargetIP) {
+		c.JSON(http.StatusNotFound, gin.H{"code": CodeNotFound, "message": "agent not found"})
+		return
+	}
 
 	// N13: 预校验 cron 表达式
 	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)

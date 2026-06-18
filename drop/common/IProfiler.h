@@ -13,13 +13,13 @@ public:
   virtual int Record(int pid, int duration_sec, int freq,
                      const std::string& output_path) = 0;
 
-  // 后处理采集结果（如格式转换），返回 0 成功
-  // 默认无操作，子类可重写
+  // 后处理采集结果（如格式转换），返回 0 成功。
+  // 默认表示无需/不支持后处理，调用方应继续使用原始 output_path。
   virtual int collect_result(const std::string& output_path,
                              const std::string& result_path) {
     (void)output_path;
     (void)result_path;
-    return 0;
+    return -1;
   }
 
   // 获取采集器名称

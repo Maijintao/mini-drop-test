@@ -54,13 +54,21 @@ void ProcessKiller::MonitorLoop() {
     LOG_WARN("ProcessKiller: timeout! sending SIGTERM to pid=" + std::to_string(pid_));
 
     // 发送 SIGTERM（使用启动时记录的 pgid，避免 PID 复用误杀）
-    killpg(pgid_, SIGTERM);
+    if (pgid_ > 0) {
+      killpg(pgid_, SIGTERM);
+    } else {
+      kill(pid_, SIGTERM);
+    }
     sleep(5);
 
     // 如果还活着，发送 SIGKILL
     if (kill(pid_, 0) == 0) {
       LOG_WARN("ProcessKiller: sending SIGKILL to pid=" + std::to_string(pid_));
-      killpg(pgid_, SIGKILL);
+      if (pgid_ > 0) {
+        killpg(pgid_, SIGKILL);
+      } else {
+        kill(pid_, SIGKILL);
+      }
     }
   }
 }

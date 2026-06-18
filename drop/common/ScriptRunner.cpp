@@ -5,6 +5,7 @@
 #include <sys/wait.h>
 #include <cstring>
 #include <memory>
+#include <fcntl.h>
 
 namespace drop {
 
@@ -20,15 +21,27 @@ int ScriptRunner::Execute(const std::string& script_path,
   }
   c_args.push_back(nullptr);
 
+  int sync_pipe[2];
+  if (pipe(sync_pipe) < 0) {
+    LOG_ERROR("pipe failed: " + std::string(strerror(errno)));
+    return -1;
+  }
+
   pid_t pid = fork();
   if (pid == -1) {
     LOG_ERROR("fork failed: " + std::string(strerror(errno)));
+    close(sync_pipe[0]);
+    close(sync_pipe[1]);
     return -1;
   }
 
   if (pid == 0) {
     // 子进程：创建独立进程组
     setpgid(0, 0);
+    close(sync_pipe[0]);
+    char ready = 1;
+    write(sync_pipe[1], &ready, 1);
+    close(sync_pipe[1]);
 
     // 关闭多余 fd
     for (int fd = 3; fd < 1024; fd++) {
@@ -41,10 +54,15 @@ int ScriptRunner::Execute(const std::string& script_path,
     _exit(127);
   }
 
+  close(sync_pipe[1]);
+  char ready = 0;
+  read(sync_pipe[0], &ready, 1);
+  close(sync_pipe[0]);
+
   // 父进程：启动超时监控
   std::unique_ptr<ProcessKiller> killer;
   if (timeout_sec > 0) {
-    killer = std::make_unique<ProcessKiller>(pid, timeout_sec);
+    killer = std::make_unique<ProcessKiller>(pid, pid, timeout_sec);
     killer->Start();
   }
 

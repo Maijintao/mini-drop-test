@@ -177,6 +177,8 @@ export const profilerTypeMap: Record<number, string> = {
   1: 'async-profiler',
   2: 'pprof',
   3: 'bpftrace',
+  4: 'memray',
+  5: 'java-heap',
 };
 
 export const taskTypeMap: Record<number, string> = {
@@ -191,6 +193,7 @@ export const taskTypeMap: Record<number, string> = {
   9: 'Assembly',
   10: 'pprof CPU',
   11: 'pprof Heap',
+  12: 'Java Heap',
 };
 
 export interface ContinuousWindow {

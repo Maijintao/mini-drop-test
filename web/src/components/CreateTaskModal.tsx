@@ -219,18 +219,30 @@ export default function CreateTaskModal({
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
               <Field label="采集类型">
                 <select
-                  value={form.type}
-                  onChange={(event) => {
-                    const type = Number(event.target.value);
-                    onChange({ type, profiler_type: type === 1 ? 1 : 0 });
-                  }}
-                  style={selectStyle}
-                >
-                  <option value={0} style={{ background: '#151515' }}>CPU / perf</option>
-                  <option value={1} style={{ background: '#151515' }}>Java / async-profiler</option>
-                  <option value={4} style={{ background: '#151515' }}>MemCheck</option>
-                  <option value={6} style={{ background: '#151515' }}>Java Heap</option>
-                </select>
+	                  value={form.type}
+	                  onChange={(event) => {
+	                    const type = Number(event.target.value);
+	                    const profilerType =
+	                      type === 1 ? 1 :
+	                        (type === 6 ? 3 :
+	                          (type === 10 || type === 11 ? 2 :
+	                            (type === 12 ? 5 : 0)));
+	                    onChange({
+	                      type,
+	                      profiler_type: profilerType,
+	                      event: type === 6 ? (form.event || 'io') : (type === 0 ? 'cpu-cycles' : form.event),
+	                    });
+	                  }}
+	                  style={selectStyle}
+	                >
+	                  <option value={0} style={{ background: '#151515' }}>CPU / perf</option>
+	                  <option value={1} style={{ background: '#151515' }}>Java / async-profiler</option>
+	                  <option value={6} style={{ background: '#151515' }}>eBPF / bpftrace</option>
+	                  <option value={10} style={{ background: '#151515' }}>pprof CPU</option>
+	                  <option value={11} style={{ background: '#151515' }}>pprof Heap</option>
+	                  <option value={4} style={{ background: '#151515' }}>MemCheck</option>
+	                  <option value={12} style={{ background: '#151515' }}>Java Heap</option>
+	                </select>
               </Field>
               <Field label="目标 PID">
                 <input
@@ -293,9 +305,9 @@ export default function CreateTaskModal({
                   <span style={{ position: 'absolute', right: 12, top: 11, color: 'rgba(255,255,255,0.34)', fontSize: 12 }}>Hz</span>
                 </div>
               </Field>
-              <Field label="Callgraph">
-                <select
-                  value={isContinuous ? (continuousForm?.callgraph || 'dwarf') : form.callgraph}
+	              <Field label="Callgraph">
+	                <select
+	                  value={isContinuous ? (continuousForm?.callgraph || 'dwarf') : form.callgraph}
                   onChange={(event) => {
                     if (isContinuous) onContinuousChange?.({ callgraph: event.target.value });
                     else onChange({ callgraph: event.target.value });
@@ -304,11 +316,23 @@ export default function CreateTaskModal({
                 >
                   <option value="dwarf" style={{ background: '#151515' }}>dwarf</option>
                   <option value="fp" style={{ background: '#151515' }}>fp</option>
-                  <option value="lbr" style={{ background: '#151515' }}>lbr</option>
-                </select>
-              </Field>
-            </div>
-          </div>
+	                  <option value="lbr" style={{ background: '#151515' }}>lbr</option>
+	                </select>
+	              </Field>
+	              {!isContinuous && form.type === 6 && (
+	                <Field label="eBPF 事件">
+	                  <select
+	                    value={form.event || 'io'}
+	                    onChange={(event) => onChange({ event: event.target.value })}
+	                    style={selectStyle}
+	                  >
+	                    <option value="io" style={{ background: '#151515' }}>IO latency</option>
+	                    <option value="sched" style={{ background: '#151515' }}>Scheduler latency</option>
+	                  </select>
+	                </Field>
+	              )}
+	            </div>
+	          </div>
         </div>
 
         <div style={{
