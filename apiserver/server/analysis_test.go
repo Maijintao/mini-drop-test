@@ -154,3 +154,47 @@ func TestPersistFetchedResultFileStoresEmbeddedCollectorResult(t *testing.T) {
 		t.Fatalf("stored content = %q", string(store.objects[key]))
 	}
 }
+
+func TestPersistFetchedResultFileRejectsMissingArtifact(t *testing.T) {
+	srv := &APIServer{Storage: &memoryStorage{objects: map[string][]byte{}}}
+
+	_, err := srv.persistFetchedResultFile(context.Background(), "tid-empty", &pb.FetchDataResponse{})
+	if err == nil {
+		t.Fatal("expected missing artifact error")
+	}
+	if !strings.Contains(err.Error(), "missing artifact") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestTransitionTaskStatusPersistsReasonHistory(t *testing.T) {
+	srv, db := setupAnalysisTestServer(t, config.AnalysisConfig{}, "")
+	db.Model(&model.HotmethodTask{}).Where("tid = ?", "tid-analysis").Updates(map[string]interface{}{
+		"status":      TaskStatusNew,
+		"status_info": "pending",
+	})
+
+	srv.transitionTaskStatus("tid-analysis", TaskStatusRunning, "collector started", nil)
+
+	var task model.HotmethodTask
+	if err := db.Where("tid = ?", "tid-analysis").First(&task).Error; err != nil {
+		t.Fatalf("load task: %v", err)
+	}
+	if task.Status != TaskStatusRunning {
+		t.Fatalf("status = %d, want %d", task.Status, TaskStatusRunning)
+	}
+	if task.StatusInfo != "collector started" {
+		t.Fatalf("status_info = %q", task.StatusInfo)
+	}
+	if task.BeginTime == nil {
+		t.Fatal("begin_time should be set when entering RUNNING")
+	}
+
+	var history model.TaskStateHistory
+	if err := db.Where("tid = ? AND from_state = ? AND to_state = ?", "tid-analysis", TaskStatusNew, TaskStatusRunning).First(&history).Error; err != nil {
+		t.Fatalf("missing state history: %v", err)
+	}
+	if history.Reason != "collector started" {
+		t.Fatalf("history reason = %q", history.Reason)
+	}
+}

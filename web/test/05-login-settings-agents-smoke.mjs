@@ -16,8 +16,10 @@ const checks = [
   [settings, 'getUsers()'],
   [settings, 'API Base URL'],
   [agents, 'getAgents()'],
+  [agents, 'getAgentAuditLog'],
   [agents, 'statAgent(agent.ip_addr)'],
   [agents, '在线 Agent'],
+  [agents, '最近审计'],
 ];
 
 for (const [source, needle] of checks) {

@@ -160,6 +160,10 @@ func (s *APIServer) canAccessAgentIP(uid, ip string) bool {
 // GetAgentAuditLog 查询 Agent 状态变更审计日志 — GET /api/v1/agent/audit-log?ip=xxx&limit=50
 func (s *APIServer) GetAgentAuditLog(c *gin.Context) {
 	uid := c.GetString(middleware.CtxUID)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_ = s.syncAgentsFromDrop(ctx, uid)
+
 	ip := c.Query("ip")
 	limit := 50
 	if l, err := fmt.Sscanf(c.DefaultQuery("limit", "50"), "%d", &limit); err != nil || l != 1 || limit <= 0 {

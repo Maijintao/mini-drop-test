@@ -1,6 +1,7 @@
 import axios from 'axios';
 import type {
   AgentInfo,
+  AgentStateHistory,
   AgentStatData,
   AnalysisSuggestion,
   ApiResponse,
@@ -14,6 +15,7 @@ import type {
   GroupMemberInfo,
   HotmethodTask,
   LLMSettings,
+  TaskStateHistory,
   TaskDetailData,
   TaskListData,
 } from '@/domain';
@@ -92,12 +94,15 @@ export const updateLLMSettings = (data: Pick<LLMSettings, 'base_url' | 'model'> 
 // Agent
 export const getAgents = () => typedGet<AgentInfo[]>('/agents');
 export const statAgent = (ip: string) => typedGet<AgentStatData>('/agent/stat', { ip });
+export const getAgentAuditLog = (params?: { ip?: string; limit?: number }) =>
+  typedGet<AgentStateHistory[]>('/agent/audit-log', params);
 
 // Task
 export const createTask = (data: CreateTaskParams) => typedPost<{ tid: string }>('/tasks', data);
 export const getTasks = (params?: { page?: number; size?: number; status?: string; keyword?: string }) =>
   typedGet<TaskListData>('/tasks', params);
 export const getTaskDetail = (tid: string) => typedGet<TaskDetailData>(`/tasks/${tid}`);
+export const getTaskStateHistory = (tid: string) => typedGet<TaskStateHistory[]>(`/tasks/${tid}/state_history`);
 export const deleteTask = (tid: string) => typedDelete<unknown>(`/tasks/${tid}`);
 export const retryTask = (tid: string) => typedPost<{ tid: string }>(`/tasks/${tid}/retry`);
 export const getCosFiles = (tid: string) => typedGet<CosFile[]>('/cosfiles', { tid });

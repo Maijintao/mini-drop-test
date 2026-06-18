@@ -3,10 +3,10 @@ import { useSearchParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { useGSAP } from '@gsap/react';
 import gsap from 'gsap';
-import { Button, Card, Table, Tabs, Typography, Space, message, Spin, Statistic, Row, Col } from 'antd';
+import { Button, Card, Table, Tabs, Typography, Space, message, Spin, Statistic, Row, Col, Timeline } from 'antd';
 import { ReloadOutlined, PlayCircleOutlined, ArrowLeftOutlined, FireOutlined } from '@ant-design/icons';
 import { fetchSignedJson, getCosFiles, getFlameData, getSuggestions, getTaskDetail, triggerAnalysis } from '@/api';
-import type { AnalysisSuggestion, CosFile, HotmethodTask, TopFunction } from '@/domain';
+import type { AnalysisSuggestion, CosFile, HotmethodTask, TaskStateHistory, TopFunction } from '@/domain';
 import { analysisMap, basename, formatDate, formatDuration, parseTaskParams, profilerTypeMap, statusMap, taskTypeMap } from '@/domain';
 import FlameGraph from '@/components/FlameGraph';
 
@@ -33,6 +33,7 @@ export default function TaskResult() {
   const [activeTab, setActiveTab] = useState('flame');
   const [task, setTask] = useState<HotmethodTask | null>(null);
   const [suggestions, setSuggestions] = useState<AnalysisSuggestion[]>([]);
+  const [stateHistory, setStateHistory] = useState<TaskStateHistory[]>([]);
   const [flameUrl, setFlameUrl] = useState('');
   const [flameLoading, setFlameLoading] = useState(false);
   const [flameError, setFlameError] = useState('');
@@ -46,6 +47,9 @@ export default function TaskResult() {
   const [pprofCpuData, setPprofCpuData] = useState<Record<string, number> | null>(null);
   const [pprofHeapData, setPprofHeapData] = useState<any[] | null>(null);
   const [pprofLoading, setPprofLoading] = useState(false);
+  const [memoryData, setMemoryData] = useState<any>(null);
+  const [heapData, setHeapData] = useState<any>(null);
+  const [resourceData, setResourceData] = useState<any>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const taskRef = useRef<HotmethodTask | null>(null);
   const navigate = useNavigate();
@@ -68,6 +72,9 @@ export default function TaskResult() {
     setPprofCpuData(null);
     setPprofHeapData(null);
     setPprofLoading(false);
+    setMemoryData(null);
+    setHeapData(null);
+    setResourceData(null);
 
     try {
       const detailRes = await getTaskDetail(tid);
@@ -75,6 +82,7 @@ export default function TaskResult() {
         setTask(detailRes.data.task);
         setSuggestions(detailRes.data.suggestions || []);
         setCosFiles(Array.isArray(detailRes.data.cos_files) ? detailRes.data.cos_files : []);
+        setStateHistory(Array.isArray(detailRes.data.state_history) ? detailRes.data.state_history : []);
       } else {
         throw new Error(detailRes.message || '任务不存在');
       }
@@ -179,6 +187,17 @@ export default function TaskResult() {
           setPprofLoading(false);
         }
       }
+
+      const memleakFile = allFiles.find(f => basename(f.key || f.name || '').toLowerCase() === 'memleak.json');
+      const heapFile = allFiles.find(f => basename(f.key || f.name || '').toLowerCase() === 'heap_stats.json');
+      const resourceFile = allFiles.find(f => basename(f.key || f.name || '').toLowerCase() === 'resource_stats.json');
+      try {
+        if (memleakFile?.url) setMemoryData(await fetchSignedJson<any>(memleakFile.url));
+        if (heapFile?.url) setHeapData(await fetchSignedJson<any>(heapFile.url));
+        if (resourceFile?.url) setResourceData(await fetchSignedJson<any>(resourceFile.url));
+      } catch {
+        // Optional extended artifacts should not block the main result page.
+      }
     } catch (e: any) {
       setError(e?.response?.data?.message || e?.message || '任务详情加载失败');
     } finally {
@@ -246,6 +265,39 @@ export default function TaskResult() {
       }))
       .sort((a, b) => b.flat_space - a.flat_space || b.cum_space - a.cum_space);
   }, [pprofHeapData]);
+  const eBpfReadCount = Number(eBpfData?.total_reads ?? eBpfData?.read_count ?? 0);
+  const eBpfWriteCount = Number(eBpfData?.total_writes ?? eBpfData?.write_count ?? 0);
+  const eBpfAvgLatencyMs = Number(eBpfData?.avg_latency_ms ?? ((eBpfData?.latency_avg_us ?? 0) / 1000));
+  const eBpfMaxLatencyMs = Number(eBpfData?.max_latency_ms ?? ((eBpfData?.latency_max_us ?? 0) / 1000));
+  const eBpfTotalBytes = Number(eBpfData?.total_bytes ?? ((eBpfData?.read_bytes ?? 0) + (eBpfData?.write_bytes ?? 0)));
+  const eBpfTopDevices = useMemo(() => {
+    if (Array.isArray(eBpfData?.top_devices)) return eBpfData.top_devices;
+    return Object.entries(eBpfData?.by_disk || {}).map(([device, value]: [string, any]) => ({
+      device,
+      count: Number(value?.count) || 0,
+      bytes: Number(value?.bytes) || 0,
+      latency_avg_ms: Number(value?.latency_avg || 0) / 1000,
+    }));
+  }, [eBpfData]);
+  const eBpfTopProcesses = useMemo(() => {
+    if (Array.isArray(eBpfData?.top_processes)) return eBpfData.top_processes;
+    return Object.entries(eBpfData?.top_processes || eBpfData?.by_process || {}).map(([process, value]: [string, any]) => ({
+      process,
+      pid: value?.pid || process,
+      count: Number(value?.count) || 0,
+      bytes: Number(value?.bytes) || 0,
+    }));
+  }, [eBpfData]);
+  const memoryLeakRows = useMemo(() => Array.isArray(memoryData?.leaks) ? memoryData.leaks : [], [memoryData]);
+  const heapRows = useMemo(() => {
+    const rows = Array.isArray(heapData?.classes) ? heapData.classes : (Array.isArray(heapData?.top_classes) ? heapData.top_classes : []);
+    return rows.map((row: any) => ({
+      name: String(row.name || row.class_name || row.class || '-'),
+      count: Number(row.count || row.instances || 0),
+      bytes: Number(row.bytes || row.total_bytes || row.size || 0),
+    })).sort((a: any, b: any) => b.bytes - a.bytes);
+  }, [heapData]);
+  const resourceSummary = resourceData?.summary || resourceData;
 
   // TopN 表格列定义
   const topnColumns = [
@@ -421,6 +473,34 @@ export default function TaskResult() {
                   ),
                 },
                 {
+                  key: 'states',
+                  label: '状态迁移',
+                  children: (
+                    stateHistory.length === 0 ? (
+                      <div style={{ padding: 60, textAlign: 'center' }}>
+                        <div style={{ fontSize: 15, color: 'rgba(255,255,255,0.35)' }}>暂无状态迁移记录</div>
+                      </div>
+                    ) : (
+                      <Timeline
+                        items={stateHistory.map((item) => ({
+                          color: statusMap[item.to_state]?.color || 'gray',
+                          children: (
+                            <div>
+                              <Text strong style={{ color: 'rgba(255,255,255,0.85)' }}>
+                                {statusMap[item.from_state]?.label || (item.from_state < 0 ? '创建' : String(item.from_state))}
+                                {' -> '}
+                                {statusMap[item.to_state]?.label || String(item.to_state)}
+                              </Text>
+                              <div style={{ marginTop: 4, color: 'rgba(255,255,255,0.55)', fontSize: 13 }}>{item.reason || '-'}</div>
+                              <div style={{ marginTop: 4, color: 'rgba(255,255,255,0.32)', fontSize: 12 }}>{formatDate(item.created_at)}</div>
+                            </div>
+                          ),
+                        }))}
+                      />
+                    )
+                  ),
+                },
+                {
                   key: 'flame',
                   label: '火焰图',
                   children: (
@@ -523,41 +603,42 @@ export default function TaskResult() {
                               <Statistic title="总事件数" value={eBpfData.total_events} />
                             </Col>
                           )}
-                          {eBpfData.total_reads !== undefined && (
+                          {eBpfReadCount > 0 && (
                             <Col span={6}>
-                              <Statistic title="读操作" value={eBpfData.total_reads} />
+                              <Statistic title="读操作" value={eBpfReadCount} />
                             </Col>
                           )}
-                          {eBpfData.total_writes !== undefined && (
+                          {eBpfWriteCount > 0 && (
                             <Col span={6}>
-                              <Statistic title="写操作" value={eBpfData.total_writes} />
+                              <Statistic title="写操作" value={eBpfWriteCount} />
                             </Col>
                           )}
-                          {eBpfData.avg_latency_ms !== undefined && (
+                          {eBpfAvgLatencyMs > 0 && (
                             <Col span={6}>
-                              <Statistic title="平均延迟" value={eBpfData.avg_latency_ms} suffix="ms" precision={2} />
+                              <Statistic title="平均延迟" value={eBpfAvgLatencyMs} suffix="ms" precision={2} />
                             </Col>
                           )}
-                          {eBpfData.max_latency_ms !== undefined && (
+                          {eBpfMaxLatencyMs > 0 && (
                             <Col span={6}>
-                              <Statistic title="最大延迟" value={eBpfData.max_latency_ms} suffix="ms" precision={2} />
+                              <Statistic title="最大延迟" value={eBpfMaxLatencyMs} suffix="ms" precision={2} />
                             </Col>
                           )}
-                          {eBpfData.total_bytes !== undefined && (
+                          {eBpfTotalBytes > 0 && (
                             <Col span={6}>
-                              <Statistic title="总字节数" value={eBpfData.total_bytes} />
+                              <Statistic title="总字节数" value={eBpfTotalBytes} />
                             </Col>
                           )}
                         </Row>
-                        {eBpfData.top_devices && eBpfData.top_devices.length > 0 && (
+                        {eBpfTopDevices.length > 0 && (
                           <>
                             <Typography.Text strong style={{ display: 'block', marginBottom: 12 }}>热点设备</Typography.Text>
                             <Table
-                              dataSource={eBpfData.top_devices}
+                              dataSource={eBpfTopDevices}
                               columns={[
                                 { title: '设备', dataIndex: 'device', key: 'device' },
                                 { title: '操作数', dataIndex: 'count', key: 'count' },
                                 { title: '字节数', dataIndex: 'bytes', key: 'bytes' },
+                                { title: '平均延迟(ms)', dataIndex: 'latency_avg_ms', key: 'latency_avg_ms', render: (value: number) => Number.isFinite(value) ? value.toFixed(3) : '-' },
                               ]}
                               rowKey="device"
                               pagination={false}
@@ -565,17 +646,18 @@ export default function TaskResult() {
                             />
                           </>
                         )}
-                        {eBpfData.top_processes && eBpfData.top_processes.length > 0 && (
+                        {eBpfTopProcesses.length > 0 && (
                           <>
                             <Typography.Text strong style={{ display: 'block', marginTop: 24, marginBottom: 12 }}>热点进程</Typography.Text>
                             <Table
-                              dataSource={eBpfData.top_processes}
+                              dataSource={eBpfTopProcesses}
                               columns={[
                                 { title: '进程', dataIndex: 'process', key: 'process' },
                                 { title: 'PID', dataIndex: 'pid', key: 'pid' },
                                 { title: '操作数', dataIndex: 'count', key: 'count' },
+                                { title: '字节数', dataIndex: 'bytes', key: 'bytes' },
                               ]}
-                              rowKey="pid"
+                              rowKey={(record: any) => `${record.process}-${record.pid}`}
                               pagination={false}
                               size="small"
                             />
@@ -658,6 +740,71 @@ export default function TaskResult() {
                       <div style={{ padding: 60, textAlign: 'center' }}>
                         <div style={{ fontSize: 15, color: 'rgba(255,255,255,0.35)' }}>这里空空如也</div>
                         <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.2)', marginTop: 6 }}>暂无 pprof 分析数据（需使用 pprof 采集器并触发分析）</div>
+                      </div>
+                    )
+                  ),
+                },
+                {
+                  key: 'memory',
+                  label: '内存/资源',
+                  children: (
+                    memoryLeakRows.length > 0 || heapRows.length > 0 || resourceSummary ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+                        {memoryData && (
+                          <Row gutter={[16, 16]}>
+                            <Col span={6}>
+                              <Statistic title="泄漏字节" value={formatBytes(Number(memoryData.total_leaked_bytes) || 0)} />
+                            </Col>
+                            <Col span={6}>
+                              <Statistic title="泄漏块数" value={Number(memoryData.total_leaked_blocks) || 0} />
+                            </Col>
+                          </Row>
+                        )}
+                        {memoryLeakRows.length > 0 && (
+                          <div>
+                            <Typography.Text strong style={{ display: 'block', marginBottom: 12 }}>泄漏 TopN</Typography.Text>
+                            <Table
+                              dataSource={memoryLeakRows}
+                              columns={[
+                                { title: '类型', dataIndex: 'leak_type', key: 'leak_type', width: 120 },
+                                { title: '大小', dataIndex: 'size', key: 'size', width: 120, render: (value: number) => formatBytes(value) },
+                                { title: '次数', dataIndex: 'count', key: 'count', width: 100 },
+                                { title: '调用栈', dataIndex: 'stack', key: 'stack', render: (value: string[]) => <Text code style={{ color: 'rgba(255,255,255,0.75)' }}>{Array.isArray(value) ? value.slice(0, 4).join(' -> ') : '-'}</Text> },
+                              ]}
+                              rowKey={(_, index) => `leak-${index}`}
+                              pagination={{ pageSize: 8, size: 'small' }}
+                              size="small"
+                            />
+                          </div>
+                        )}
+                        {heapRows.length > 0 && (
+                          <div>
+                            <Typography.Text strong style={{ display: 'block', marginBottom: 12 }}>堆对象 TopN</Typography.Text>
+                            <Table
+                              dataSource={heapRows}
+                              columns={[
+                                { title: '类/对象', dataIndex: 'name', key: 'name', render: (value: string) => <Text code style={{ color: 'rgba(255,255,255,0.75)' }}>{value}</Text> },
+                                { title: '数量', dataIndex: 'count', key: 'count', width: 120 },
+                                { title: '大小', dataIndex: 'bytes', key: 'bytes', width: 140, render: (value: number) => formatBytes(value) },
+                              ]}
+                              rowKey={(record: any) => record.name}
+                              pagination={{ pageSize: 8, size: 'small' }}
+                              size="small"
+                            />
+                          </div>
+                        )}
+                        {resourceSummary && (
+                          <Card size="small" style={{ background: 'rgba(255,255,255,0.02)', border: '0.5px solid rgba(255,255,255,0.085)' }}>
+                            <pre style={{ margin: 0, whiteSpace: 'pre-wrap', color: 'rgba(255,255,255,0.65)', fontSize: 12 }}>
+                              {typeof resourceSummary === 'string' ? resourceSummary : JSON.stringify(resourceSummary, null, 2)}
+                            </pre>
+                          </Card>
+                        )}
+                      </div>
+                    ) : (
+                      <div style={{ padding: 60, textAlign: 'center' }}>
+                        <div style={{ fontSize: 15, color: 'rgba(255,255,255,0.35)' }}>这里空空如也</div>
+                        <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.2)', marginTop: 6 }}>暂无内存或资源分析数据</div>
                       </div>
                     )
                   ),

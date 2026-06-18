@@ -230,7 +230,10 @@ export default function CreateTaskModal({
 	                    onChange({
 	                      type,
 	                      profiler_type: profilerType,
-	                      event: type === 6 ? (form.event || 'io') : (type === 0 ? 'cpu-cycles' : form.event),
+	                      event: type === 6 ? (form.event || 'io') :
+	                        (type === 10 ? 'cpu' :
+	                          (type === 11 ? 'heap' :
+	                            (type === 0 ? 'cpu-cycles' : form.event))),
 	                    });
 	                  }}
 	                  style={selectStyle}

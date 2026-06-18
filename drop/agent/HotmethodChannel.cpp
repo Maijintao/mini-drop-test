@@ -117,7 +117,8 @@ static std::unique_ptr<IProfiler> CreateProfiler(int profiler_type, const Config
     case PROFILER_ASYNC_PROFILER:
       return std::make_unique<AsyncProfiler>();
     case PROFILER_PPROF:
-      return std::make_unique<PprofProfiler>(config.pprof_host, config.pprof_port);
+      return std::make_unique<PprofProfiler>(config.pprof_host, config.pprof_port,
+                                             event == "heap" ? "heap" : "cpu");
     case PROFILER_BPFTRACE:
       return std::make_unique<BpftraceProfiler>(event);
     case PROFILER_MEMRAY:

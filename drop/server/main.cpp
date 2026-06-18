@@ -33,7 +33,9 @@ int main(int argc, char* argv[]) {
 
   // 从环境变量读取存储配置
   drop::AgentConfig storage_config;
-  storage_config.endpoint = std::getenv("MINIO_ENDPOINT") ? std::getenv("MINIO_ENDPOINT") : "localhost:9000";
+  const char* agent_minio_endpoint = std::getenv("AGENT_MINIO_ENDPOINT");
+  storage_config.endpoint = agent_minio_endpoint ? agent_minio_endpoint :
+      (std::getenv("MINIO_ENDPOINT") ? std::getenv("MINIO_ENDPOINT") : "localhost:9000");
   storage_config.access_key = std::getenv("MINIO_ACCESS_KEY") ? std::getenv("MINIO_ACCESS_KEY") : "drop";
   storage_config.secret_key = std::getenv("MINIO_SECRET_KEY") ? std::getenv("MINIO_SECRET_KEY") : "dropdrop";
   storage_config.bucket = std::getenv("MINIO_BUCKET") ? std::getenv("MINIO_BUCKET") : "drop";

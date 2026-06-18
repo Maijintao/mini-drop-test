@@ -174,6 +174,7 @@ func SetupTestRouter(srv *server.APIServer) *gin.Engine {
 			auth.POST("/tasks", srv.CreateTask)
 			auth.GET("/tasks", srv.GetTasks)
 			auth.GET("/tasks/:tid", srv.GetTaskDetail)
+			auth.GET("/tasks/:tid/state_history", srv.GetTaskStateHistory)
 			auth.DELETE("/tasks/:tid", srv.DeleteTask)
 			auth.POST("/tasks/:tid/retry", srv.RetryTask)
 			auth.GET("/cosfiles", srv.GetCOSFiles)

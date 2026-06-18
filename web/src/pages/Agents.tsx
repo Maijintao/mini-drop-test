@@ -2,8 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useGSAP } from '@gsap/react';
 import gsap from 'gsap';
-import { getAgents, statAgent } from '@/api';
-import type { AgentInfo, AgentStatData } from '@/domain';
+import { getAgentAuditLog, getAgents, statAgent } from '@/api';
+import type { AgentInfo, AgentStateHistory, AgentStatData } from '@/domain';
 import { formatRelativeTime } from '@/domain';
 
 gsap.registerPlugin(useGSAP);
@@ -26,6 +26,7 @@ export default function Agents() {
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [agents, setAgents] = useState<AgentInfo[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AgentStateHistory[]>([]);
   const [stats, setStats] = useState<Record<string, AgentStatData>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -72,6 +73,12 @@ export default function Agents() {
           }),
       );
       setStats(Object.fromEntries(statEntries.filter((entry): entry is readonly [string, AgentStatData] => Boolean(entry[1]))));
+      try {
+        const audit = await getAgentAuditLog({ limit: 8 });
+        setAuditLogs(audit.code === 0 ? (audit.data || []) : []);
+      } catch {
+        setAuditLogs([]);
+      }
     } catch (e: any) {
       setError(e?.response?.data?.message || e?.message || 'Agent 列表加载失败');
       setAgents([]);
@@ -110,6 +117,25 @@ export default function Agents() {
             <div style={{ fontSize: 28, fontWeight: 700, color: s.color }}>{s.value}</div>
           </div>
         ))}
+      </div>
+
+      <div style={{ ...glassCard, padding: 20, marginBottom: 24 }}>
+        <div style={{ fontSize: 15, fontWeight: 700, color: 'rgba(255,255,255,0.85)', marginBottom: 14 }}>最近审计</div>
+        {auditLogs.length === 0 ? (
+          <div style={{ color: 'rgba(255,255,255,0.35)', fontSize: 13 }}>暂无离线/恢复记录</div>
+        ) : (
+          <div style={{ display: 'grid', gap: 10 }}>
+            {auditLogs.map((log) => (
+              <div key={log.id} style={{ display: 'grid', gridTemplateColumns: '160px 1fr 160px', gap: 12, alignItems: 'center', fontSize: 13 }}>
+                <code style={{ color: 'rgba(255,255,255,0.5)' }}>{log.ip_addr}</code>
+                <span style={{ color: log.to_state ? '#4ade80' : '#f87171' }}>
+                  {log.from_state ? '在线' : '离线'} {'->'} {log.to_state ? '在线' : '离线'} · {log.reason || '-'}
+                </span>
+                <span style={{ color: 'rgba(255,255,255,0.32)', textAlign: 'right' }}>{formatRelativeTime(log.created_at)}</span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Search */}

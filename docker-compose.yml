@@ -54,6 +54,9 @@ services:
       - drop-db:/data
     environment:
       MINIO_ENDPOINT: minio:9000
+      # drop-agent 使用 host network，不能稳定解析 compose 服务名 minio。
+      # 下发给 Agent 的存储端点单独使用宿主机可达地址。
+      AGENT_MINIO_ENDPOINT: 127.0.0.1:9000
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
       MINIO_BUCKET: drop-data

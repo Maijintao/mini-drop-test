@@ -18,10 +18,12 @@ int PprofProfiler::Record(int pid, int duration_sec, int freq,
 int PprofProfiler::FetchFromHTTP(const std::string& host, int port,
                                   int duration_sec,
                                   const std::string& output_path) {
-  // 使用 curl 采集 pprof 数据
-  // curl -o <output> "http://<host>:<port>/debug/pprof/profile?seconds=<duration>"
-  std::string url = "http://" + host + ":" + std::to_string(port) +
-                    "/debug/pprof/profile?seconds=" + std::to_string(duration_sec);
+  // 使用 curl 采集 pprof 数据。CPU profile 需要 seconds，heap 是即时快照。
+  std::string endpoint = "/debug/pprof/profile?seconds=" + std::to_string(duration_sec);
+  if (profile_kind_ == "heap") {
+    endpoint = "/debug/pprof/heap";
+  }
+  std::string url = "http://" + host + ":" + std::to_string(port) + endpoint;
 
   std::vector<std::string> args = {
     "curl", "-s", "-o", output_path, url

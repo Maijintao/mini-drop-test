@@ -262,6 +262,11 @@ func (s *APIServer) GetTaskDetail(c *gin.Context) {
 	var suggestions []model.AnalysisSuggestion
 	s.Db.Where("tid = ?", tid).Find(&suggestions)
 
+	var stateHistory []model.TaskStateHistory
+	s.Db.Where("tid = ? AND change_type = ?", tid, ChangeTypeTask).
+		Order("created_at ASC").
+		Find(&stateHistory)
+
 	// 生成 COS 签名 URL（如果任务完成）
 	cosFiles := make([]gin.H, 0)
 	if task.Status == TaskStatusSuccess {
@@ -288,10 +293,30 @@ func (s *APIServer) GetTaskDetail(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"code": CodeSuccess,
 		"data": gin.H{
-			"task":        task,
-			"suggestions": suggestions,
-			"cos_files":   cosFiles,
+			"task":          task,
+			"suggestions":   suggestions,
+			"cos_files":     cosFiles,
+			"state_history": stateHistory,
 		},
+	})
+}
+
+// GetTaskStateHistory 查询任务状态迁移历史 — GET /api/v1/tasks/:tid/state_history
+func (s *APIServer) GetTaskStateHistory(c *gin.Context) {
+	tid := c.Param("tid")
+	if _, ok := s.checkTaskAccess(c, tid); !ok {
+		return
+	}
+
+	var history []model.TaskStateHistory
+	if err := s.Db.Where("tid = ?", tid).Order("created_at ASC").Find(&history).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": CodeInternal, "message": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code": CodeSuccess,
+		"data": history,
 	})
 }
 
@@ -549,6 +574,7 @@ func (s *APIServer) waitTaskResult(ctx context.Context, tid string, timeoutSec u
 			now := time.Now()
 			cosKey, storeErr := s.persistFetchedResultFile(context.Background(), tid, resp)
 			if storeErr != nil {
+				s.ensureTaskReached(tid, TaskStatusRunning, "collector ran before result was fetched")
 				s.transitionTaskStatus(tid, TaskStatusFailed, storeErr.Error(), map[string]interface{}{"end_time": &now})
 				return
 			}
@@ -573,6 +599,7 @@ func (s *APIServer) waitTaskResult(ctx context.Context, tid string, timeoutSec u
 		}
 		if err == nil && !isStatusMessage && resp.GetMessage() != "" && resp.GetMessage() != "Result not found" {
 			now := time.Now()
+			s.ensureTaskReached(tid, TaskStatusRunning, "collector started before failure")
 			s.transitionTaskStatus(tid, TaskStatusFailed, resp.GetMessage(), map[string]interface{}{"end_time": &now})
 			return
 		}
@@ -588,7 +615,7 @@ func (s *APIServer) persistFetchedResultFile(ctx context.Context, tid string, re
 
 	file := resp.GetFile()
 	if file == nil || len(file.GetContent()) == 0 {
-		return "", nil
+		return "", fmt.Errorf("collector result missing artifact: no cos_key or embedded file")
 	}
 	if s.Storage == nil {
 		return "", fmt.Errorf("collector returned embedded file but storage is not configured")
@@ -725,7 +752,9 @@ func (s *APIServer) recordStateChange(tid string, fromState, toState int, reason
 		Reason:     reason,
 		ChangeType: changeType,
 	}
-	s.Db.Create(history)
+	if err := s.Db.Create(history).Error; err != nil {
+		log.Printf("ERROR: record state change failed tid=%s from=%d to=%d type=%d: %v", tid, fromState, toState, changeType, err)
+	}
 }
 
 func (s *APIServer) updateTaskStatusInfo(tid string, reason string) {
@@ -773,14 +802,15 @@ func (s *APIServer) transitionTaskStatus(tid string, toState int, reason string,
 		now := time.Now()
 		updates["begin_time"] = &now
 	}
-	_ = s.Db.Transaction(func(tx *gorm.DB) error {
+	fromState := normalizeTaskStatus(task.Status)
+	if err := s.Db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(&task).Updates(updates).Error; err != nil {
 			return err
 		}
-		if task.Status != toState {
+		if fromState != toState {
 			history := &model.TaskStateHistory{
 				TID:        tid,
-				FromState:  task.Status,
+				FromState:  fromState,
 				ToState:    toState,
 				Reason:     reason,
 				ChangeType: ChangeTypeTask,
@@ -790,7 +820,9 @@ func (s *APIServer) transitionTaskStatus(tid string, toState int, reason string,
 			}
 		}
 		return nil
-	})
+	}); err != nil {
+		log.Printf("ERROR: transition task status failed tid=%s from=%d to=%d: %v", tid, task.Status, toState, err)
+	}
 }
 
 func (s *APIServer) syncDropTaskStatus(tid string, status int, reason string) {

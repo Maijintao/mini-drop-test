@@ -18,6 +18,16 @@ export interface AgentInfo {
   updated_at: string;
 }
 
+export interface AgentStateHistory {
+  id: number;
+  ip_addr: string;
+  hostname: string;
+  from_state: boolean;
+  to_state: boolean;
+  reason: string;
+  created_at: string;
+}
+
 export interface TaskParams {
   pid?: number;
   duration?: number;
@@ -86,6 +96,16 @@ export interface AnalysisSuggestion {
   updated_at: string;
 }
 
+export interface TaskStateHistory {
+  id: number;
+  tid: string;
+  from_state: number;
+  to_state: number;
+  reason: string;
+  change_type: number;
+  created_at: string;
+}
+
 export interface GroupInfo {
   gid: number;
   name: string;
@@ -115,6 +135,7 @@ export interface TaskDetailData {
   task: HotmethodTask;
   suggestions?: AnalysisSuggestion[];
   cos_files?: CosFile[];
+  state_history?: TaskStateHistory[];
 }
 
 export interface TopFunction {

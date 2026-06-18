@@ -83,8 +83,8 @@ void HealthCheckChannel::HeartbeatLoop() {
     children_agg.set_read_kb_per_sec(0.0);
     children_agg.set_write_kb_per_sec(0.0);
 
-    // N18: 正确路径是 /proc/<pid>/children，不需要 /task/<pid>/
-    std::string children_path = "/proc/" + std::to_string(getpid()) + "/children";
+    std::string children_path = "/proc/" + std::to_string(getpid()) +
+                                "/task/" + std::to_string(getpid()) + "/children";
     std::ifstream children_file(children_path);
     if (children_file.is_open()) {
       std::string child_pid_str;
