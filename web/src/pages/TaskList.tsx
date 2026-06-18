@@ -135,6 +135,9 @@ export default function TaskList() {
         duration: Number(form.duration),
         hz: Number(form.hz || 99),
       });
+      if (res.code !== 0) {
+        throw new Error(res.message || '创建任务失败');
+      }
       const tid = res.data?.tid;
       setShowCreate(false);
       setForm(prev => ({ ...defaultForm, target_ip: prev.target_ip }));
@@ -149,6 +152,9 @@ export default function TaskList() {
         });
         pollerRef.current = poller;
       }
+    } catch (e: any) {
+      console.error('create task failed:', e);
+      alert(e.message || '创建任务失败');
     } finally {
       setSubmitting(false);
     }

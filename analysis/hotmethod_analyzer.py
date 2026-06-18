@@ -192,7 +192,7 @@ def main():
         elif task_type == 4:
             if raw_path is None:
                 error_exit("no memleak data found", ERR_NOT_FOUND, api=api, tid=tid)
-            result = run_memleak(raw_path, work_dir, tid)
+            result = run_memleak(raw_path, work_dir, tid, api=api)
         elif task_type == 5:
             if raw_path is None:
                 error_exit("no pidstat data found for resource analysis", ERR_NOT_FOUND, api=api, tid=tid)
@@ -555,13 +555,13 @@ def run_pprof_heap(data_path: str, work_dir: str, tid: str) -> dict:
     return {result_path: "pprof_heap.json"}
 
 
-def run_memleak(data_path: str, work_dir: str, tid: str) -> dict:
+def run_memleak(data_path: str, work_dir: str, tid: str, api=None) -> dict:
     """内存泄漏分析"""
     result_path = os.path.join(work_dir, "memleak.json")
     result = analyze_memleak(data_path)
 
     if not result.success:
-        error_exit(result.error, ERR_ANALYSIS)
+        error_exit(result.error, ERR_ANALYSIS, api=api, tid=tid)
 
     output = {
         "total_leaked_bytes": result.total_leaked_bytes,

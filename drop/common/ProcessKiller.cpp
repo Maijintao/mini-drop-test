@@ -10,6 +10,9 @@ namespace drop {
 ProcessKiller::ProcessKiller(pid_t pid, int timeout_sec)
     : pid_(pid), pgid_(getpgid(pid)), timeout_sec_(timeout_sec), running_(false), timeout_(false) {}
 
+ProcessKiller::ProcessKiller(pid_t pid, pid_t pgid, int timeout_sec)
+    : pid_(pid), pgid_(pgid), timeout_sec_(timeout_sec), running_(false), timeout_(false) {}
+
 ProcessKiller::~ProcessKiller() {
   Stop();
 }

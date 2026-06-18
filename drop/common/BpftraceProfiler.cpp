@@ -37,9 +37,19 @@ int BpftraceProfiler::Record(int pid, int duration_sec, int freq,
 
   LOG_INFO("Executing: bpftrace " + script_path + " > " + output_path);
 
+  // R4 修复：pipe 同步，确保子进程 setpgid 完成后父进程再读 pgid
+  int sync_pipe[2];
+  if (pipe(sync_pipe) < 0) {
+    LOG_ERROR("pipe failed: " + std::string(strerror(errno)));
+    unlink(script_path.c_str());
+    return -1;
+  }
+
   pid_t child = fork();
   if (child == -1) {
     LOG_ERROR("fork failed: " + std::string(strerror(errno)));
+    close(sync_pipe[0]);
+    close(sync_pipe[1]);
     unlink(script_path.c_str());
     return -1;
   }
@@ -47,6 +57,11 @@ int BpftraceProfiler::Record(int pid, int duration_sec, int freq,
   if (child == 0) {
     // 子进程：创建独立进程组
     setpgid(0, 0);
+    // 通知父进程 setpgid 已完成
+    close(sync_pipe[0]);
+    char ready = 1;
+    write(sync_pipe[1], &ready, 1);
+    close(sync_pipe[1]);
 
     // 重定向 stdout 到 output_path
     int fd = open(output_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
@@ -76,8 +91,14 @@ int BpftraceProfiler::Record(int pid, int duration_sec, int freq,
     _exit(127);
   }
 
-  // 父进程：启动超时监控（采集时长 + 60 秒缓冲，eBPF 加载可能较慢）
-  ProcessKiller killer(child, duration_sec + 60);
+  // 父进程：等待子进程 setpgid 完成，然后读取 pgid
+  close(sync_pipe[1]);
+  char ready = 0;
+  read(sync_pipe[0], &ready, 1);
+  close(sync_pipe[0]);
+
+  // 启动超时监控（采集时长 + 60 秒缓冲，eBPF 加载可能较慢）
+  ProcessKiller killer(child, child, duration_sec + 60);
   killer.Start();
 
   int status;

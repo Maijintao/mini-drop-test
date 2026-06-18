@@ -94,6 +94,9 @@ export default function Home() {
         hz: Number(form.hz || 99),
       };
       const res = await createTask(payload);
+      if (res.code !== 0) {
+        throw new Error(res.message || '创建任务失败');
+      }
       const tid = res.data?.tid;
       setShowCreate(false);
       const taskRes = await getTasks({ page: 1, size: 100 });
@@ -108,6 +111,9 @@ export default function Home() {
         });
         pollerRef.current = poller;
       }
+    } catch (e: any) {
+      console.error('create task failed:', e);
+      alert(e.message || '创建任务失败');
     } finally {
       setSubmitting(false);
     }

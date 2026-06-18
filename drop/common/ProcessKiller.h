@@ -9,6 +9,8 @@ namespace drop {
 class ProcessKiller {
 public:
   ProcessKiller(pid_t pid, int timeout_sec);
+  // 显式指定 pgid，避免 getpgid 竞态
+  ProcessKiller(pid_t pid, pid_t pgid, int timeout_sec);
   ~ProcessKiller();
 
   // 启动超时监控

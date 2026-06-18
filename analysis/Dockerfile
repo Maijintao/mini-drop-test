@@ -19,4 +19,7 @@ RUN chmod +x flamegraph.pl stackcollapse-perf.pl 2>/dev/null || true
 # 构建 Java heap analyzer
 RUN cd java_heap_analyzer && go build -o /app/analysis/java_heap_analyzer/analyzer .
 
+# 环境变量配置（Docker 部署时通过 -e 或 compose 注入）
+# MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY, MINIO_BUCKET, MINIO_SECURE
+# APISERVER_URL
 ENTRYPOINT ["python3", "hotmethod_analyzer.py"]

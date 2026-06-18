@@ -68,15 +68,22 @@ void HotmethodChannel::PushTask(const TaskDesc& task) {
 }
 
 void HotmethodChannel::ReportResult(const TaskResult& result) {
-  grpc::ClientContext context;
-  context.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(5));
-  google::protobuf::Empty empty;
-  auto status = stub_->NotifyResult(&context, result, &empty);
-  if (status.ok()) {
-    LOG_INFO("Task " + result.task_id() + " result reported.");
-  } else {
-    LOG_ERROR("Failed to report result: " + status.error_message());
+  // N23: 重试 3 次，避免网络抖动导致结果丢失、任务超时
+  for (int attempt = 1; attempt <= 3; attempt++) {
+    grpc::ClientContext context;
+    context.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(5));
+    google::protobuf::Empty empty;
+    auto status = stub_->NotifyResult(&context, result, &empty);
+    if (status.ok()) {
+      LOG_INFO("Task " + result.task_id() + " result reported.");
+      return;
+    }
+    LOG_ERROR("NotifyResult attempt " + std::to_string(attempt) + "/3 failed: " + status.error_message());
+    if (attempt < 3) {
+      std::this_thread::sleep_for(std::chrono::seconds(1));
+    }
   }
+  LOG_ERROR("NotifyResult all retries exhausted for task " + result.task_id());
 }
 
 void HotmethodChannel::ReportStatus(const std::string& task_id, TaskState state, const std::string& reason) {

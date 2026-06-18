@@ -9,14 +9,14 @@ class Config:
     def __init__(self, config_path: str = ""):
         self.cfg = configparser.ConfigParser()
 
-        # 默认值
-        self.minio_endpoint = "localhost:9000"
-        self.minio_access_key = "minioadmin"
-        self.minio_secret_key = "minioadmin"
-        self.minio_bucket = "drop-data"
-        self.minio_secure = False
+        # 默认值（环境变量优先，适配 Docker 部署）
+        self.minio_endpoint = os.environ.get("MINIO_ENDPOINT", "localhost:9000")
+        self.minio_access_key = os.environ.get("MINIO_ACCESS_KEY", "minioadmin")
+        self.minio_secret_key = os.environ.get("MINIO_SECRET_KEY", "minioadmin")
+        self.minio_bucket = os.environ.get("MINIO_BUCKET", "drop-data")
+        self.minio_secure = os.environ.get("MINIO_SECURE", "false").lower() == "true"
 
-        self.apiserver_url = "http://localhost:8191"
+        self.apiserver_url = os.environ.get("APISERVER_URL", "http://localhost:8191")
 
         if config_path and os.path.exists(config_path):
             self._load(config_path)
