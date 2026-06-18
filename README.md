@@ -23,6 +23,38 @@ docker compose up
 
 启动后访问 http://localhost 即可使用。
 
+## 权限要求
+
+drop-agent 容器需要宿主机级权限才能执行 CPU/IO 采集：
+
+| 配置项 | 值 | 说明 |
+|--------|-----|------|
+| `privileged: true` | docker-compose.yml | Agent 需要访问宿主机 `/proc`、`/sys` 及 perf 设备 |
+| `pid: host` | docker-compose.yml | 采集宿主机进程信息 |
+| `network_mode: host` | docker-compose.yml | Agent 直接与 drop_server 通信 |
+| `perf_event_paranoid` | ≤ 1 | 允许非 root 用户采集 CPU 事件 |
+
+**设置 perf_event_paranoid**（宿主机执行）：
+
+```bash
+# 临时生效
+sudo sysctl kernel.perf_event_paranoid=1
+
+# 永久生效
+echo 'kernel.perf_event_paranoid=1' | sudo tee -a /etc/sysctl.d/99-perf.conf
+sudo sysctl --system
+```
+
+**最小 capabilities 替代方案**（不使用 `--privileged`）：
+
+```yaml
+cap_add:
+  - CAP_PERFMON    # perf 事件采集
+  - CAP_SYS_PTRACE # 进程追踪
+  - CAP_BPF        # bpftrace/eBPF
+  - CAP_NET_ADMIN   # bpftrace 网络抓包（可选）
+```
+
 ## 技术栈
 
 | 模块 | 语言 | 框架 |

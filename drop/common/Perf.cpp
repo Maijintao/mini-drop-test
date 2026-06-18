@@ -85,15 +85,29 @@ int Perf::ExecCommand(const std::vector<std::string>& args,
   }
   c_args.push_back(nullptr);
 
+  // pipe 同步：确保子进程 setpgid 完成后父进程再读 pgid
+  int sync_pipe[2];
+  if (pipe(sync_pipe) < 0) {
+    LOG_ERROR("pipe failed: " + std::string(strerror(errno)));
+    return -1;
+  }
+
   pid_t pid = fork();
   if (pid == -1) {
     LOG_ERROR("fork failed: " + std::string(strerror(errno)));
+    close(sync_pipe[0]);
+    close(sync_pipe[1]);
     return -1;
   }
 
   if (pid == 0) {
     // 子进程：创建新的进程组
     setpgid(0, 0);
+    // 通知父进程 setpgid 已完成
+    close(sync_pipe[0]);
+    char ready = 1;
+    write(sync_pipe[1], &ready, 1);
+    close(sync_pipe[1]);
 
     // 重定向 stdout 到文件（用于 perf script > output）
     if (!stdout_path.empty()) {
@@ -116,8 +130,14 @@ int Perf::ExecCommand(const std::vector<std::string>& args,
     _exit(127);
   }
 
-  // 父进程：启动超时监控
-  ProcessKiller killer(pid, timeout_sec);
+  // 父进程：等待子进程 setpgid 完成
+  close(sync_pipe[1]);
+  char ready = 0;
+  read(sync_pipe[0], &ready, 1);
+  close(sync_pipe[0]);
+
+  // 启动超时监控
+  ProcessKiller killer(pid, pid, timeout_sec);
   killer.Start();
 
   int status;

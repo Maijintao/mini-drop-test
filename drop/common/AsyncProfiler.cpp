@@ -38,15 +38,29 @@ int AsyncProfiler::Record(int pid, int duration_sec, int freq,
   }
   c_args.push_back(nullptr);
 
+  // pipe 同步：确保子进程 setpgid 完成后父进程再读 pgid
+  int sync_pipe[2];
+  if (pipe(sync_pipe) < 0) {
+    LOG_ERROR("pipe failed: " + std::string(strerror(errno)));
+    return -1;
+  }
+
   pid_t child = fork();
   if (child == -1) {
     LOG_ERROR("fork failed: " + std::string(strerror(errno)));
+    close(sync_pipe[0]);
+    close(sync_pipe[1]);
     return -1;
   }
 
   if (child == 0) {
     // 子进程：创建独立进程组
     setpgid(0, 0);
+    // 通知父进程 setpgid 已完成
+    close(sync_pipe[0]);
+    char ready = 1;
+    write(sync_pipe[1], &ready, 1);
+    close(sync_pipe[1]);
 
     // 关闭多余 fd
     for (int fd = 3; fd < 1024; fd++) {
@@ -59,8 +73,14 @@ int AsyncProfiler::Record(int pid, int duration_sec, int freq,
     _exit(127);
   }
 
-  // 父进程：启动超时监控（采集时长 + 30 秒缓冲）
-  ProcessKiller killer(child, duration_sec + 30);
+  // 父进程：等待子进程 setpgid 完成
+  close(sync_pipe[1]);
+  char ready = 0;
+  read(sync_pipe[0], &ready, 1);
+  close(sync_pipe[0]);
+
+  // 启动超时监控（采集时长 + 30 秒缓冲）
+  ProcessKiller killer(child, child, duration_sec + 30);
   killer.Start();
 
   int status;
