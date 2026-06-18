@@ -14,10 +14,19 @@ export default function ContinuousTimeline() {
   const [loading, setLoading] = useState(false);
   const [stopping, setStopping] = useState(false);
 
+  // 时间范围过滤
+  const [fromTime, setFromTime] = useState('');
+  const [toTime, setToTime] = useState('');
+  const [isFiltering, setIsFiltering] = useState(false);
+
   const fetchWindows = useCallback(async () => {
     if (!tid) return;
     try {
-      const res = await getContinuousWindows(tid);
+      const timeParams: { from?: string; to?: string } = {};
+      if (isFiltering && fromTime) timeParams.from = new Date(fromTime).toISOString();
+      if (isFiltering && toTime) timeParams.to = new Date(toTime).toISOString();
+
+      const res = await getContinuousWindows(tid, isFiltering ? timeParams : undefined);
       if (res.code === 0 && res.data) {
         setWindows(res.data);
         // 自动选中最新的已完成窗口
@@ -29,14 +38,15 @@ export default function ContinuousTimeline() {
     } catch (e) {
       console.error('fetch windows failed:', e);
     }
-  }, [tid, selected]);
+  }, [tid, selected, isFiltering, fromTime, toTime]);
 
-  // 轮询窗口列表
+  // 轮询窗口列表（过滤模式下暂停轮询）
   useEffect(() => {
     fetchWindows();
+    if (isFiltering) return; // 过滤模式不轮询
     const timer = setInterval(fetchWindows, 5000);
     return () => clearInterval(timer);
-  }, [fetchWindows]);
+  }, [fetchWindows, isFiltering]);
 
   // 加载选中窗口的火焰图
   useEffect(() => {
@@ -66,6 +76,18 @@ export default function ContinuousTimeline() {
     setStopping(false);
   };
 
+  const handleSearch = () => {
+    setSelected(null);
+    setIsFiltering(true);
+  };
+
+  const handleReset = () => {
+    setFromTime('');
+    setToTime('');
+    setSelected(null);
+    setIsFiltering(false);
+  };
+
   const formatTime = (ts: string) => {
     try {
       return new Date(ts).toLocaleTimeString();
@@ -87,38 +109,122 @@ export default function ContinuousTimeline() {
         <div style={{
           padding: '16px 16px 12px',
           borderBottom: '0.5px solid rgba(255,255,255,0.06)',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
         }}>
-          <div>
-            <div style={{ fontSize: 15, fontWeight: 700, color: '#fff' }}>时间轴</div>
-            <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', marginTop: 4 }}>
-              {tid} / {windows.length} 个窗口
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+            <div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: '#fff' }}>时间轴</div>
+              <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', marginTop: 4 }}>
+                {tid} / {windows.length} 个窗口
+              </div>
             </div>
+            <button
+              onClick={handleStop}
+              disabled={stopping}
+              style={{
+                padding: '5px 12px',
+                borderRadius: 6,
+                border: '0.5px solid rgba(248,113,113,0.3)',
+                background: 'rgba(248,113,113,0.08)',
+                color: '#f87171',
+                cursor: 'pointer',
+                fontSize: 12,
+                fontWeight: 600,
+              }}
+            >
+              {stopping ? '停止中...' : '停止'}
+            </button>
           </div>
-          <button
-            onClick={handleStop}
-            disabled={stopping}
-            style={{
-              padding: '5px 12px',
-              borderRadius: 6,
-              border: '0.5px solid rgba(248,113,113,0.3)',
-              background: 'rgba(248,113,113,0.08)',
-              color: '#f87171',
-              cursor: 'pointer',
-              fontSize: 12,
-              fontWeight: 600,
-            }}
-          >
-            {stopping ? '停止中...' : '停止'}
-          </button>
+
+          {/* 时间范围搜索 */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)', fontWeight: 600 }}>
+              按时间范围查询
+            </div>
+            <input
+              type="datetime-local"
+              value={fromTime}
+              onChange={(e) => setFromTime(e.target.value)}
+              placeholder="起始时间"
+              style={{
+                width: '100%',
+                height: 30,
+                padding: '0 8px',
+                background: 'rgba(255,255,255,0.04)',
+                border: '0.5px solid rgba(255,255,255,0.08)',
+                borderRadius: 6,
+                fontSize: 11,
+                color: 'rgba(255,255,255,0.6)',
+                outline: 'none',
+                boxSizing: 'border-box',
+              }}
+            />
+            <input
+              type="datetime-local"
+              value={toTime}
+              onChange={(e) => setToTime(e.target.value)}
+              placeholder="结束时间"
+              style={{
+                width: '100%',
+                height: 30,
+                padding: '0 8px',
+                background: 'rgba(255,255,255,0.04)',
+                border: '0.5px solid rgba(255,255,255,0.08)',
+                borderRadius: 6,
+                fontSize: 11,
+                color: 'rgba(255,255,255,0.6)',
+                outline: 'none',
+                boxSizing: 'border-box',
+              }}
+            />
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button
+                onClick={handleSearch}
+                disabled={!fromTime && !toTime}
+                style={{
+                  flex: 1,
+                  height: 28,
+                  borderRadius: 6,
+                  border: '0.5px solid rgba(96,165,250,0.3)',
+                  background: (fromTime || toTime) ? 'rgba(96,165,250,0.1)' : 'rgba(255,255,255,0.03)',
+                  color: (fromTime || toTime) ? '#60a5fa' : 'rgba(255,255,255,0.3)',
+                  cursor: (fromTime || toTime) ? 'pointer' : 'not-allowed',
+                  fontSize: 11,
+                  fontWeight: 600,
+                }}
+              >
+                查询
+              </button>
+              {isFiltering && (
+                <button
+                  onClick={handleReset}
+                  style={{
+                    flex: 1,
+                    height: 28,
+                    borderRadius: 6,
+                    border: '0.5px solid rgba(255,255,255,0.08)',
+                    background: 'rgba(255,255,255,0.04)',
+                    color: 'rgba(255,255,255,0.5)',
+                    cursor: 'pointer',
+                    fontSize: 11,
+                    fontWeight: 600,
+                  }}
+                >
+                  重置
+                </button>
+              )}
+            </div>
+            {isFiltering && (
+              <div style={{ fontSize: 10, color: 'rgba(96,165,250,0.6)', textAlign: 'center' }}>
+                已启用时间过滤，自动轮询已暂停
+              </div>
+            )}
+          </div>
         </div>
 
         <div style={{ flex: 1, overflow: 'auto', padding: '8px 0' }}>
           {windows.length === 0 && (
             <div style={{ padding: 24, textAlign: 'center', color: 'rgba(255,255,255,0.3)', fontSize: 13 }}>
-              等待第一个窗口完成...
+              {isFiltering ? '该时间范围内无窗口数据' : '等待第一个窗口完成...'}
             </div>
           )}
           {windows.map((w) => (
@@ -171,6 +277,9 @@ export default function ContinuousTimeline() {
               <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)' }}>
                 {selected.window_tid}
               </span>
+              <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.3)' }}>
+                {new Date(selected.start_time).toLocaleString()} ~ {new Date(selected.end_time).toLocaleString()}
+              </span>
             </div>
             <div style={{ flex: 1, overflow: 'auto' }}>
               {loading ? (
@@ -195,7 +304,7 @@ export default function ContinuousTimeline() {
             color: 'rgba(255,255,255,0.3)',
             fontSize: 14,
           }}>
-            选择左侧窗口查看火焰图
+            {isFiltering ? '选择窗口查看火焰图' : '选择左侧窗口查看火焰图'}
           </div>
         )}
       </div>

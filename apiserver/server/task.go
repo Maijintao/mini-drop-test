@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -980,8 +981,24 @@ func (s *APIServer) GetContinuousWindows(c *gin.Context) {
 		}
 	}
 
+	// 时间范围过滤
 	var windows []model.ContinuousWindow
-	s.Db.Where("parent_tid = ?", tid).Order("seq ASC").Find(&windows)
+	query := s.Db.Where("parent_tid = ?", tid)
+	if from := c.Query("from"); from != "" {
+		if t, err := time.Parse(time.RFC3339, from); err == nil {
+			query = query.Where("start_time >= ?", t)
+		} else if ts, err := strconv.ParseInt(from, 10, 64); err == nil {
+			query = query.Where("start_time >= ?", time.Unix(ts, 0))
+		}
+	}
+	if to := c.Query("to"); to != "" {
+		if t, err := time.Parse(time.RFC3339, to); err == nil {
+			query = query.Where("end_time <= ?", t)
+		} else if ts, err := strconv.ParseInt(to, 10, 64); err == nil {
+			query = query.Where("end_time <= ?", time.Unix(ts, 0))
+		}
+	}
+	query.Order("seq ASC").Find(&windows)
 
 	c.JSON(http.StatusOK, gin.H{
 		"code": CodeSuccess,

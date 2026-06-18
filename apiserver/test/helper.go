@@ -73,9 +73,11 @@ func (m *MockStorage) List(ctx context.Context, prefix string) ([]string, error)
 
 // MockGRPCClient mock gRPC 客户端
 type MockGRPCClient struct {
-	CreateTaskFunc func(ctx context.Context, req *pb.CreateTaskRequest) (*pb.CreateTaskResponse, error)
-	StatAgentFunc  func(ctx context.Context, req *pb.StatAgentRequest) (*pb.StatAgentResponse, error)
-	ListAgentsFunc func(ctx context.Context, req *pb.ListAgentsRequest) (*pb.ListAgentsResponse, error)
+	CreateTaskFunc       func(ctx context.Context, req *pb.CreateTaskRequest) (*pb.CreateTaskResponse, error)
+	StatAgentFunc        func(ctx context.Context, req *pb.StatAgentRequest) (*pb.StatAgentResponse, error)
+	ListAgentsFunc       func(ctx context.Context, req *pb.ListAgentsRequest) (*pb.ListAgentsResponse, error)
+	StartContinuousFunc  func(ctx context.Context, req *pb.StartContinuousRequest) (*pb.StartContinuousResponse, error)
+	StopContinuousFunc   func(ctx context.Context, req *pb.StopContinuousRequest) (*pb.StopContinuousResponse, error)
 }
 
 func (m *MockGRPCClient) CreateTask(ctx context.Context, req *pb.CreateTaskRequest) (*pb.CreateTaskResponse, error) {
@@ -106,10 +108,16 @@ func (m *MockGRPCClient) ListAgents(ctx context.Context, req *pb.ListAgentsReque
 func (m *MockGRPCClient) Close() error { return nil }
 
 func (m *MockGRPCClient) StartContinuous(ctx context.Context, req *pb.StartContinuousRequest) (*pb.StartContinuousResponse, error) {
+	if m.StartContinuousFunc != nil {
+		return m.StartContinuousFunc(ctx, req)
+	}
 	return &pb.StartContinuousResponse{Code: 0, Message: "ok", TaskId: "mock-continuous-tid"}, nil
 }
 
 func (m *MockGRPCClient) StopContinuous(ctx context.Context, req *pb.StopContinuousRequest) (*pb.StopContinuousResponse, error) {
+	if m.StopContinuousFunc != nil {
+		return m.StopContinuousFunc(ctx, req)
+	}
 	return &pb.StopContinuousResponse{Code: 0, Message: "ok"}, nil
 }
 

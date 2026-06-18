@@ -101,8 +101,8 @@ export const getCosFiles = (tid: string) => typedGet<CosFile[]>('/cosfiles', { t
 // Continuous Profiling
 export const createContinuousTask = (data: CreateContinuousParams) =>
   typedPost<{ tid: string }>('/tasks/continuous', data);
-export const getContinuousWindows = (tid: string) =>
-  typedGet<ContinuousWindow[]>(`/tasks/${tid}/windows`);
+export const getContinuousWindows = (tid: string, params?: { from?: string; to?: string }) =>
+  typedGet<ContinuousWindow[]>(`/tasks/${tid}/windows`, params as Record<string, any>);
 export const stopContinuousTask = (tid: string) =>
   typedPost<unknown>(`/tasks/${tid}/stop`);
 
