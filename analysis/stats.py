@@ -5,6 +5,7 @@
 参考 ferric 项目的统计框架。
 """
 from collections import defaultdict
+from typing import List, Optional
 
 
 def compute_flame_stats(stacks: dict[str, int], topn: list[dict],
@@ -24,8 +25,10 @@ def compute_flame_stats(stacks: dict[str, int], topn: list[dict],
     if total_samples == 0 or not topn:
         return _empty_stats()
 
+    self_counts = _compute_self_counts(stacks)
+
     # 1. 集中度指标
-    concentration = _compute_concentration(topn, total_samples)
+    concentration = _compute_concentration(topn, total_samples, self_counts)
 
     # 2. 性能分层
     tiers = _compute_performance_tiers(topn, total_samples)
@@ -48,7 +51,8 @@ def compute_flame_stats(stacks: dict[str, int], topn: list[dict],
     }
 
 
-def _compute_concentration(topn: list[dict], total_samples: int) -> dict:
+def _compute_concentration(topn: list[dict], total_samples: int,
+                           self_counts: Optional[List[int]] = None) -> dict:
     """计算 CPU 集中度指标"""
     def pct(func):
         return func["self"] / total_samples * 100 if total_samples > 0 else 0
@@ -57,9 +61,11 @@ def _compute_concentration(topn: list[dict], total_samples: int) -> dict:
     top_3 = sum(pct(f) for f in topn[:3])
     top_5 = sum(pct(f) for f in topn[:5])
 
-    # Gini 系数：衡量 CPU 分布的不均匀程度
+    # Gini 系数：衡量 CPU 分布的不均匀程度。优先使用全量 self 分布，
+    # 避免只基于 TopN 时把长尾函数截掉导致集中度偏高。
     # 0 = 完全均匀，1 = 完全集中在一个函数
-    gini = _gini_coefficient([f["self"] for f in topn])
+    gini_values = self_counts if self_counts is not None else [f["self"] for f in topn]
+    gini = _gini_coefficient(gini_values)
 
     return {
         "top_1_pct": round(top_1, 2),
@@ -67,6 +73,15 @@ def _compute_concentration(topn: list[dict], total_samples: int) -> dict:
         "top_5_pct": round(top_5, 2),
         "gini_coefficient": round(gini, 3),
     }
+
+
+def _compute_self_counts(stacks: dict[str, int]) -> list[int]:
+    self_count = defaultdict(int)
+    for stack_str, count in stacks.items():
+        frames = stack_str.split(";")
+        if frames:
+            self_count[frames[-1]] += count
+    return list(self_count.values())
 
 
 def _gini_coefficient(values: list[int]) -> float:

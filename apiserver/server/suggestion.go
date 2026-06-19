@@ -1,10 +1,12 @@
 package server
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 
 	"mini-drop/apiserver/model"
 )
@@ -53,14 +55,24 @@ func (s *APIServer) CreateSuggestion(c *gin.Context) {
 		return
 	}
 
-	suggestion := &model.AnalysisSuggestion{
-		TID:          tid,
-		Func:         req.Func,
-		Suggestion:   req.Suggestion,
-		AISuggestion: req.AISuggestion,
-		Status:       AnalysisStatusSuccess,
+	var suggestion model.AnalysisSuggestion
+	err := s.Db.Where("tid = ? AND func = ?", tid, req.Func).First(&suggestion).Error
+	if err == nil {
+		suggestion.Suggestion = req.Suggestion
+		suggestion.AISuggestion = req.AISuggestion
+		suggestion.Status = AnalysisStatusSuccess
+		err = s.Db.Save(&suggestion).Error
+	} else if errors.Is(err, gorm.ErrRecordNotFound) {
+		suggestion = model.AnalysisSuggestion{
+			TID:          tid,
+			Func:         req.Func,
+			Suggestion:   req.Suggestion,
+			AISuggestion: req.AISuggestion,
+			Status:       AnalysisStatusSuccess,
+		}
+		err = s.Db.Create(&suggestion).Error
 	}
-	if err := s.Db.Create(suggestion).Error; err != nil {
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    CodeInternal,
 			"message": err.Error(),
@@ -70,7 +82,7 @@ func (s *APIServer) CreateSuggestion(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"code": CodeSuccess,
-		"data": suggestion,
+		"data": &suggestion,
 	})
 }
 

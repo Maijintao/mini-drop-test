@@ -551,20 +551,29 @@ export default function TaskResult() {
                 },
                 {
                   key: 'suggestions',
-                  label: '优化建议',
+                  label: '归因分析',
                   children: (
                     suggestions.length === 0 ? (
                       <div style={{ padding: 60, textAlign: 'center' }}>
                         <div style={{ fontSize: 15, color: 'rgba(255,255,255,0.35)' }}>这里空空如也</div>
-                        <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.2)', marginTop: 6 }}>暂无优化建议</div>
+                        <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.2)', marginTop: 6 }}>暂无归因分析</div>
                       </div>
                     ) : (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                         {suggestions.map((item) => (
                           <Card key={item.id || item.func} size="small" style={{ background: 'rgba(255,255,255,0.02)', border: '0.5px solid rgba(255,255,255,0.085)', borderLeft: '3px solid rgba(96,165,250,0.65)' }}>
-                            <Text strong style={{ fontSize: 15, color: 'rgba(255,255,255,0.85)', display: 'block', marginBottom: 6 }}>{item.func || '建议'}</Text>
-                            <Text style={{ fontSize: 13, color: 'rgba(255,255,255,0.5)', lineHeight: 1.7 }}>{item.suggestion || item.ai_suggestion || '-'}</Text>
-                            {item.ai_suggestion && <Text style={{ marginTop: 8, fontSize: 13, color: 'rgba(255,255,255,0.5)', lineHeight: 1.7, display: 'block' }}>{item.ai_suggestion}</Text>}
+                            <Text strong style={{ fontSize: 15, color: 'rgba(255,255,255,0.85)', display: 'block', marginBottom: 6 }}>{item.func || '归因项'}</Text>
+                            {item.suggestion && (
+                              <Text style={{ fontSize: 13, color: 'rgba(255,255,255,0.5)', lineHeight: 1.7, display: 'block' }}>
+                                <Text style={{ color: 'rgba(255,255,255,0.68)' }}>规则依据：</Text>{item.suggestion}
+                              </Text>
+                            )}
+                            {item.ai_suggestion && (
+                              <Text style={{ marginTop: item.suggestion ? 8 : 0, whiteSpace: 'pre-wrap', fontSize: 13, color: 'rgba(255,255,255,0.55)', lineHeight: 1.7, display: 'block' }}>
+                                <Text style={{ color: 'rgba(255,255,255,0.68)' }}>归因报告：</Text>{item.ai_suggestion}
+                              </Text>
+                            )}
+                            {!item.suggestion && !item.ai_suggestion && <Text style={{ fontSize: 13, color: 'rgba(255,255,255,0.5)', lineHeight: 1.7 }}>-</Text>}
                           </Card>
                         ))}
                       </div>

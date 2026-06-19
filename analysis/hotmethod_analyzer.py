@@ -220,10 +220,12 @@ def main():
         # 7. 按 task_type 分发到具体 analyzer
         if task_type == 0:
             result = run_cpu_flamegraph(raw_path, work_dir, tid,
-                                        pre_collapsed_path if has_collapsed else None)
+                                        pre_collapsed_path if has_collapsed else None,
+                                        api=api)
         elif task_type == 1:
             result = run_cpu_flamegraph(raw_path, work_dir, tid,
-                                        pre_collapsed_path if has_collapsed else None)
+                                        pre_collapsed_path if has_collapsed else None,
+                                        api=api)
         elif task_type == 12:
             if raw_path is None:
                 error_exit("no hprof/perf data found for Java task", ERR_NOT_FOUND, api=api, tid=tid)
@@ -394,7 +396,8 @@ def _truncate_collapsed(collapsed_path: str):
 
 
 def run_cpu_flamegraph(perf_data_path: str, work_dir: str, tid: str,
-                       pre_collapsed_path: str = None) -> dict:
+                       pre_collapsed_path: str = None,
+                       api: APIServerClient = None) -> dict:
     """
     CPU 火焰图完整流水线:
     perf.data → perf script → stackcollapse → flamegraph.svg
@@ -488,6 +491,13 @@ def run_cpu_flamegraph(perf_data_path: str, work_dir: str, tid: str,
                     f.write(report)
                 products[report_path] = "attribution_report.md"
                 log.info("attribution_report -> %s", report_path)
+                if api:
+                    api.create_suggestion(
+                        tid=tid,
+                        func="整体归因报告",
+                        suggestion="基于 TopN、集中度、热路径和规则建议生成的 LLM 归因报告。",
+                        ai_suggestion=report,
+                    )
         except Exception as e:
             log.warning("attribution report failed (non-fatal): %s", e)
 
