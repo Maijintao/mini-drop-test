@@ -21,6 +21,7 @@ int AsyncProfiler::Record(int pid, int duration_sec, int freq,
   std::vector<std::string> args = {
     PROFILER_PATH,
     "-d", std::to_string(duration_sec),
+    "-o", "collapsed",
     "-f", output_path,
     "-e", "cpu",
     "-i", std::to_string(1000000 / freq) + "us",  // 转换为微秒
@@ -28,7 +29,7 @@ int AsyncProfiler::Record(int pid, int duration_sec, int freq,
   };
 
   LOG_INFO("Executing: " + std::string(PROFILER_PATH) + " -d " + std::to_string(duration_sec) +
-           " -f " + output_path + " -e cpu -i " + std::to_string(1000000 / freq) + "us" +
+           " -o collapsed -f " + output_path + " -e cpu -i " + std::to_string(1000000 / freq) + "us" +
            " " + std::to_string(pid));
 
   // 转换为 char* 数组

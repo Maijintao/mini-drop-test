@@ -206,7 +206,7 @@ export const taskTypeMap: Record<number, string> = {
   0: 'CPU Profiling',
   1: 'Java Profiling',
   2: 'Continuous Profiling',
-  4: 'MemCheck',
+  4: 'Python Memray',
   5: 'Resource Analysis',
   6: 'Biosnoop (eBPF)',
   7: 'BW Sync',

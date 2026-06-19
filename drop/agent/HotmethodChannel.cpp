@@ -213,13 +213,17 @@ void HotmethodChannel::WorkerLoop() {
       std::string upload_path = output_path;
       std::string upload_ext = ext;
       if (profiler) {
-        std::string result_path = "/tmp/result_" + task.task_id() + ext;
+        std::string result_ext = ext;
+        if (task.profiler_type() == PROFILER_PERF) {
+          result_ext = ".txt";  // perf script 文本，analyzer 按 perf script 处理
+        } else if (task.profiler_type() == PROFILER_MEMRAY) {
+          result_ext = ".html";  // memray flamegraph 产出 HTML
+        }
+        std::string result_path = "/tmp/result_" + task.task_id() + result_ext;
         int post_ret = profiler->collect_result(output_path, result_path);
         if (post_ret == 0) {
           upload_path = result_path;
-          if (task.profiler_type() == PROFILER_PERF) {
-            upload_ext = ".txt";  // perf script 文本，analyzer 按预折叠/脚本文本处理
-          }
+          upload_ext = result_ext;
           LOG_INFO("Task " + task.task_id() + " post-processed: " + result_path);
         }
       }

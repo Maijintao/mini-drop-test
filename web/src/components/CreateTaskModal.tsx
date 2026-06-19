@@ -226,7 +226,8 @@ export default function CreateTaskModal({
 	                      type === 1 ? 1 :
 	                        (type === 6 ? 3 :
 	                          (type === 10 || type === 11 ? 2 :
-	                            (type === 12 ? 5 : 0)));
+	                            (type === 4 ? 4 :
+	                              (type === 12 ? 5 : 0))));
 	                    onChange({
 	                      type,
 	                      profiler_type: profilerType,
@@ -243,7 +244,7 @@ export default function CreateTaskModal({
 	                  <option value={6} style={{ background: '#151515' }}>eBPF / bpftrace</option>
 	                  <option value={10} style={{ background: '#151515' }}>pprof CPU</option>
 	                  <option value={11} style={{ background: '#151515' }}>pprof Heap</option>
-	                  <option value={4} style={{ background: '#151515' }}>MemCheck</option>
+	                  <option value={4} style={{ background: '#151515' }}>Python / memray</option>
 	                  <option value={12} style={{ background: '#151515' }}>Java Heap</option>
 	                </select>
               </Field>

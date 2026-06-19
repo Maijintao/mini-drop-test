@@ -14,7 +14,7 @@ namespace drop {
 int BpftraceProfiler::Record(int pid, int duration_sec, int freq,
                               const std::string& output_path) {
   // 根据 event_ 选择探针类型：
-  //   "sched" / "schedule" → 调度延迟探针
+  //   "sched" / "schedule" → 调度延迟探针（输出 biosnoop 兼容 CSV）
   //   其他（默认）         → IO 延迟探针
   std::string script;
   if (event_ == "sched" || event_ == "schedule") {
@@ -164,7 +164,7 @@ END
 
 std::string BpftraceProfiler::GenerateSchedProbeScript(int pid, int duration) {
   // bpftrace 脚本：追踪调度延迟（从 wakeup 到被调度上 CPU 的等待时间）
-  // N16: 用 curtask->tgid 替代 args->next_pid，正确匹配多线程进程的所有线程
+  // 输出与 biotrace.py 兼容的 CSV：TIME,COMM,PID,DISK,T,BYTES,LAT(ns)。
   return R"(
 tracepoint:sched:sched_wakeup
 /args->pid == )" + std::to_string(pid) + R"( /
@@ -173,15 +173,26 @@ tracepoint:sched:sched_wakeup
 }
 
 tracepoint:sched:sched_switch
-/curtask->tgid == )" + std::to_string(pid) + R"( && @start[args->next_pid]/
+/args->next_pid == )" + std::to_string(pid) + R"( && @start[args->next_pid]/
 {
-  @usecs = hist((nsecs - @start[args->next_pid]) / 1000);
+  $lat_ns = nsecs - @start[args->next_pid];
+  printf("%lld,%s,%d,sched,W,0,%lld\n",
+    nsecs,
+    args->next_comm,
+    args->next_pid,
+    $lat_ns
+  );
   delete(@start[args->next_pid]);
 }
 
 interval:s:)" + std::to_string(duration) + R"(
 {
   exit();
+}
+
+END
+{
+  clear(@start);
 }
 )";
 }

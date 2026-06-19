@@ -9,16 +9,16 @@ const resultChecks = [
   'getFlameData',
   'getCosFiles',
   'triggerAnalysis',
-  'flamegraph.svg',
   '文件下载',
   '火焰图',
-  'iframe',
+  'collapsed.txt',
+  'COS 返回的 SVG 会触发下载',
   'top.json',
   'pprof_cpu.json',
   'pprof_heap.json',
   'pprof 分析',
   'CPU Top Functions',
-  'Heap Allocators',
+  'Heap Top Functions',
 ];
 
 for (const needle of resultChecks) {

@@ -171,11 +171,11 @@ export default function TaskResult() {
         }
       }
 
-      // 加载 eBPF 分析数据（biosnoop_stats.json 等）
+      // 加载 eBPF biosnoop 分析数据；resource_stats.json 属于资源统计，避免混入 eBPF 页。
       const allFiles = files;
       const eBpfFile = allFiles.find(f => {
         const name = basename(f.key || f.name || '').toLowerCase();
-        return name === 'biosnoop_stats.json' || name === 'resource_stats.json';
+        return name === 'biosnoop_stats.json';
       });
       if (eBpfFile?.url) {
         setEBpfLoading(true);
@@ -701,13 +701,13 @@ export default function TaskResult() {
                                 <Statistic title="最大 Flat Space" value={formatBytes(pprofHeapRows[0]?.flat_space || 0)} />
                               </Col>
                             </Row>
-                            <Typography.Text strong style={{ display: 'block', marginBottom: 12 }}>Heap Allocators</Typography.Text>
+                            <Typography.Text strong style={{ display: 'block', marginBottom: 12 }}>Heap Top Functions</Typography.Text>
                             <Table
                               dataSource={pprofHeapRows}
                               columns={[
                                 { title: '函数', dataIndex: 'func', key: 'func', render: (text: string) => <Text code style={{ color: 'rgba(255,255,255,0.85)' }}>{text}</Text> },
-                                { title: 'Flat Space', dataIndex: 'flat_space', key: 'flat_space', width: 130, render: (value: number) => <Text style={{ color: '#f87171', fontWeight: 600 }}>{formatBytes(value)}</Text> },
-                                { title: 'Cum Space', dataIndex: 'cum_space', key: 'cum_space', width: 130, render: (value: number) => <Text>{formatBytes(value)}</Text> },
+                                { title: 'Flat', dataIndex: 'flat_space', key: 'flat_space', width: 130, render: (value: number) => <Text style={{ color: '#f87171', fontWeight: 600 }}>{formatBytes(value)}</Text> },
+                                { title: 'Cum', dataIndex: 'cum_space', key: 'cum_space', width: 130, render: (value: number) => <Text>{formatBytes(value)}</Text> },
                                 { title: 'Flat Objects', dataIndex: 'flat_objects', key: 'flat_objects', width: 120 },
                                 { title: 'Cum Objects', dataIndex: 'cum_objects', key: 'cum_objects', width: 120 },
                               ]}
@@ -730,17 +730,24 @@ export default function TaskResult() {
                   key: 'memory',
                   label: '内存/资源',
                   children: (
-                    memoryLeakRows.length > 0 || heapRows.length > 0 || resourceSummary ? (
+                    memoryData || heapRows.length > 0 || resourceSummary ? (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
                         {memoryData && (
-                          <Row gutter={[16, 16]}>
-                            <Col span={6}>
-                              <Statistic title="泄漏字节" value={formatBytes(Number(memoryData.total_leaked_bytes) || 0)} />
-                            </Col>
-                            <Col span={6}>
-                              <Statistic title="泄漏块数" value={Number(memoryData.total_leaked_blocks) || 0} />
-                            </Col>
-                          </Row>
+                          <>
+                            <Row gutter={[16, 16]}>
+                              <Col span={6}>
+                                <Statistic title="泄漏字节" value={formatBytes(Number(memoryData.total_leaked_bytes) || 0)} />
+                              </Col>
+                              <Col span={6}>
+                                <Statistic title="泄漏块数" value={Number(memoryData.total_leaked_blocks) || 0} />
+                              </Col>
+                            </Row>
+                            {memoryData.summary && (
+                              <Card size="small" style={{ background: 'rgba(255,255,255,0.02)', border: '0.5px solid rgba(255,255,255,0.085)' }}>
+                                <Typography.Text style={{ color: 'rgba(255,255,255,0.65)' }}>{memoryData.summary}</Typography.Text>
+                              </Card>
+                            )}
+                          </>
                         )}
                         {memoryLeakRows.length > 0 && (
                           <div>

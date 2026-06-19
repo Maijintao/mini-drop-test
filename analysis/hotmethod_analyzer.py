@@ -163,9 +163,9 @@ def main():
         # NOTE: agent 上传路径为 profiler/{tid}/{tid}.ext，需兼容两种命名
         FILE_MAP = {
             0:  ["collapsed.txt", f"{tid}.collapsed", "perf.script.txt", f"{tid}.txt", "perf.data", f"{tid}.data"],  # CPU 火焰图
-            1:  ["heap.hprof", "perf.data", f"{tid}.hprof", f"{tid}.data"],   # Java Heap / Profiling
+            1:  ["collapsed.txt", f"{tid}.collapsed", f"{tid}.txt"],          # Java async-profiler collapsed stacks
             2:  ["tracing.json", "tracing.csv", f"{tid}.json", f"{tid}.csv"], # Tracing
-            4:  ["memleak.xml", "memleak.txt", "memleak.json"],              # MemCheck
+            4:  ["memleak.xml", "memleak.txt", "memleak.json", "memray.json", "memray.html", f"{tid}.json", f"{tid}.html", f"{tid}.bin"],  # MemCheck / memray
             5:  ["pidstat.csv", "pidstat.json"],                             # Resource Analysis
             6:  ["biosnoop.csv", "biosnoop.json"],                           # eBPF Biosnoop
             7:  ["bw_sync.json", "bw_sync.csv"],                             # BW Sync
@@ -221,7 +221,10 @@ def main():
         if task_type == 0:
             result = run_cpu_flamegraph(raw_path, work_dir, tid,
                                         pre_collapsed_path if has_collapsed else None)
-        elif task_type in (1, 12):
+        elif task_type == 1:
+            result = run_cpu_flamegraph(raw_path, work_dir, tid,
+                                        pre_collapsed_path if has_collapsed else None)
+        elif task_type == 12:
             if raw_path is None:
                 error_exit("no hprof/perf data found for Java task", ERR_NOT_FOUND, api=api, tid=tid)
             result = run_java_heap(raw_path, work_dir, tid)
@@ -756,6 +759,24 @@ def run_pprof_heap(data_path: str, work_dir: str, tid: str) -> dict:
 def run_memleak(data_path: str, work_dir: str, tid: str, api=None) -> dict:
     """内存泄漏分析"""
     result_path = os.path.join(work_dir, "memleak.json")
+    name = os.path.basename(data_path).lower()
+    if name.endswith(".html") or name.endswith(".bin"):
+        output = {
+            "total_leaked_bytes": 0,
+            "total_leaked_blocks": 0,
+            "summary": (
+                "Memray 采集产物已生成；当前离线分析器仅解析 Valgrind/ASan/memray JSON，"
+                "请在文件下载中查看 memray flamegraph HTML。"
+            ),
+            "leaks": [],
+            "suggestions": [],
+            "artifact": name,
+        }
+        with open(result_path, "w") as f:
+            json.dump(output, f, indent=2, ensure_ascii=False)
+        log.info("memray artifact summary -> %s", result_path)
+        return {result_path: "memleak.json"}
+
     result = analyze_memleak(data_path)
 
     if not result.success:
