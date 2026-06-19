@@ -97,11 +97,11 @@ while true; do
   sleep 3
 done
 
-echo "[demo] waiting for analysis and flamegraph"
+echo "[demo] waiting for analysis and renderable flamegraph data"
 deadline=$((SECONDS + 180))
 while true; do
   curl -fsS "${AUTH_HEADERS[@]}" "$API/cosfiles?tid=$TID" >/tmp/mini_drop_files.json
-  if python3 -c 'import json,sys; files=json.load(open("/tmp/mini_drop_files.json")).get("data", []); sys.exit(0 if any("flamegraph.svg" in f.get("key","") for f in files) else 1)'; then
+  if python3 -c 'import json,sys; files=json.load(open("/tmp/mini_drop_files.json")).get("data", []); names=[f.get("key","").split("/")[-1] for f in files]; sys.exit(0 if ("collapsed.txt" in names or "top.json" in names) else 1)'; then
     break
   fi
   curl -fsS "${AUTH_HEADERS[@]}" "$API/tasks/$TID" >/tmp/mini_drop_task_detail.json
@@ -112,7 +112,7 @@ while true; do
     exit 1
   fi
   if (( SECONDS > deadline )); then
-    echo "[demo] timeout waiting for flamegraph.svg" >&2
+    echo "[demo] timeout waiting for collapsed.txt/top.json" >&2
     cat /tmp/mini_drop_files.json >&2
     exit 1
   fi

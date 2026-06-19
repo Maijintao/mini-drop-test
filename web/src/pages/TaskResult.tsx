@@ -27,6 +27,25 @@ const glassCard: React.CSSProperties = {
   borderRadius: 16,
 };
 
+function shouldPollTask(task: HotmethodTask | null) {
+  if (!task) return false;
+  if (task.status < 4) return true;
+  if (task.status === 4 && task.analysis_status === 1) return true;
+  return false;
+}
+
+function stateHistoryLabel(item: TaskStateHistory, field: 'from_state' | 'to_state') {
+  const value = item[field];
+  if (value < 0) return '创建';
+  const mapping = item.change_type === 1 ? analysisMap : statusMap;
+  return mapping[value]?.label || String(value);
+}
+
+function stateHistoryColor(item: TaskStateHistory) {
+  const mapping = item.change_type === 1 ? analysisMap : statusMap;
+  return mapping[item.to_state]?.color || 'gray';
+}
+
 export default function TaskResult() {
   const [searchParams] = useSearchParams();
   const tid = searchParams.get('tid') || '';
@@ -248,7 +267,7 @@ export default function TaskResult() {
     if (!loadTask) return;
     const id = window.setInterval(() => {
       const t = taskRef.current;
-      if (!t || t.status >= 4) {
+      if (!shouldPollTask(t)) {
         window.clearInterval(id);
         return;
       }
@@ -512,13 +531,16 @@ export default function TaskResult() {
                     ) : (
                       <Timeline
                         items={stateHistory.map((item) => ({
-                          color: statusMap[item.to_state]?.color || 'gray',
+                          color: stateHistoryColor(item),
                           children: (
                             <div>
+                              <Text style={{ color: item.change_type === 1 ? '#93c5fd' : '#fbbf24', fontSize: 12, display: 'block', marginBottom: 2 }}>
+                                {item.change_type === 1 ? '分析状态' : '任务状态'}
+                              </Text>
                               <Text strong style={{ color: 'rgba(255,255,255,0.85)' }}>
-                                {statusMap[item.from_state]?.label || (item.from_state < 0 ? '创建' : String(item.from_state))}
+                                {stateHistoryLabel(item, 'from_state')}
                                 {' -> '}
-                                {statusMap[item.to_state]?.label || String(item.to_state)}
+                                {stateHistoryLabel(item, 'to_state')}
                               </Text>
                               <div style={{ marginTop: 4, color: 'rgba(255,255,255,0.55)', fontSize: 13 }}>{item.reason || '-'}</div>
                               <div style={{ marginTop: 4, color: 'rgba(255,255,255,0.32)', fontSize: 12 }}>{formatDate(item.created_at)}</div>

@@ -112,38 +112,9 @@ func (s *APIServer) GetFlameData(c *gin.Context) {
 		}
 	}
 
-	// 尝试获取 SVG
-	svgKey := tid + "/flamegraph.svg"
-	exists, err := s.Storage.IsExist(c, svgKey)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    CodeInternal,
-			"message": "storage error: " + err.Error(),
-		})
-		return
-	}
-	if exists {
-		url, err := s.Storage.PreSign(c, svgKey, 1*time.Hour)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"code":    CodeInternal,
-				"message": "presign error: " + err.Error(),
-			})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{
-			"code": CodeSuccess,
-			"data": gin.H{
-				"type": "svg",
-				"url":  url,
-			},
-		})
-		return
-	}
-
 	// 尝试获取折叠栈文本，前端可直接渲染层次火焰图
 	collapsedKey := tid + "/collapsed.txt"
-	exists, err = s.Storage.IsExist(c, collapsedKey)
+	exists, err := s.Storage.IsExist(c, collapsedKey)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    CodeInternal,
@@ -199,6 +170,35 @@ func (s *APIServer) GetFlameData(c *gin.Context) {
 		return
 	}
 
+	// SVG 作为下载产物保留；只有缺少 collapsed/top 时才兜底返回。
+	svgKey := tid + "/flamegraph.svg"
+	exists, err = s.Storage.IsExist(c, svgKey)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    CodeInternal,
+			"message": "storage error: " + err.Error(),
+		})
+		return
+	}
+	if exists {
+		url, err := s.Storage.PreSign(c, svgKey, 1*time.Hour)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"code":    CodeInternal,
+				"message": "presign error: " + err.Error(),
+			})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"code": CodeSuccess,
+			"data": gin.H{
+				"type": "svg",
+				"url":  url,
+			},
+		})
+		return
+	}
+
 	c.JSON(http.StatusNotFound, gin.H{
 		"code":    CodeNotFound,
 		"message": "no flame data found for this task",
@@ -208,9 +208,9 @@ func (s *APIServer) GetFlameData(c *gin.Context) {
 // ---------- 内部工具 ----------
 
 type FuncSample struct {
-	Func   string `json:"func"`
-	Self   int64  `json:"self"`
-	Total  int64  `json:"total"`
+	Func  string `json:"func"`
+	Self  int64  `json:"self"`
+	Total int64  `json:"total"`
 }
 
 // loadTopN 从存储加载 top.json
@@ -312,9 +312,9 @@ func normalizeFunc(name string) string {
 // DiffTreeNode 差异火焰图节点
 type DiffTreeNode struct {
 	Name       string          `json:"name"`
-	SelfDelta  int64           `json:"selfDelta"`   // 自身delta（叶子=stack delta，非叶子=0）
-	TotalDelta int64           `json:"totalDelta"`  // 子树delta总和（用于宽度计算）
-	SelfValue  int64           `json:"selfValue"`   // 自身采样数（基准）
+	SelfDelta  int64           `json:"selfDelta"`  // 自身delta（叶子=stack delta，非叶子=0）
+	TotalDelta int64           `json:"totalDelta"` // 子树delta总和（用于宽度计算）
+	SelfValue  int64           `json:"selfValue"`  // 自身采样数（基准）
 	Children   []*DiffTreeNode `json:"children,omitempty"`
 }
 

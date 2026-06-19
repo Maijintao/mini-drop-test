@@ -37,10 +37,16 @@ func (s *APIServer) TriggerAnalysis(c *gin.Context) {
 		c.JSON(http.StatusConflict, gin.H{"code": CodeInternal, "message": "analysis already running"})
 		return
 	}
+	if task.AnalysisStatus == AnalysisStatusSuccess {
+		c.JSON(http.StatusConflict, gin.H{"code": CodeInternal, "message": "analysis already completed"})
+		return
+	}
 	if s.AnalysisCmd.Command == "" || s.AnalysisCmd.ScriptPath == "" {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": CodeInternal, "message": "analysis command not configured"})
 		return
 	}
+
+	s.transitionAnalysisStatus(tid, AnalysisStatusRunning, "analysis queued")
 
 	// 异步触发，不阻塞请求
 	s.WG.Add(1)
@@ -115,6 +121,7 @@ func (s *APIServer) analysisProcessEnv(tid string) []string {
 	env = append(env,
 		"DROP_USER_UID="+task.UID,
 		"DROP_USER_NAME="+task.UserName,
+		"DROP_ANALYSIS_TRIGGERED_BY_APISERVER=1",
 	)
 	if s.AuthSecret != "" {
 		env = append(env, "DROP_USER_TOKEN="+middleware.ComputeHMAC(task.UID, s.AuthSecret))

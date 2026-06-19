@@ -3,7 +3,6 @@ package server
 import (
 	"errors"
 	"net/http"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -106,47 +105,16 @@ func (s *APIServer) UpdateAnalysisStatus(c *gin.Context) {
 		return
 	}
 
-	// 查询当前分析状态用于审计
 	var currentTask model.HotmethodTask
-	s.Db.Where("tid = ?", tid).First(&currentTask)
-
-	statusInfo := req.StatusInfo
-	if currentTask.StatusInfo != "" &&
-		strings.Contains(currentTask.StatusInfo, "collector result ready: ") &&
-		!strings.Contains(statusInfo, "collector result ready: ") {
-		if statusInfo == "" {
-			statusInfo = currentTask.StatusInfo
-		} else {
-			statusInfo = currentTask.StatusInfo + "; " + statusInfo
-		}
-	}
-
-	result := s.Db.Model(&model.HotmethodTask{}).
-		Where("tid = ?", tid).
-		Updates(map[string]interface{}{
-			"analysis_status": req.AnalysisStatus,
-			"status_info":     statusInfo,
-		})
-
-	// 记录分析状态变更审计
-	if result.Error == nil && result.RowsAffected > 0 && currentTask.AnalysisStatus != req.AnalysisStatus {
-		s.recordStateChange(tid, currentTask.AnalysisStatus, req.AnalysisStatus, req.StatusInfo, ChangeTypeAnalysis)
-	}
-
-	if result.Error != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    CodeInternal,
-			"message": result.Error.Error(),
-		})
-		return
-	}
-	if result.RowsAffected == 0 {
+	if err := s.Db.Where("tid = ?", tid).First(&currentTask).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"code":    CodeNotFound,
 			"message": "task not found",
 		})
 		return
 	}
+
+	s.transitionAnalysisStatus(tid, req.AnalysisStatus, req.StatusInfo)
 
 	c.JSON(http.StatusOK, gin.H{
 		"code":    CodeSuccess,

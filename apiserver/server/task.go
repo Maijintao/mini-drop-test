@@ -284,7 +284,7 @@ func (s *APIServer) GetTaskDetail(c *gin.Context) {
 	s.Db.Where("tid = ?", tid).Find(&suggestions)
 
 	var stateHistory []model.TaskStateHistory
-	s.Db.Where("tid = ? AND change_type = ?", tid, ChangeTypeTask).
+	s.Db.Where("tid = ?", tid).
 		Order("created_at ASC").
 		Find(&stateHistory)
 
@@ -786,6 +786,62 @@ func (s *APIServer) recordStateChange(tid string, fromState, toState int, reason
 	if err := s.Db.Create(history).Error; err != nil {
 		log.Printf("ERROR: record state change failed tid=%s from=%d to=%d type=%d: %v", tid, fromState, toState, changeType, err)
 	}
+}
+
+func (s *APIServer) transitionAnalysisStatus(tid string, toState int, reason string) {
+	var task model.HotmethodTask
+	if err := s.Db.Where("tid = ?", tid).First(&task).Error; err != nil {
+		return
+	}
+	if task.AnalysisStatus == toState {
+		if reason != "" {
+			s.updateAnalysisStatusInfo(tid, reason)
+		}
+		return
+	}
+
+	statusInfo := mergeStatusInfo(task.StatusInfo, reason)
+	if err := s.Db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&task).Updates(map[string]interface{}{
+			"analysis_status": toState,
+			"status_info":     statusInfo,
+		}).Error; err != nil {
+			return err
+		}
+		return tx.Create(&model.TaskStateHistory{
+			TID:        tid,
+			FromState:  task.AnalysisStatus,
+			ToState:    toState,
+			Reason:     reason,
+			ChangeType: ChangeTypeAnalysis,
+		}).Error
+	}); err != nil {
+		log.Printf("ERROR: transition analysis status failed tid=%s from=%d to=%d: %v", tid, task.AnalysisStatus, toState, err)
+	}
+}
+
+func mergeStatusInfo(current string, reason string) string {
+	if current == "" || !strings.Contains(current, "collector result ready: ") {
+		return reason
+	}
+	if reason == "" {
+		return current
+	}
+	if strings.Contains(reason, "collector result ready: ") {
+		return reason
+	}
+	return current + "; " + reason
+}
+
+func (s *APIServer) updateAnalysisStatusInfo(tid string, reason string) {
+	if reason == "" {
+		return
+	}
+	var task model.HotmethodTask
+	if err := s.Db.Where("tid = ?", tid).First(&task).Error; err != nil {
+		return
+	}
+	s.Db.Model(&model.HotmethodTask{}).Where("tid = ?", tid).Update("status_info", mergeStatusInfo(task.StatusInfo, reason))
 }
 
 func (s *APIServer) updateTaskStatusInfo(tid string, reason string) {

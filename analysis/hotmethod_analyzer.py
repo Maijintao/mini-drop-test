@@ -108,6 +108,15 @@ def _is_stale_running_analysis(task: dict) -> bool:
     return age > RUNNING_STALE_SECONDS
 
 
+def _should_skip_running_analysis(task: dict) -> bool:
+    """返回 True 表示已有非过期分析进程在跑，本次应跳过。"""
+    if task.get("analysis_status") != 1:
+        return False
+    if _is_stale_running_analysis(task):
+        return False
+    return os.environ.get("DROP_ANALYSIS_TRIGGERED_BY_APISERVER") != "1"
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Mini-Drop Analyzer")
     parser.add_argument("--task-id", required=True, help="任务 ID")
@@ -171,11 +180,13 @@ def main():
             log.info("task %s already analyzed, skipping", tid)
             sys.exit(0)
         if task.get("analysis_status") == 1:  # 已在运行
+            if _should_skip_running_analysis(task):
+                log.info("task %s analysis already running, skipping", tid)
+                sys.exit(0)
             if _is_stale_running_analysis(task):
                 log.warning("task %s analysis_status=running is stale, continuing re-analysis", tid)
             else:
-                log.info("task %s analysis already running, skipping", tid)
-                sys.exit(0)
+                log.info("task %s analysis was pre-marked running by apiserver, continuing", tid)
     except Exception as e:
         log.warning("idempotency check failed (will proceed): %s", e)
 

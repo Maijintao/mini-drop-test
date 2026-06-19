@@ -1,0 +1,14 @@
+.git
+.gitignore
+.DS_Store
+
+apiserver
+apiserver_test
+coverage.out
+mini-drop.db
+
+*.cover
+*.test
+*.log
+
+config/apiserver.yaml
