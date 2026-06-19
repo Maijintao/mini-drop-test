@@ -49,6 +49,7 @@ export default function TaskResult() {
   const [memoryData, setMemoryData] = useState<any>(null);
   const [heapData, setHeapData] = useState<any>(null);
   const [resourceData, setResourceData] = useState<any>(null);
+  const [attributionEvidence, setAttributionEvidence] = useState<any>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const taskRef = useRef<HotmethodTask | null>(null);
   const navigate = useNavigate();
@@ -76,6 +77,7 @@ export default function TaskResult() {
     setMemoryData(null);
     setHeapData(null);
     setResourceData(null);
+    setAttributionEvidence(null);
   }, [tid]);
 
   const loadTask = useCallback(async () => {
@@ -93,6 +95,7 @@ export default function TaskResult() {
     setMemoryData(null);
     setHeapData(null);
     setResourceData(null);
+    setAttributionEvidence(null);
 
     try {
       const detailRes = await getTaskDetail(tid);
@@ -216,10 +219,12 @@ export default function TaskResult() {
       const memleakFile = allFiles.find(f => basename(f.key || f.name || '').toLowerCase() === 'memleak.json');
       const heapFile = allFiles.find(f => basename(f.key || f.name || '').toLowerCase() === 'heap_stats.json');
       const resourceFile = allFiles.find(f => basename(f.key || f.name || '').toLowerCase() === 'resource_stats.json');
+      const attributionEvidenceFile = allFiles.find(f => basename(f.key || f.name || '').toLowerCase() === 'attribution_evidence.json');
       try {
         if (memleakFile?.url) setMemoryData(await fetchSignedJson<any>(memleakFile.url));
         if (heapFile?.url) setHeapData(await fetchSignedJson<any>(heapFile.url));
         if (resourceFile?.url) setResourceData(await fetchSignedJson<any>(resourceFile.url));
+        if (attributionEvidenceFile?.url) setAttributionEvidence(await fetchSignedJson<any>(attributionEvidenceFile.url));
       } catch {
         // Optional extended artifacts should not block the main result page.
       }
@@ -321,6 +326,7 @@ export default function TaskResult() {
     })).sort((a: any, b: any) => b.bytes - a.bytes);
   }, [heapData]);
   const resourceSummary = resourceData?.summary || resourceData;
+  const attributionEvidenceRows = useMemo(() => flattenAttributionEvidence(attributionEvidence), [attributionEvidence]);
 
   // TopN 表格列定义
   const topnColumns = [
@@ -564,22 +570,41 @@ export default function TaskResult() {
                       </div>
                     ) : (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                        {suggestions.map((item) => (
-                          <Card key={item.id || item.func} size="small" style={{ background: 'rgba(255,255,255,0.02)', border: '0.5px solid rgba(255,255,255,0.085)', borderLeft: '3px solid rgba(96,165,250,0.65)' }}>
-                            <Text strong style={{ fontSize: 15, color: 'rgba(255,255,255,0.85)', display: 'block', marginBottom: 6 }}>{item.func || '归因项'}</Text>
-                            {item.suggestion && (
-                              <Text style={{ fontSize: 13, color: 'rgba(255,255,255,0.5)', lineHeight: 1.7, display: 'block' }}>
-                                <Text style={{ color: 'rgba(255,255,255,0.68)' }}>规则依据：</Text>{item.suggestion}
-                              </Text>
-                            )}
-                            {item.ai_suggestion && (
-                              <Text style={{ marginTop: item.suggestion ? 8 : 0, whiteSpace: 'pre-wrap', fontSize: 13, color: 'rgba(255,255,255,0.55)', lineHeight: 1.7, display: 'block' }}>
-                                <Text style={{ color: 'rgba(255,255,255,0.68)' }}>归因报告：</Text>{item.ai_suggestion}
-                              </Text>
-                            )}
-                            {!item.suggestion && !item.ai_suggestion && <Text style={{ fontSize: 13, color: 'rgba(255,255,255,0.5)', lineHeight: 1.7 }}>-</Text>}
-                          </Card>
-                        ))}
+                        {suggestions.map((item) => {
+                          const sections = parseAttributionReport(item.ai_suggestion || '');
+                          const isOverall = item.func === '整体归因报告' || Boolean(item.ai_suggestion?.includes('## 证据'));
+                          return (
+                            <Card key={item.id || item.func} size="small" style={{ background: 'rgba(255,255,255,0.02)', border: '0.5px solid rgba(255,255,255,0.085)', borderLeft: '3px solid rgba(96,165,250,0.65)' }}>
+                              <Text strong style={{ fontSize: 15, color: 'rgba(255,255,255,0.85)', display: 'block', marginBottom: 10 }}>{item.func || '归因项'}</Text>
+                              {isOverall ? (
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
+                                  <AttributionSection
+                                    title="证据"
+                                    content={sections.evidence || item.suggestion}
+                                    extra={attributionEvidenceRows.length > 0 ? attributionEvidenceRows.slice(0, 8).map(row => `${row.id} ${row.text}`).join('\n') : ''}
+                                  />
+                                  <AttributionSection title="结论" content={sections.conclusion || item.suggestion} />
+                                  <AttributionSection title="可验证假设" content={sections.hypothesis} />
+                                  <AttributionSection title="追加采集" content={sections.collection || sections.repair} />
+                                </div>
+                              ) : (
+                                <>
+                                  {item.suggestion && (
+                                    <Text style={{ fontSize: 13, color: 'rgba(255,255,255,0.55)', lineHeight: 1.7, display: 'block' }}>
+                                      <Text style={{ color: 'rgba(255,255,255,0.7)' }}>规则命中：</Text>{item.suggestion}
+                                    </Text>
+                                  )}
+                                  {item.ai_suggestion && (
+                                    <Text style={{ marginTop: item.suggestion ? 8 : 0, whiteSpace: 'pre-wrap', fontSize: 13, color: 'rgba(255,255,255,0.55)', lineHeight: 1.7, display: 'block' }}>
+                                      <Text style={{ color: 'rgba(255,255,255,0.7)' }}>归因说明：</Text>{item.ai_suggestion}
+                                    </Text>
+                                  )}
+                                  {!item.suggestion && !item.ai_suggestion && <Text style={{ fontSize: 13, color: 'rgba(255,255,255,0.5)', lineHeight: 1.7 }}>-</Text>}
+                                </>
+                              )}
+                            </Card>
+                          );
+                        })}
                       </div>
                     )
                   ),
@@ -846,4 +871,81 @@ function formatBytes(value: number): string {
     unitIndex += 1;
   }
   return `${size.toFixed(unitIndex === 0 ? 0 : 2)} ${units[unitIndex]}`;
+}
+
+function AttributionSection({ title, content, extra }: { title: string; content?: string; extra?: string }) {
+  const text = [extra, content].filter(Boolean).join('\n');
+  return (
+    <div style={{ background: 'rgba(255,255,255,0.025)', border: '0.5px solid rgba(255,255,255,0.07)', borderRadius: 8, padding: 12, minHeight: 120 }}>
+      <Text strong style={{ display: 'block', marginBottom: 8, color: 'rgba(255,255,255,0.78)' }}>{title}</Text>
+      <Text style={{ whiteSpace: 'pre-wrap', fontSize: 13, lineHeight: 1.65, color: text ? 'rgba(255,255,255,0.58)' : 'rgba(255,255,255,0.28)' }}>
+        {text || '暂无'}
+      </Text>
+    </div>
+  );
+}
+
+function parseAttributionReport(markdown: string): Record<string, string> {
+  const sections: Record<string, string> = {};
+  if (!markdown) return sections;
+
+  const matches = [...markdown.matchAll(/^##\s+(.+?)\s*$/gm)];
+  if (matches.length === 0) {
+    sections.conclusion = markdown.trim();
+    return sections;
+  }
+
+  matches.forEach((match, index) => {
+    const title = match[1].trim();
+    const start = (match.index || 0) + match[0].length;
+    const end = index + 1 < matches.length ? (matches[index + 1].index || markdown.length) : markdown.length;
+    const body = markdown.slice(start, end).trim();
+    const key = normalizeAttributionSectionTitle(title);
+    if (key && body) sections[key] = body;
+  });
+
+  return sections;
+}
+
+function normalizeAttributionSectionTitle(title: string): string {
+  if (title.includes('证据')) return 'evidence';
+  if (title.includes('结论')) return 'conclusion';
+  if (title.includes('假设')) return 'hypothesis';
+  if (title.includes('追加采集') || title.includes('建议追加采集')) return 'collection';
+  if (title.includes('优先修复') || title.includes('修复')) return 'repair';
+  return '';
+}
+
+function flattenAttributionEvidence(data: any): Array<{ id: string; text: string }> {
+  const evidence = data?.evidence;
+  if (!evidence || typeof evidence !== 'object') return [];
+  const rows: Array<{ id: string; text: string }> = [];
+
+  const concentration = evidence.concentration;
+  if (concentration?.evidence_id) {
+    rows.push({
+      id: concentration.evidence_id,
+      text: `总采样 ${concentration.total_samples || 0}，Top1 ${concentration.top_1_pct || 0}%，Top3 ${concentration.top_3_pct || 0}%，Gini ${concentration.gini_coefficient ?? 0}`,
+    });
+  }
+
+  for (const item of evidence.topn_hotspots || []) {
+    rows.push({
+      id: item.evidence_id,
+      text: `Top${item.rank} ${item.func} self=${item.self}，占比 ${item.self_pct}%`,
+    });
+  }
+  for (const item of evidence.hot_paths || []) {
+    rows.push({
+      id: item.evidence_id,
+      text: `热路径占比 ${item.pct}%：${Array.isArray(item.stack_tail) ? item.stack_tail.join(' -> ') : '-'}`,
+    });
+  }
+  for (const item of evidence.rule_hits || []) {
+    rows.push({
+      id: item.evidence_id,
+      text: `规则命中 ${item.func}：${item.advice || '-'}`,
+    });
+  }
+  return rows.filter(row => row.id);
 }

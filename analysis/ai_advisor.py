@@ -2,7 +2,10 @@
 import json
 import logging
 import os
-from datetime import datetime
+import re
+from datetime import datetime, timezone
+from dataclasses import dataclass
+from typing import Any
 
 log = logging.getLogger(__name__)
 
@@ -10,6 +13,10 @@ log = logging.getLogger(__name__)
 LLM_BASE_URL = os.environ.get("LLM_BASE_URL") or os.environ.get("LLM_API_URL", "")
 LLM_TOKEN = os.environ.get("LLM_TOKEN") or os.environ.get("LLM_API_KEY", "")
 LLM_MODEL = os.environ.get("LLM_MODEL", "gpt-4o-mini")
+
+
+def _utc_timestamp() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
 def generate_ai_suggestion(func_name: str, suggestion: str,
@@ -102,7 +109,7 @@ def _format_summary_markdown(content: str, tid: str) -> str:
     content = content.strip()
     header = (
         f"# LLM 归因报告 - {tid}\n\n"
-        f"- 生成时间: {datetime.utcnow().isoformat(timespec='seconds')}Z\n"
+        f"- 生成时间: {_utc_timestamp()}\n"
         f"- 模型: {LLM_MODEL}\n"
         "- 证据边界: 仅基于本次分析产物和规则建议\n\n"
     )
@@ -153,6 +160,36 @@ def _call_llm(prompt: str, max_tokens: int = 512) -> str:
 # 增强归因报告（新增，不影响上面的 generate_ai_summary）
 # ============================================================
 
+@dataclass
+class AttributionArtifacts:
+    report: str
+    evidence: dict
+    tool_calls: dict
+
+
+ATTRIBUTION_TOOL_SCHEMA = [
+    {
+        "name": "read_collection_metadata",
+        "description": "读取本次采集任务的 pid、采样时长、频率、目标机器和类型。",
+    },
+    {
+        "name": "read_topn_hotspots",
+        "description": "读取火焰图 TopN 热点函数及采样占比。",
+    },
+    {
+        "name": "read_hot_paths",
+        "description": "读取采样数最高的完整调用栈热路径。",
+    },
+    {
+        "name": "read_concentration",
+        "description": "读取 Top1/Top3/Top5 占比和 Gini 集中度。",
+    },
+    {
+        "name": "read_rule_hits",
+        "description": "读取规则引擎命中的函数级归因线索。",
+    },
+]
+
 def generate_attribution_report(
     tid: str,
     topn: list[dict],
@@ -176,106 +213,242 @@ def generate_attribution_report(
     Returns:
         markdown 格式的归因报告，未配置 LLM 时返回空字符串
     """
-    if not is_llm_enabled():
-        return ""
+    artifacts = generate_attribution_artifacts(
+        tid, topn, stacks, task_meta, rule_suggestions
+    )
+    return artifacts.report
 
+
+def generate_attribution_artifacts(
+    tid: str,
+    topn: list[dict],
+    stacks: dict[str, int],
+    task_meta: dict,
+    rule_suggestions: list[dict],
+) -> AttributionArtifacts:
+    """
+    生成归因报告和可审计证据产物。
+
+    这里的“工具调用”是确定性的本地工具：LLM 只能看到这些工具输出，
+    证据 JSON 和调用记录也会随分析产物保存，便于演示和复核。
+    """
     from stats import compute_flame_stats
 
     structured_stats = compute_flame_stats(stacks, topn)
-    prompt = _build_attribution_prompt(tid, topn, structured_stats,
-                                       task_meta, rule_suggestions)
+    evidence, tool_calls = build_attribution_evidence(
+        tid, topn, structured_stats, task_meta, rule_suggestions
+    )
+
+    if not is_llm_enabled():
+        return AttributionArtifacts("", evidence, tool_calls)
+
+    prompt = _build_attribution_prompt(tid, evidence, tool_calls)
 
     try:
         content = _call_llm(prompt, max_tokens=1024)
-        return _format_attribution_report(content, tid, structured_stats, task_meta)
+        content = _ensure_evidence_bound_report(content, evidence)
+        report = _format_attribution_report(content, tid, structured_stats, task_meta)
+        return AttributionArtifacts(report, evidence, tool_calls)
     except Exception as e:
         log.warning("attribution report LLM call failed: %s", e)
-        return ""
+        return AttributionArtifacts("", evidence, tool_calls)
 
 
-def _build_attribution_prompt(
+def build_attribution_evidence(
     tid: str,
     topn: list[dict],
     stats: dict,
     task_meta: dict,
     rule_suggestions: list[dict],
-) -> str:
-    """构造结构化归因 prompt（参考 PerfettoKit AIRequest.toPrompt）"""
+) -> tuple[dict, dict]:
+    """运行归因工具，返回证据 JSON 和工具调用记录。"""
+    started_at = _utc_timestamp()
+    calls = []
 
-    # 采集元数据
-    meta_section = (
-        f"- 任务ID: {tid}\n"
-        f"- 目标进程PID: {task_meta.get('pid', 'N/A')}\n"
-        f"- 采集时长: {task_meta.get('duration', 'N/A')}s\n"
-        f"- 采样频率: {task_meta.get('hz', 'N/A')} Hz\n"
-        f"- 目标机器: {task_meta.get('target_ip', 'N/A')}\n"
-        f"- 采集类型: {task_meta.get('type_name', 'CPU')}\n"
-    )
+    def call_tool(name: str, payload: Any) -> Any:
+        calls.append({
+            "tool": name,
+            "called_at": _utc_timestamp(),
+            "result_count": len(payload) if isinstance(payload, list) else 1,
+        })
+        return payload
 
-    # 统计指标
-    conc = stats.get("concentration", {})
-    stats_section = (
-        f"- 总采样数: {stats.get('total_samples', 0)}\n"
-        f"- 函数总数: {stats.get('total_functions', 0)}\n"
-        f"- Top1 CPU 占比: {conc.get('top_1_pct', 0)}%\n"
-        f"- Top3 CPU 占比: {conc.get('top_3_pct', 0)}%\n"
-        f"- Top5 CPU 占比: {conc.get('top_5_pct', 0)}%\n"
-        f"- Gini 系数: {conc.get('gini_coefficient', 0)} (0=均匀, 1=集中)\n"
-    )
+    total_samples = stats.get("total_samples", 0)
+    concentration = stats.get("concentration", {})
 
-    # 性能分层
-    tiers = stats.get("performance_tiers", {})
-    tier_lines = []
-    for level in ("critical", "high", "medium"):
-        for entry in tiers.get(level, [])[:5]:
-            tier_lines.append(f"  [{level}] {entry['func']}: {entry['self_pct']}%")
-    tier_section = "\n".join(tier_lines) if tier_lines else "  (无显著热点)"
+    metadata = call_tool("read_collection_metadata", {
+        "evidence_id": "E1",
+        "tid": tid,
+        "pid": task_meta.get("pid", "N/A"),
+        "duration": task_meta.get("duration", "N/A"),
+        "hz": task_meta.get("hz", "N/A"),
+        "target_ip": task_meta.get("target_ip", "N/A"),
+        "type_name": task_meta.get("type_name", "CPU"),
+        "generated_at": started_at,
+    })
 
-    # TopN 函数（最多15个）
-    topn_lines = []
+    topn_payload = []
     for i, item in enumerate(topn[:15], 1):
-        pct = item["self"] / stats["total_samples"] * 100 if stats["total_samples"] else 0
-        topn_lines.append(f"  {i}. {item['func']} — self={item['self']} ({pct:.1f}%)")
-    topn_section = "\n".join(topn_lines)
+        self_count = item.get("self", 0)
+        pct = self_count / total_samples * 100 if total_samples else 0
+        topn_payload.append({
+            "evidence_id": f"E2.{i}",
+            "rank": i,
+            "func": item.get("func", ""),
+            "self": self_count,
+            "total": item.get("total", 0),
+            "self_pct": round(pct, 2),
+        })
+    topn_payload = call_tool("read_topn_hotspots", topn_payload)
 
-    # 热路径
-    hot_path_lines = []
-    for hp in stats.get("hot_paths", [])[:3]:
-        # 展示最后5帧（最内层调用链）
-        tail = " → ".join(hp["frames"][-5:])
-        hot_path_lines.append(f"  [{hp['pct']:.1f}%] ...{tail}")
-    hot_path_section = "\n".join(hot_path_lines) if hot_path_lines else "  (无)"
+    hot_paths = []
+    for i, hp in enumerate(stats.get("hot_paths", [])[:5], 1):
+        hot_paths.append({
+            "evidence_id": f"E3.{i}",
+            "sample_count": hp.get("sample_count", 0),
+            "pct": hp.get("pct", 0),
+            "depth": hp.get("depth", 0),
+            "frames": hp.get("frames", []),
+            "stack_tail": hp.get("frames", [])[-5:],
+        })
+    hot_paths = call_tool("read_hot_paths", hot_paths)
 
-    # 规则引擎已有结论
-    rule_lines = []
-    for s in rule_suggestions[:5]:
-        rule_lines.append(f"  - {s['func']}: {s.get('advice', '')}")
-    rule_section = "\n".join(rule_lines) if rule_lines else "  (无匹配规则)"
+    concentration_payload = call_tool("read_concentration", {
+        "evidence_id": "E4",
+        "total_samples": total_samples,
+        "total_functions": stats.get("total_functions", 0),
+        "top_1_pct": concentration.get("top_1_pct", 0),
+        "top_3_pct": concentration.get("top_3_pct", 0),
+        "top_5_pct": concentration.get("top_5_pct", 0),
+        "gini_coefficient": concentration.get("gini_coefficient", 0),
+    })
+
+    rules = []
+    for i, s in enumerate(rule_suggestions[:10], 1):
+        rules.append({
+            "evidence_id": f"E5.{i}",
+            "func": s.get("func", ""),
+            "self": s.get("self", 0),
+            "total": s.get("total", 0),
+            "advice": s.get("advice") or s.get("suggestion", ""),
+        })
+    rules = call_tool("read_rule_hits", rules)
+
+    evidence = {
+        "schema_version": 1,
+        "tid": tid,
+        "tool_contract": ATTRIBUTION_TOOL_SCHEMA,
+        "evidence": {
+            "metadata": metadata,
+            "topn_hotspots": topn_payload,
+            "hot_paths": hot_paths,
+            "concentration": concentration_payload,
+            "rule_hits": rules,
+        },
+        "evidence_boundary": "仅基于本次采集产物、火焰图统计和规则命中，不包含源码语义或外部监控指标。",
+    }
+    tool_calls = {
+        "schema_version": 1,
+        "tid": tid,
+        "llm_visibility": "LLM prompt is built only from the following local tool outputs.",
+        "available_tools": ATTRIBUTION_TOOL_SCHEMA,
+        "calls": calls,
+    }
+    return evidence, tool_calls
+
+
+def _build_attribution_prompt(
+    tid: str,
+    evidence: dict,
+    tool_calls: dict,
+) -> str:
+    """构造只包含工具输出的结构化归因 prompt。"""
+    evidence_json = json.dumps(evidence, ensure_ascii=False, indent=2)
+    calls_json = json.dumps(tool_calls, ensure_ascii=False, indent=2)
 
     return (
-        "你是资深 Linux 性能诊断专家。基于以下结构化数据做归因分析。\n"
+        "你是资深 Linux 性能诊断专家。你不能访问源码、机器或外部监控，"
+        "只能使用下面列出的本地工具输出做归因分析。\n"
         "严格要求：\n"
-        "1. 只基于提供的数据做判断，不能编造未给出的代码或指标\n"
-        "2. 引用证据时必须标注具体数值（如 '函数X占比23.5%'）\n"
+        "1. 每条结论、假设和追加采集建议都必须引用至少一个证据编号，如 [E2.1]、[E3.1]、[E4]\n"
+        "2. 只基于工具输出做判断，不能编造未给出的代码、业务背景或指标\n"
         "3. 无法确认时明确写'需要代码/运行时证据确认'\n\n"
-        "## 采集元数据\n"
-        f"{meta_section}\n"
-        "## 统计指标\n"
-        f"{stats_section}\n"
-        "## 性能分层\n"
-        f"{tier_section}\n"
-        "## TopN 热点函数\n"
-        f"{topn_section}\n"
-        "## 热路径（最频繁调用链）\n"
-        f"{hot_path_section}\n"
-        "## 规则引擎初步结论\n"
-        f"{rule_section}\n\n"
+        f"任务ID: {tid}\n\n"
+        "## 可调用工具与调用记录\n"
+        f"```json\n{calls_json}\n```\n\n"
+        "## 工具返回的证据 JSON\n"
+        f"```json\n{evidence_json}\n```\n\n"
         "请输出以下格式的归因报告：\n"
-        "## 结论（一句话概括瓶颈所在）\n"
-        "## 证据链（逐条引用具体数据，标注来源：统计指标/TopN/热路径/规则）\n"
-        "## 可验证假设（列出可通过追加采集验证的假设）\n"
-        "## 优先修复（按影响度排序，给出具体优化方向）\n"
-        "## 建议追加采集（推荐下一步应做的采集类型和参数）\n"
+        "## 证据\n"
+        "- [证据编号] 证据事实和数值\n"
+        "## 结论\n"
+        "- 归因结论，必须引用证据编号\n"
+        "## 可验证假设\n"
+        "- 假设 + 如何验证，必须引用证据编号\n"
+        "## 追加采集\n"
+        "- 推荐下一步采集类型和参数，必须引用证据编号\n"
+    )
+
+
+def _ensure_evidence_bound_report(content: str, evidence: dict) -> str:
+    """LLM 输出不合规时追加兜底报告，保证前端有证据化内容可展示。"""
+    content = content.strip()
+    required_sections = ("## 证据", "## 结论", "## 可验证假设", "## 追加采集")
+    has_sections = all(section in content for section in required_sections)
+    has_evidence_refs = bool(re.search(r"\[E\d+(?:\.\d+)?\]", content))
+    if has_sections and has_evidence_refs:
+        return content
+
+    fallback = _build_rule_based_attribution(evidence)
+    if not content:
+        return fallback
+    return content + "\n\n## 证据化兜底\n" + fallback
+
+
+def _build_rule_based_attribution(evidence: dict) -> str:
+    data = evidence.get("evidence", {})
+    topn = data.get("topn_hotspots", [])
+    hot_paths = data.get("hot_paths", [])
+    concentration = data.get("concentration", {})
+    rules = data.get("rule_hits", [])
+
+    top = topn[0] if topn else {}
+    path = hot_paths[0] if hot_paths else {}
+    rule = rules[0] if rules else {}
+    top_ref = top.get("evidence_id", "E2.1")
+    path_ref = path.get("evidence_id", "E3.1")
+    rule_ref = rule.get("evidence_id", "E5.1")
+
+    evidence_lines = [
+        f"- [E4] 总采样 {concentration.get('total_samples', 0)}，"
+        f"Top1/Top3/Top5 占比分别为 {concentration.get('top_1_pct', 0)}%、"
+        f"{concentration.get('top_3_pct', 0)}%、{concentration.get('top_5_pct', 0)}%，"
+        f"Gini={concentration.get('gini_coefficient', 0)}。",
+    ]
+    if top:
+        evidence_lines.append(
+            f"- [{top_ref}] Top1 热点函数 {top.get('func', '')} self={top.get('self', 0)}，"
+            f"占比 {top.get('self_pct', 0)}%。"
+        )
+    if path:
+        evidence_lines.append(
+            f"- [{path_ref}] 最热调用路径占比 {path.get('pct', 0)}%，"
+            f"尾部调用链 {' -> '.join(path.get('stack_tail', []))}。"
+        )
+    if rule:
+        evidence_lines.append(f"- [{rule_ref}] 规则命中 {rule.get('func', '')}: {rule.get('advice', '')}")
+
+    conclusion_target = top.get("func", "TopN 热点")
+    return (
+        "## 证据\n"
+        + "\n".join(evidence_lines)
+        + "\n## 结论\n"
+        + f"- 当前瓶颈优先怀疑集中在 {conclusion_target} 及其所在热路径，"
+        + f"该判断来自 [{top_ref}] 和 [E4]；源码级根因仍需要代码/运行时证据确认。\n"
+        + "## 可验证假设\n"
+        + f"- 若 {conclusion_target} 的自耗时来自锁、分配或循环计算，追加 off-CPU/内存分配/源码行级采样后应能在同一调用链复现热点 [{top_ref}]。\n"
+        + "## 追加采集\n"
+        + f"- 追加更长时长 CPU 采样和源码行号采样，必要时叠加 off-CPU 或内存分配采集，用于验证 [{path_ref}] 与 [E4] 的集中度是否稳定。\n"
     )
 
 
@@ -285,7 +458,7 @@ def _format_attribution_report(content: str, tid: str,
     conc = stats.get("concentration", {})
     header = (
         f"# 智能归因报告 - {tid}\n\n"
-        f"- 生成时间: {datetime.utcnow().isoformat(timespec='seconds')}Z\n"
+        f"- 生成时间: {_utc_timestamp()}\n"
         f"- 模型: {LLM_MODEL}\n"
         f"- 总采样: {stats.get('total_samples', 0)} | "
         f"函数数: {stats.get('total_functions', 0)} | "

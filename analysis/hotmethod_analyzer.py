@@ -47,7 +47,7 @@ from analyzers.flamegraph import perf_script_to_collapsed, collapsed_to_svg
 from analyzers.topn import analyze_topn, topn_to_json
 from analyzers.advisor import load_rules, match_rules, suggestions_to_markdown
 from ai_advisor import generate_ai_suggestion, generate_ai_summary, is_llm_enabled
-from ai_advisor import generate_attribution_report
+from ai_advisor import generate_attribution_artifacts
 from analyzers.pprof_data_parser import parse_pprof_text, parse_pprof_csv
 from analyzers.pprof_heap_parser import parse_heap_text, parse_heap_csv
 from analyzers.resource_analyzer import ResourceSample, parse_pidstat_csv, analyze_resources, samples_to_json
@@ -515,25 +515,38 @@ def run_cpu_flamegraph(perf_data_path: str, work_dir: str, tid: str,
             products[ai_path] = "ai_suggestion.md"
             log.info("ai_suggestion -> %s", ai_path)
 
-    # 增强归因报告（新增，不影响现有 ai_summary）
-    # 只要有 TopN 数据且 LLM 可用就生成，不依赖规则引擎命中
-    if is_llm_enabled() and topn:
+    # 增强归因报告和证据产物：只要有 TopN 数据就保存可审计证据，
+    # LLM 可用时额外生成报告，不依赖规则引擎命中。
+    if topn:
         try:
             task_meta = _extract_task_meta_from_env()
             task_meta["type_name"] = "CPU"
-            report = generate_attribution_report(tid, topn, stacks, task_meta, suggestions)
-            if report:
+            artifacts = generate_attribution_artifacts(tid, topn, stacks, task_meta, suggestions)
+
+            evidence_path = os.path.join(work_dir, "attribution_evidence.json")
+            with open(evidence_path, "w") as f:
+                json.dump(artifacts.evidence, f, ensure_ascii=False, indent=2)
+            products[evidence_path] = "attribution_evidence.json"
+            log.info("attribution_evidence -> %s", evidence_path)
+
+            tool_calls_path = os.path.join(work_dir, "attribution_tool_calls.json")
+            with open(tool_calls_path, "w") as f:
+                json.dump(artifacts.tool_calls, f, ensure_ascii=False, indent=2)
+            products[tool_calls_path] = "attribution_tool_calls.json"
+            log.info("attribution_tool_calls -> %s", tool_calls_path)
+
+            if artifacts.report:
                 report_path = os.path.join(work_dir, "attribution_report.md")
                 with open(report_path, "w") as f:
-                    f.write(report)
+                    f.write(artifacts.report)
                 products[report_path] = "attribution_report.md"
                 log.info("attribution_report -> %s", report_path)
                 if api:
                     api.create_suggestion(
                         tid=tid,
                         func="整体归因报告",
-                        suggestion="基于 TopN、集中度、热路径和规则建议生成的 LLM 归因报告。",
-                        ai_suggestion=report,
+                        suggestion="基于可审计证据 JSON、工具调用记录、TopN、热路径、集中度和规则命中生成的归因报告。",
+                        ai_suggestion=artifacts.report,
                     )
         except Exception as e:
             log.warning("attribution report failed (non-fatal): %s", e)

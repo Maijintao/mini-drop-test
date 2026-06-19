@@ -86,7 +86,22 @@ cap_add:
 - CPU 火焰图
 - TopN 热点函数
 - 规则引擎优化建议
+- LLM 归因分析（证据编号、工具调用记录、可验证假设）
 - eBPF IO 分析 (biosnoop)
 - 资源分析 (pidstat)
 - 内存泄漏检测
 - 汇编代码分析
+
+## LLM 归因评测/演示
+
+LLM 归因不是直接输出普通优化建议。分析引擎先运行本地归因工具读取 TopN、热路径、集中度、规则命中和采集元数据，生成：
+
+- `attribution_evidence.json`：可审计证据，证据编号形如 `[E2.1]`、`[E3.1]`、`[E4]`
+- `attribution_tool_calls.json`：工具调用记录
+- `attribution_report.md`：强制引用证据编号的归因报告
+
+前端“归因分析”页按证据、结论、可验证假设、追加采集四块展示。可用下面命令给本地演示库补一条 `mock-cmp-002` 记录：
+
+```bash
+make seed-attribution-mock
+```

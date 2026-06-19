@@ -737,6 +737,9 @@ func (s *APIServer) listStorageObjects(c context.Context, prefix string) []strin
 			prefix + "flamegraph.svg",
 			prefix + "top.json",
 			prefix + "suggestions.md",
+			prefix + "attribution_report.md",
+			prefix + "attribution_evidence.json",
+			prefix + "attribution_tool_calls.json",
 			prefix + "collapsed.txt",
 		}
 		for _, k := range known {
