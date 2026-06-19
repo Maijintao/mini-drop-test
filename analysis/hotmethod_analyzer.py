@@ -15,6 +15,7 @@ import os
 import subprocess
 import sys
 import tempfile
+from datetime import datetime, timezone
 
 import shutil
 
@@ -79,6 +80,34 @@ def _extract_task_meta_from_env() -> dict:
     return meta
 
 
+RUNNING_STALE_SECONDS = 30 * 60
+
+
+def _parse_task_timestamp(value: str):
+    """解析 apiserver 返回的 RFC3339/ISO 时间，解析失败返回 None。"""
+    if not value:
+        return None
+    try:
+        normalized = value.replace("Z", "+00:00")
+        parsed = datetime.fromisoformat(normalized)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    except (TypeError, ValueError):
+        return None
+
+
+def _is_stale_running_analysis(task: dict) -> bool:
+    """判断 analysis_status=running 是否可能是上次崩溃遗留。"""
+    updated = _parse_task_timestamp(task.get("updated_at") or task.get("UpdatedAt"))
+    if updated is None:
+        updated = _parse_task_timestamp(task.get("create_time") or task.get("created_at"))
+    if updated is None:
+        return False
+    age = (datetime.now(timezone.utc) - updated).total_seconds()
+    return age > RUNNING_STALE_SECONDS
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Mini-Drop Analyzer")
     parser.add_argument("--task-id", required=True, help="任务 ID")
@@ -141,9 +170,12 @@ def main():
         if task.get("analysis_status") == 2:  # 已成功
             log.info("task %s already analyzed, skipping", tid)
             sys.exit(0)
-        if task.get("analysis_status") == 1:  # 已在运行（另一个进程）
-            log.info("task %s analysis already running, skipping", tid)
-            sys.exit(0)
+        if task.get("analysis_status") == 1:  # 已在运行
+            if _is_stale_running_analysis(task):
+                log.warning("task %s analysis_status=running is stale, continuing re-analysis", tid)
+            else:
+                log.info("task %s analysis already running, skipping", tid)
+                sys.exit(0)
     except Exception as e:
         log.warning("idempotency check failed (will proceed): %s", e)
 
@@ -324,17 +356,22 @@ def _extract_cos_keys(data: dict) -> list:
 def _is_analysis_product_key(key: str) -> bool:
     name = os.path.basename(key)
     return name in {
-        "flamegraph.svg",
-        "top.json",
-        "suggestions.md",
         "ai_suggestion.md",
-        "heap_stats.json",
-        "tracing_stats.json",
-        "resource_stats.json",
+        "assembly_stats.json",
+        "attribution_report.md",
         "biosnoop_stats.json",
+        "bw_sync_stats.json",
+        "flamegraph.svg",
+        "heap_stats.json",
+        "memleak.json",
+        "namespace.json",
         "pprof_cpu.json",
         "pprof_heap.json",
-    }
+        "resource_stats.json",
+        "suggestions.md",
+        "top.json",
+        "tracing_stats.json",
+    } or name.startswith("attribution_") or name.endswith("_stats.json")
 
 
 def _select_downloaded_input(local_path: str, source_name: str, raw_path,
@@ -736,7 +773,11 @@ def run_pprof_cpu(data_path: str, work_dir: str, tid: str) -> dict:
         samples = parse_pprof_text(content)
 
     with open(result_path, "w") as f:
-        json.dump(samples, f, indent=2)
+        json.dump({
+            "profile_type": "cpu",
+            "summary": f"pprof CPU Top 表，共 {len(samples)} 个函数样本。",
+            "samples": samples,
+        }, f, indent=2)
     log.info("pprof_cpu -> %s", result_path)
     return {result_path: "pprof_cpu.json"}
 
@@ -754,14 +795,19 @@ def run_pprof_heap(data_path: str, work_dir: str, tid: str) -> dict:
     except Exception:
         samples = parse_heap_text(content)
 
+    rows = [{
+        "func": s.func,
+        "flat_objects": s.flat_objects,
+        "flat_space": s.flat_space,
+        "cum_objects": s.cum_objects,
+        "cum_space": s.cum_space,
+    } for s in samples]
     with open(result_path, "w") as f:
-        json.dump([{
-            "func": s.func,
-            "flat_objects": s.flat_objects,
-            "flat_space": s.flat_space,
-            "cum_objects": s.cum_objects,
-            "cum_space": s.cum_space,
-        } for s in samples], f, indent=2)
+        json.dump({
+            "profile_type": "heap",
+            "summary": f"pprof Heap Top 表，共 {len(rows)} 个函数样本。",
+            "samples": rows,
+        }, f, indent=2)
     log.info("pprof_heap -> %s", result_path)
     return {result_path: "pprof_heap.json"}
 
@@ -774,12 +820,15 @@ def run_memleak(data_path: str, work_dir: str, tid: str, api=None) -> dict:
         output = {
             "total_leaked_bytes": 0,
             "total_leaked_blocks": 0,
+            "analysis_kind": "memray_artifact",
             "summary": (
-                "Memray 采集产物已生成；当前离线分析器仅解析 Valgrind/ASan/memray JSON，"
-                "请在文件下载中查看 memray flamegraph HTML。"
+                "Memray 采集产物已生成。当前离线分析器不会把 memray HTML 反解析为泄漏栈；"
+                "请在文件下载中查看 memray flamegraph HTML，用于定位 Python 分配热点。"
             ),
             "leaks": [],
-            "suggestions": [],
+            "suggestions": [
+                "若需要泄漏级别归因，请导出 memray summary/table JSON 或使用 Valgrind/ASan 文本产物。"
+            ],
             "artifact": name,
         }
         with open(result_path, "w") as f:

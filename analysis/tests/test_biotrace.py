@@ -26,6 +26,31 @@ def test_parse_biosnoop_csv():
     assert events[1].latency_us == 98.765
 
 
+def test_parse_bpftrace_rwbs_direction():
+    """解析 bpftrace block tracepoint 输出的 rwbs 字段"""
+    csv = "1000,bash,1234,8,RA,4096,12345\n"
+    csv += "1001,dd,5678,8,WS,131072,98765\n"
+
+    events = parse_biosnoop_csv(csv)
+    assert len(events) == 2
+    assert events[0].direction == "R"
+    assert events[1].direction == "W"
+    assert events[1].io_size == 131072
+
+
+def test_analyze_sched_probe_type():
+    events = [
+        BioEvent(timestamp=0.0, comm="java", pid=1, disk="sched", direction="SCHED", io_size=0, latency_us=1200),
+        BioEvent(timestamp=0.1, comm="java", pid=1, disk="sched", direction="SCHED", io_size=0, latency_us=15000),
+    ]
+    stats = analyze_biosnoop(events, slow_threshold_us=10000)
+    assert stats.probe_type == "sched"
+    assert stats.read_count == 0
+    assert stats.write_count == 0
+    assert len(stats.slow_ios) == 1
+    assert "调度延迟" in stats.summary
+
+
 def test_parse_biosnoop_text():
     """解析 biosnoop 文本格式"""
     text = """TIME(s)     COMM           PID    DISK    T  BYTES   LAT(ns)
@@ -70,6 +95,7 @@ def test_stats_to_json():
     json_str = stats_to_json(stats)
     import json
     data = json.loads(json_str)
+    assert data["probe_type"] == "io"
     assert data["total_events"] == 1
     assert "sda" in data["by_disk"]
 

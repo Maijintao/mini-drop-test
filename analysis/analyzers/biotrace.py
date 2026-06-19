@@ -28,6 +28,7 @@ class BioEvent:
 @dataclass
 class BioStats:
     """IO 统计结果"""
+    probe_type: str = "io"
     total_events: int = 0
     read_count: int = 0
     write_count: int = 0
@@ -88,7 +89,7 @@ def _parse_biosnoop_row(row: list) -> Optional[BioEvent]:
             comm=row[1].strip(),
             pid=int(row[2]),
             disk=row[3].strip(),
-            direction="R" if row[4].strip().upper() == "R" else "W",
+            direction=_normalize_direction(row[4]),
             io_size=int(row[5]),
             latency_us=float(row[6]) / 1000,  # ns -> us
         )
@@ -125,7 +126,7 @@ def parse_biosnoop_text(text: str) -> list[BioEvent]:
                 comm=parts[1],
                 pid=int(parts[2]),
                 disk=parts[3],
-                direction="R" if parts[4].upper() == "R" else "W",
+                direction=_normalize_direction(parts[4]),
                 io_size=int(parts[5]),
                 latency_us=float(parts[6]) / 1000,
             )
@@ -134,6 +135,17 @@ def parse_biosnoop_text(text: str) -> list[BioEvent]:
             continue
 
     return events
+
+
+def _normalize_direction(value: str) -> str:
+    raw = str(value or "").strip().upper()
+    if raw.startswith("SCHED"):
+        return "SCHED"
+    if "W" in raw:
+        return "W"
+    if "R" in raw:
+        return "R"
+    return "UNKNOWN"
 
 
 def analyze_biosnoop(events: list[BioEvent], slow_threshold_us: float = 10000) -> BioStats:
@@ -151,6 +163,7 @@ def analyze_biosnoop(events: list[BioEvent], slow_threshold_us: float = 10000) -
         return BioStats(summary="No IO events to analyze")
 
     # 基础统计
+    probe_type = "sched" if any(e.disk == "sched" or e.direction == "SCHED" for e in events) else "io"
     read_events = [e for e in events if e.direction == "R"]
     write_events = [e for e in events if e.direction == "W"]
 
@@ -194,14 +207,22 @@ def analyze_biosnoop(events: list[BioEvent], slow_threshold_us: float = 10000) -
         sorted(by_process.items(), key=lambda x: x[1]["bytes"], reverse=True)[:10]
     )
 
-    summary = (
-        f"总 IO 事件 {len(events)} (读 {len(read_events)} 写 {len(write_events)}), "
-        f"读 {read_bytes//1024}KB 写 {write_bytes//1024}KB, "
-        f"延迟 avg={latency_avg:.0f}us p99={latency_p99:.0f}us max={latency_max:.0f}us, "
-        f"慢 IO ({slow_threshold_us/1000:.0f}ms+): {len(slow_ios)} 个"
-    )
+    if probe_type == "sched":
+        summary = (
+            f"总调度延迟事件 {len(events)}, "
+            f"延迟 avg={latency_avg:.0f}us p99={latency_p99:.0f}us max={latency_max:.0f}us, "
+            f"慢调度 ({slow_threshold_us/1000:.0f}ms+): {len(slow_ios)} 个"
+        )
+    else:
+        summary = (
+            f"总 IO 事件 {len(events)} (读 {len(read_events)} 写 {len(write_events)}), "
+            f"读 {read_bytes//1024}KB 写 {write_bytes//1024}KB, "
+            f"延迟 avg={latency_avg:.0f}us p99={latency_p99:.0f}us max={latency_max:.0f}us, "
+            f"慢 IO ({slow_threshold_us/1000:.0f}ms+): {len(slow_ios)} 个"
+        )
 
     return BioStats(
+        probe_type=probe_type,
         total_events=len(events),
         read_count=len(read_events),
         write_count=len(write_events),
@@ -221,6 +242,7 @@ def analyze_biosnoop(events: list[BioEvent], slow_threshold_us: float = 10000) -
 def stats_to_json(stats: BioStats) -> str:
     """将统计结果序列化为 JSON，包含慢 IO 事件详情。"""
     data = {
+        "probe_type": stats.probe_type,
         "total_events": stats.total_events,
         "read_count": stats.read_count,
         "write_count": stats.write_count,

@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"sync"
 	"time"
@@ -82,6 +83,13 @@ func (s *APIServer) CreateScheduleTask(c *gin.Context) {
 	}
 	if !s.canAccessAgentIP(uid, req.TargetIP) {
 		c.JSON(http.StatusNotFound, gin.H{"code": CodeNotFound, "message": "agent not found"})
+		return
+	}
+	if !isValidTaskProfilerCombination(req.Type, req.ProfilerType) {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    CodeParamError,
+			"message": fmt.Sprintf("invalid task_type/profiler_type combination: type=%d profiler_type=%d", req.Type, req.ProfilerType),
+		})
 		return
 	}
 

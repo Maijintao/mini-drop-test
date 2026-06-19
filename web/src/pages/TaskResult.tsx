@@ -196,12 +196,14 @@ export default function TaskResult() {
         setPprofLoading(true);
         try {
           if (pprofCpuFile?.url) {
-            const data = await fetchSignedJson<Record<string, number>>(pprofCpuFile.url);
-            setPprofCpuData(data && typeof data === 'object' && !Array.isArray(data) ? data : null);
+            const data = await fetchSignedJson<any>(pprofCpuFile.url);
+            const samples = data?.samples ?? data;
+            setPprofCpuData(samples && typeof samples === 'object' && !Array.isArray(samples) ? samples : null);
           }
           if (pprofHeapFile?.url) {
-            const data = await fetchSignedJson<any[]>(pprofHeapFile.url);
-            setPprofHeapData(Array.isArray(data) ? data : null);
+            const data = await fetchSignedJson<any>(pprofHeapFile.url);
+            const samples = data?.samples ?? data;
+            setPprofHeapData(Array.isArray(samples) ? samples : null);
           }
         } catch {
           setPprofCpuData(null);
@@ -286,6 +288,8 @@ export default function TaskResult() {
   }, [pprofHeapData]);
   const eBpfReadCount = Number(eBpfData?.total_reads ?? eBpfData?.read_count ?? 0);
   const eBpfWriteCount = Number(eBpfData?.total_writes ?? eBpfData?.write_count ?? 0);
+  const eBpfProbeType = String(eBpfData?.probe_type || 'io');
+  const isSchedProbe = eBpfProbeType === 'sched';
   const eBpfAvgLatencyMs = Number(eBpfData?.avg_latency_ms ?? ((eBpfData?.latency_avg_us ?? 0) / 1000));
   const eBpfMaxLatencyMs = Number(eBpfData?.max_latency_ms ?? ((eBpfData?.latency_max_us ?? 0) / 1000));
   const eBpfTotalBytes = Number(eBpfData?.total_bytes ?? ((eBpfData?.read_bytes ?? 0) + (eBpfData?.write_bytes ?? 0)));
@@ -594,33 +598,33 @@ export default function TaskResult() {
                               <Statistic title="总事件数" value={eBpfData.total_events} />
                             </Col>
                           )}
-                          {eBpfReadCount > 0 && (
+                          {!isSchedProbe && eBpfReadCount > 0 && (
                             <Col span={6}>
                               <Statistic title="读操作" value={eBpfReadCount} />
                             </Col>
                           )}
-                          {eBpfWriteCount > 0 && (
+                          {!isSchedProbe && eBpfWriteCount > 0 && (
                             <Col span={6}>
                               <Statistic title="写操作" value={eBpfWriteCount} />
                             </Col>
                           )}
                           {eBpfAvgLatencyMs > 0 && (
                             <Col span={6}>
-                              <Statistic title="平均延迟" value={eBpfAvgLatencyMs} suffix="ms" precision={2} />
+                              <Statistic title={isSchedProbe ? '平均调度延迟' : '平均延迟'} value={eBpfAvgLatencyMs} suffix="ms" precision={2} />
                             </Col>
                           )}
                           {eBpfMaxLatencyMs > 0 && (
                             <Col span={6}>
-                              <Statistic title="最大延迟" value={eBpfMaxLatencyMs} suffix="ms" precision={2} />
+                              <Statistic title={isSchedProbe ? '最大调度延迟' : '最大延迟'} value={eBpfMaxLatencyMs} suffix="ms" precision={2} />
                             </Col>
                           )}
-                          {eBpfTotalBytes > 0 && (
+                          {!isSchedProbe && eBpfTotalBytes > 0 && (
                             <Col span={6}>
                               <Statistic title="总字节数" value={eBpfTotalBytes} />
                             </Col>
                           )}
                         </Row>
-                        {eBpfTopDevices.length > 0 && (
+                        {!isSchedProbe && eBpfTopDevices.length > 0 && (
                           <>
                             <Typography.Text strong style={{ display: 'block', marginBottom: 12 }}>热点设备</Typography.Text>
                             <Table
@@ -639,14 +643,16 @@ export default function TaskResult() {
                         )}
                         {eBpfTopProcesses.length > 0 && (
                           <>
-                            <Typography.Text strong style={{ display: 'block', marginTop: 24, marginBottom: 12 }}>热点进程</Typography.Text>
+                            <Typography.Text strong style={{ display: 'block', marginTop: isSchedProbe ? 0 : 24, marginBottom: 12 }}>
+                              {isSchedProbe ? '热点调度目标' : '热点进程'}
+                            </Typography.Text>
                             <Table
                               dataSource={eBpfTopProcesses}
                               columns={[
                                 { title: '进程', dataIndex: 'process', key: 'process' },
                                 { title: 'PID', dataIndex: 'pid', key: 'pid' },
-                                { title: '操作数', dataIndex: 'count', key: 'count' },
-                                { title: '字节数', dataIndex: 'bytes', key: 'bytes' },
+                                { title: isSchedProbe ? '调度事件数' : '操作数', dataIndex: 'count', key: 'count' },
+                                ...(!isSchedProbe ? [{ title: '字节数', dataIndex: 'bytes', key: 'bytes' }] : []),
                               ]}
                               rowKey={(record: any) => `${record.process}-${record.pid}`}
                               pagination={false}

@@ -35,6 +35,20 @@ type CreateTaskReq struct {
 	Event        string `json:"event"`
 }
 
+func isValidTaskProfilerCombination(taskType int, profilerType int) bool {
+	valid := map[int]int{
+		0:  0, // CPU / perf
+		1:  1, // Java / async-profiler
+		4:  4, // Python / memray
+		6:  3, // eBPF / bpftrace
+		10: 2, // pprof CPU
+		11: 2, // pprof Heap
+		12: 5, // Java Heap
+	}
+	want, ok := valid[taskType]
+	return ok && profilerType == want
+}
+
 // ---------- handler ----------
 
 // CreateTask 创建采集任务 — POST /api/v1/tasks
@@ -61,6 +75,13 @@ func (s *APIServer) CreateTask(c *gin.Context) {
 	}
 	if !s.canAccessAgentIP(uid, req.TargetIP) {
 		c.JSON(http.StatusNotFound, gin.H{"code": CodeNotFound, "message": "agent not found"})
+		return
+	}
+	if !isValidTaskProfilerCombination(req.Type, req.ProfilerType) {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    CodeParamError,
+			"message": fmt.Sprintf("invalid task_type/profiler_type combination: type=%d profiler_type=%d", req.Type, req.ProfilerType),
+		})
 		return
 	}
 
@@ -430,6 +451,13 @@ func (s *APIServer) RetryTask(c *gin.Context) {
 	}
 	if callgraph == "" {
 		callgraph = "dwarf"
+	}
+	if !isValidTaskProfilerCombination(task.Type, task.ProfilerType) {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    CodeParamError,
+			"message": fmt.Sprintf("invalid task_type/profiler_type combination: type=%d profiler_type=%d", task.Type, task.ProfilerType),
+		})
+		return
 	}
 
 	// 直接创建新任务（不调 CreateTask，避免 body 解析问题）

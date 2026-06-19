@@ -132,6 +132,7 @@ tracepoint:block:block_rq_issue
 /curtask->tgid == )" + std::to_string(pid) + R"( /
 {
   @start[args->dev, args->sector] = nsecs;
+  @bytes[args->dev, args->sector] = args->bytes;
 }
 
 tracepoint:block:block_rq_complete
@@ -143,11 +144,12 @@ tracepoint:block:block_rq_complete
 	    comm,
 	    pid,
 	    args->dev,
-	    "R",
-	    0,
+	    str(args->rwbs),
+	    @bytes[args->dev, args->sector],
 	    $lat_ns
   );
   delete(@start[args->dev, args->sector]);
+  delete(@bytes[args->dev, args->sector]);
 }
 
 interval:s:)" + std::to_string(duration) + R"(
@@ -158,6 +160,7 @@ interval:s:)" + std::to_string(duration) + R"(
 END
 {
   clear(@start);
+  clear(@bytes);
 }
 )";
 }
@@ -176,7 +179,7 @@ tracepoint:sched:sched_switch
 /args->next_pid == )" + std::to_string(pid) + R"( && @start[args->next_pid]/
 {
   $lat_ns = nsecs - @start[args->next_pid];
-  printf("%lld,%s,%d,sched,W,0,%lld\n",
+  printf("%lld,%s,%d,sched,SCHED,0,%lld\n",
     nsecs,
     args->next_comm,
     args->next_pid,

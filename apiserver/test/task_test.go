@@ -58,6 +58,54 @@ func TestCreateTask_BadRequest(t *testing.T) {
 	}
 }
 
+func TestCreateTask_InvalidProfilerCombination(t *testing.T) {
+	db := SetupTestDB()
+	SeedTestData(db)
+	srv, _, _ := CreateTestAPIServer(db)
+	r := SetupTestRouter(srv)
+
+	body := map[string]interface{}{
+		"name":          "bad-combo",
+		"target_ip":     "10.0.0.1",
+		"pid":           1234,
+		"duration":      10,
+		"type":          6,
+		"profiler_type": 0,
+	}
+	w := DoAuthRequest(r, "POST", "/api/v1/tasks", body)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestCreateTask_EBPFCombinationOK(t *testing.T) {
+	db := SetupTestDB()
+	SeedTestData(db)
+	srv, mockGRPC, _ := CreateTestAPIServer(db)
+	r := SetupTestRouter(srv)
+
+	mockGRPC.CreateTaskFunc = func(ctx context.Context, req *pb.CreateTaskRequest) (*pb.CreateTaskResponse, error) {
+		if req.GetTaskDesc().GetTaskType() != 6 || req.GetTaskDesc().GetProfilerType() != 3 {
+			t.Fatalf("unexpected task/profiler: %d/%d", req.GetTaskDesc().GetTaskType(), req.GetTaskDesc().GetProfilerType())
+		}
+		return &pb.CreateTaskResponse{Code: 0, Message: "ok"}, nil
+	}
+
+	body := map[string]interface{}{
+		"name":          "ebpf",
+		"target_ip":     "10.0.0.1",
+		"pid":           1234,
+		"duration":      10,
+		"type":          6,
+		"profiler_type": 3,
+		"event":         "io",
+	}
+	w := DoAuthRequest(r, "POST", "/api/v1/tasks", body)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 // 测试创建任务 gRPC 下发失败回滚状态
 func TestCreateTask_GRPCFail(t *testing.T) {
 	db := SetupTestDB()

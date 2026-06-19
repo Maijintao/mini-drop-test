@@ -45,6 +45,27 @@ func TestCreateScheduleTask_BadRequest(t *testing.T) {
 	}
 }
 
+func TestCreateScheduleTask_InvalidProfilerCombination(t *testing.T) {
+	db := SetupTestDB()
+	SeedTestData(db)
+	srv, _, _ := CreateTestAPIServer(db)
+	r := SetupTestRouter(srv)
+
+	body := map[string]interface{}{
+		"task_name":     "bad-schedule",
+		"target_ip":     "10.0.0.1",
+		"pid":           1234,
+		"duration":      30,
+		"cron_expr":     "0 * * * *",
+		"type":          10,
+		"profiler_type": 0,
+	}
+	w := DoAuthRequest(r, "POST", "/api/v1/schedule/task", body)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestGetScheduleTasks_OK(t *testing.T) {
 	db := SetupTestDB()
 	SeedTestData(db)
