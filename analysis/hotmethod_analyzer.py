@@ -46,6 +46,7 @@ from analyzers.flamegraph import perf_script_to_collapsed, collapsed_to_svg
 from analyzers.topn import analyze_topn, topn_to_json
 from analyzers.advisor import load_rules, match_rules, suggestions_to_markdown
 from ai_advisor import generate_ai_suggestion, generate_ai_summary, is_llm_enabled
+from ai_advisor import generate_attribution_report
 from analyzers.pprof_data_parser import parse_pprof_text, parse_pprof_csv
 from analyzers.pprof_heap_parser import parse_heap_text, parse_heap_csv
 from analyzers.resource_analyzer import ResourceSample, parse_pidstat_csv, analyze_resources, samples_to_json
@@ -55,6 +56,27 @@ from analyzers.tracing_analyzer import parse_tracing_json, parse_tracing_csv, an
 from analyzers.namespace_parse import parse_pid_namespaces, namespaces_to_json
 from analyzers.assembly_code_analyzer import parse_objdump, stats_to_json as asm_to_json
 from analyzers.memleak_analyzer import analyze_memleak
+
+
+def _extract_task_meta_from_env() -> dict:
+    """
+    从环境变量和已获取的 task 信息中提取采集元数据。
+    用于归因报告，让 LLM 知道采集的基本参数。
+    """
+    meta = {
+        "pid": os.environ.get("DROP_TASK_PID", "N/A"),
+        "duration": os.environ.get("DROP_TASK_DURATION", "N/A"),
+        "hz": os.environ.get("DROP_TASK_HZ", "N/A"),
+        "target_ip": os.environ.get("DROP_TASK_TARGET_IP", "N/A"),
+        "type": os.environ.get("DROP_TASK_TYPE", "0"),
+    }
+    # 尝试转为 int（兼容 "100" 和 "100.0" 两种格式）
+    for key in ("pid", "duration", "hz", "type"):
+        try:
+            meta[key] = int(float(meta[key]))
+        except (ValueError, TypeError):
+            pass
+    return meta
 
 
 def parse_args():
@@ -384,7 +406,8 @@ def run_cpu_flamegraph(perf_data_path: str, work_dir: str, tid: str,
 
     # 如果有预处理的折叠栈，直接使用
     if pre_collapsed_path and os.path.exists(pre_collapsed_path):
-        shutil.copy2(pre_collapsed_path, collapsed_path)
+        if os.path.abspath(pre_collapsed_path) != os.path.abspath(collapsed_path):
+            shutil.copy2(pre_collapsed_path, collapsed_path)
         log.info("using pre-processed collapsed stack")
     else:
         if _looks_like_text_stack(perf_data_path):
@@ -448,6 +471,22 @@ def run_cpu_flamegraph(perf_data_path: str, work_dir: str, tid: str,
                 f.write(ai_summary)
             products[ai_path] = "ai_suggestion.md"
             log.info("ai_suggestion -> %s", ai_path)
+
+    # 增强归因报告（新增，不影响现有 ai_summary）
+    # 只要有 TopN 数据且 LLM 可用就生成，不依赖规则引擎命中
+    if is_llm_enabled() and topn:
+        try:
+            task_meta = _extract_task_meta_from_env()
+            task_meta["type_name"] = "CPU"
+            report = generate_attribution_report(tid, topn, stacks, task_meta, suggestions)
+            if report:
+                report_path = os.path.join(work_dir, "attribution_report.md")
+                with open(report_path, "w") as f:
+                    f.write(report)
+                products[report_path] = "attribution_report.md"
+                log.info("attribution_report -> %s", report_path)
+        except Exception as e:
+            log.warning("attribution report failed (non-fatal): %s", e)
 
     return products
 

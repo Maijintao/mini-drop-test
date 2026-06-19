@@ -205,9 +205,15 @@ export default function FlameDiff() {
 // ========== 差异火焰图渲染 ==========
 
 function DiffFlamePanel({ result }: { result: FlameDiffResult }) {
+  const panelRef = useRef<HTMLDivElement>(null);
   const flameRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<any>(null);
   const chartDataRef = useRef<any>(null);
+  const resizeTimerRef = useRef<number | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const chartHeight = isFullscreen
+    ? Math.max((typeof window === 'undefined' ? 480 : window.innerHeight) - 138, 480)
+    : 480;
 
   // 注入 CSS（只执行一次）
   useEffect(() => {
@@ -215,23 +221,19 @@ function DiffFlamePanel({ result }: { result: FlameDiffResult }) {
   }, []);
 
   // 转换数据：使用 selfValue(true) 模式
-  // 叶子节点：value = |selfDelta|, delta = selfDelta
-  // 中间节点：value = sum(children.value), delta = sum(children.delta)
+  // value 只表示节点自身宽度，children 会由 d3-flame-graph 累加。
   const transformNode = (node: any): any => {
+    const selfDelta = Number(node.selfDelta) || 0;
+    const totalDelta = Number(node.totalDelta) || 0;
     const transformed: any = {
       name: node.name,
-      selfValue: node.selfValue,  // 基准采样数（用于 tooltip）
+      selfValue: Number(node.selfValue) || 0,  // 基准采样数（用于 tooltip）
+      value: Math.abs(selfDelta),
+      delta: totalDelta || selfDelta,
     };
 
     if (node.children && node.children.length > 0) {
       transformed.children = node.children.map(transformNode);
-      // 中间节点：value = 子节点 value 之和，delta = 子节点 delta 之和
-      transformed.value = transformed.children.reduce((sum: number, c: any) => sum + (c.value || 0), 0);
-      transformed.delta = transformed.children.reduce((sum: number, c: any) => sum + (c.delta || 0), 0);
-    } else {
-      // 叶子节点：value = |selfDelta|，delta = selfDelta
-      transformed.value = Math.abs(node.selfDelta);
-      transformed.delta = node.selfDelta;
     }
 
     return transformed;
@@ -246,7 +248,7 @@ function DiffFlamePanel({ result }: { result: FlameDiffResult }) {
 
     const chart = flamegraph()
       .width(el.offsetWidth || 960)
-      .height(480)
+      .height(chartHeight)
       .cellHeight(18)
       .transitionDuration(300)
       .tooltip(true)
@@ -275,13 +277,15 @@ function DiffFlamePanel({ result }: { result: FlameDiffResult }) {
         flameRef.current.innerHTML = '';
       }
     };
-  }, [result.tree]);
+  }, [result.tree, chartHeight]);
 
   // 监听窗口 resize 事件
   useEffect(() => {
     const handleResize = () => {
-      // 延迟执行，避免频繁重绘
-      setTimeout(() => {
+      if (resizeTimerRef.current) {
+        window.clearTimeout(resizeTimerRef.current);
+      }
+      resizeTimerRef.current = window.setTimeout(() => {
         if (chartDataRef.current) {
           renderChart();
         }
@@ -291,6 +295,20 @@ function DiffFlamePanel({ result }: { result: FlameDiffResult }) {
     window.addEventListener('resize', handleResize);
     return () => {
       window.removeEventListener('resize', handleResize);
+      if (resizeTimerRef.current) {
+        window.clearTimeout(resizeTimerRef.current);
+      }
+    };
+  }, [chartHeight]);
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(document.fullscreenElement === panelRef.current);
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
     };
   }, []);
 
@@ -304,6 +322,20 @@ function DiffFlamePanel({ result }: { result: FlameDiffResult }) {
       chartRef.current.clear();
     }
   }, [searchTerm]);
+
+  const toggleFullscreen = async () => {
+    const el = panelRef.current;
+    if (!el) return;
+    try {
+      if (document.fullscreenElement === el) {
+        await document.exitFullscreen();
+      } else {
+        await el.requestFullscreen();
+      }
+    } catch {
+      // Fullscreen can be denied by the browser; keep the inline chart usable.
+    }
+  };
 
   // 如果没有 tree 数据（只有扁平 diff），显示简化的消息
   if (!result.tree) {
@@ -320,7 +352,18 @@ function DiffFlamePanel({ result }: { result: FlameDiffResult }) {
   }
 
   return (
-    <div className="diff-panel" style={{ ...glassCard, padding: 20 }}>
+    <div
+      ref={panelRef}
+      className="diff-panel"
+      style={{
+        ...glassCard,
+        padding: 20,
+        background: isFullscreen ? '#101014' : glassCard.background,
+        height: isFullscreen ? '100vh' : 'auto',
+        overflow: isFullscreen ? 'auto' : 'visible',
+        boxSizing: 'border-box',
+      }}
+    >
       {/* 头部信息 */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -334,11 +377,17 @@ function DiffFlamePanel({ result }: { result: FlameDiffResult }) {
           </span>
           <span style={{ fontSize: 13, color: 'rgba(255,255,255,0.7)', fontFamily: 'monospace' }}>{result.curr_tid}</span>
         </div>
-        {/* 图例 */}
-        <div style={{ display: 'flex', gap: 16, fontSize: 12, color: 'rgba(255,255,255,0.5)' }}>
-          <span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: '#ef4444', marginRight: 4, verticalAlign: -1 }} />回归（采样数增加）</span>
-          <span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: '#3b82f6', marginRight: 4, verticalAlign: -1 }} />优化（采样数减少）</span>
-          <span>宽度 = |delta| 占比</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          {/* 图例 */}
+          <div style={{ display: 'flex', gap: 16, fontSize: 12, color: 'rgba(255,255,255,0.5)' }}>
+            <span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: '#ef4444', marginRight: 4, verticalAlign: -1 }} />红色系：采样增加</span>
+            <span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: '#3b82f6', marginRight: 4, verticalAlign: -1 }} />蓝色系：采样减少</span>
+            <span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: '#dcdcdc', marginRight: 4, verticalAlign: -1 }} />灰色：变化较小</span>
+            <span>宽度 = |采样差值| 占比</span>
+          </div>
+          <button onClick={toggleFullscreen} style={{ ...buttonStyle, padding: '6px 12px', fontSize: 12 }}>
+            {isFullscreen ? '退出全屏' : '全屏'}
+          </button>
         </div>
       </div>
 

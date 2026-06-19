@@ -75,10 +75,13 @@ func main() {
 	// 5. 初始化 MinIO 存储
 	store, err := minio.New(
 		cfg.MinIO.Endpoint,
+		cfg.MinIO.PublicEndpoint,
 		cfg.MinIO.AccessKey,
 		cfg.MinIO.SecretKey,
 		cfg.MinIO.Bucket,
 		cfg.MinIO.UseSSL,
+		cfg.MinIO.PublicUseSSL,
+		cfg.MinIO.Region,
 	)
 	if err != nil {
 		logger.Fatal("init minio failed", zap.Error(err))

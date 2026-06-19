@@ -13,18 +13,35 @@ import (
 )
 
 type MinIOStorage struct {
-	client *minio.Client
-	bucket string
+	client        *minio.Client
+	presignClient *minio.Client
+	bucket        string
 }
 
 // New 创建 MinIO 存储客户端，自动创建 bucket
-func New(endpoint, accessKey, secretKey, bucket string, useSSL bool) (*MinIOStorage, error) {
+func New(endpoint, publicEndpoint, accessKey, secretKey, bucket string, useSSL, publicUseSSL bool, region string) (*MinIOStorage, error) {
+	if region == "" {
+		region = "us-east-1"
+	}
 	client, err := minio.New(endpoint, &minio.Options{
 		Creds:  credentials.NewStaticV4(accessKey, secretKey, ""),
 		Secure: useSSL,
+		Region: region,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("minio new client: %w", err)
+	}
+	if publicEndpoint == "" {
+		publicEndpoint = endpoint
+		publicUseSSL = useSSL
+	}
+	presignClient, err := minio.New(publicEndpoint, &minio.Options{
+		Creds:  credentials.NewStaticV4(accessKey, secretKey, ""),
+		Secure: publicUseSSL,
+		Region: region,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("minio new presign client: %w", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -40,7 +57,7 @@ func New(endpoint, accessKey, secretKey, bucket string, useSSL bool) (*MinIOStor
 		}
 	}
 
-	return &MinIOStorage{client: client, bucket: bucket}, nil
+	return &MinIOStorage{client: client, presignClient: presignClient, bucket: bucket}, nil
 }
 
 func (m *MinIOStorage) Get(ctx context.Context, key string) (io.ReadCloser, error) {
@@ -62,7 +79,7 @@ func (m *MinIOStorage) Put(ctx context.Context, key string, reader io.Reader, si
 }
 
 func (m *MinIOStorage) PreSign(ctx context.Context, key string, expiry time.Duration) (string, error) {
-	url, err := m.client.PresignedGetObject(ctx, m.bucket, key, expiry, nil)
+	url, err := m.presignClient.PresignedGetObject(ctx, m.bucket, key, expiry, nil)
 	if err != nil {
 		return "", fmt.Errorf("minio presign %s: %w", key, err)
 	}

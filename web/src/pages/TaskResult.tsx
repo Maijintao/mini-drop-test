@@ -35,7 +35,6 @@ export default function TaskResult() {
   const [suggestions, setSuggestions] = useState<AnalysisSuggestion[]>([]);
   const [stateHistory, setStateHistory] = useState<TaskStateHistory[]>([]);
   const [flameUrl, setFlameUrl] = useState('');
-  const [flameLoading, setFlameLoading] = useState(false);
   const [flameError, setFlameError] = useState('');
   const [topn, setTopn] = useState<TopFunction[]>([]);
   const [collapsedText, setCollapsedText] = useState('');
@@ -59,6 +58,25 @@ export default function TaskResult() {
     gsap.fromTo('.result-stats', { y: 10, autoAlpha: 0 }, { y: 0, autoAlpha: 1, stagger: 0.06, duration: 0.35, delay: 0.08, clearProps: 'transform,opacity,visibility' });
     gsap.fromTo('.result-content', { y: 14, autoAlpha: 0 }, { y: 0, autoAlpha: 1, duration: 0.35, delay: 0.15, clearProps: 'transform,opacity,visibility' });
   }, { scope: containerRef });
+
+  useEffect(() => {
+    setTask(null);
+    setSuggestions([]);
+    setStateHistory([]);
+    setCosFiles([]);
+    setFlameUrl('');
+    setFlameError('');
+    setTopn([]);
+    setCollapsedText('');
+    setEBpfData(null);
+    setEBpfLoading(false);
+    setPprofCpuData(null);
+    setPprofHeapData(null);
+    setPprofLoading(false);
+    setMemoryData(null);
+    setHeapData(null);
+    setResourceData(null);
+  }, [tid]);
 
   const loadTask = useCallback(async () => {
     if (!tid) {
@@ -99,16 +117,21 @@ export default function TaskResult() {
         setFlameError('');
         if (flameRes.code === 0 && flameRes.data?.url) {
           if (flameRes.data.type === 'svg') {
-            setFlameUrl(flameRes.data.url);
+            // COS 返回的 SVG 会触发下载，不在 iframe 中渲染；继续走 collapsed.txt / top.json 的 D3 渲染路径。
+            setFlameUrl('');
           } else if (flameRes.data.type === 'json') {
             const data = await fetchSignedJson<TopFunction[]>(flameRes.data.url);
             setTopn(Array.isArray(data) ? data : []);
+            setFlameUrl('');
+          } else if (flameRes.data.type === 'collapsed') {
+            const res = await axios.get<string>(flameRes.data.url, { withCredentials: false, timeout: 30000, responseType: 'text' });
+            setCollapsedText(typeof res.data === 'string' ? res.data : '');
             setFlameUrl('');
           }
         }
       } catch {
         setFlameUrl('');
-        setFlameError('暂无可渲染的 flamegraph.svg');
+        setFlameError('暂无可渲染的火焰图数据');
       }
 
       // 确保 files 列表有数据（task detail 可能返回 null）
@@ -226,10 +249,6 @@ export default function TaskResult() {
     }, 3000);
     return () => window.clearInterval(id);
   }, [loadTask]);
-
-  useEffect(() => {
-    if (flameUrl) setFlameLoading(true);
-  }, [flameUrl]);
 
   const runAnalysis = async () => {
     if (!tid) return;
@@ -505,44 +524,7 @@ export default function TaskResult() {
                   label: '火焰图',
                   children: (
                     flameUrl ? (
-                      <div style={{ border: '0.5px solid rgba(255,255,255,0.08)', borderRadius: 12, overflow: 'hidden' }}>
-                        <div style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          gap: 12,
-                          padding: '10px 12px',
-                          background: 'rgba(255,255,255,0.03)',
-                          borderBottom: '0.5px solid rgba(255,255,255,0.08)',
-                        }}>
-                          <Text strong style={{ color: 'rgba(255,255,255,0.75)', fontSize: 13 }}>
-                            flamegraph.svg
-                            {flameLoading && <Text style={{ marginLeft: 8, color: 'rgba(255,255,255,0.4)', fontWeight: 500 }}>加载中...</Text>}
-                          </Text>
-                          <Space>
-                            <Button size="small" onClick={() => setFlameUrl((url) => `${url}${url.includes('?') ? '&' : '?'}_reload=${Date.now()}`)}>刷新</Button>
-                            <Button size="small" onClick={() => window.open(flameUrl, '_blank', 'noopener,noreferrer')}>新窗口打开</Button>
-                          </Space>
-                        </div>
-                        {flameError && (
-                          <div style={{ padding: '8px 12px', color: '#f87171', background: 'rgba(248,113,113,0.1)', fontSize: 12 }}>
-                            {flameError}
-                          </div>
-                        )}
-                        <iframe
-                          title={`flamegraph-${tid}`}
-                          src={flameUrl}
-                          onLoad={() => {
-                            setFlameLoading(false);
-                            setFlameError('');
-                          }}
-                          onError={() => {
-                            setFlameLoading(false);
-                            setFlameError('火焰图加载失败，签名 URL 可能已过期');
-                          }}
-                          style={{ width: '100%', height: 560, border: 0, display: 'block', background: '#fff' }}
-                        />
-                      </div>
+                      <FlameGraph url={flameUrl} width={900} height={560} />
                     ) : (topn.length > 0 || collapsedText) ? (
                       <FlameGraph data={topn} collapsedText={collapsedText} width={900} height={400} />
                     ) : (

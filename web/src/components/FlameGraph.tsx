@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import flamegraph from 'd3-flame-graph';
 import { select as d3Select } from 'd3-selection';
 
@@ -88,11 +88,13 @@ function parseCollapsedToTree(text: string): FlameNode | null {
  */
 function flatDataToTree(data: { func: string; self: number }[]): FlameNode {
   // 不截断，保留全部数据
-  const sorted = [...data].sort((a, b) => b.self - a.self);
-  const totalSamples = sorted.reduce((sum, item) => sum + item.self, 0);
+  const sorted = [...data]
+    .map((item) => ({ ...item, self: Number(item.self) || 0 }))
+    .filter((item) => item.self > 0)
+    .sort((a, b) => b.self - a.self);
   return {
     name: 'all',
-    value: totalSamples,
+    value: 0,
     children: sorted.map(item => ({
       name: item.func,
       value: item.self,
@@ -101,10 +103,28 @@ function flatDataToTree(data: { func: string; self: number }[]): FlameNode {
 }
 
 export default function FlameGraph({ data, collapsedText, url, width = 960, height = 400 }: FlameGraphProps) {
+  const wrapperRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<any>(null);
   const rootRef = useRef<FlameNode | null>(null);
+  const resizeTimerRef = useRef<number | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  const root = useMemo(() => {
+    let parsedRoot: FlameNode | null = null;
+    if (collapsedText) {
+      parsedRoot = parseCollapsedToTree(collapsedText);
+    }
+    if (!parsedRoot && data && data.length > 0) {
+      parsedRoot = flatDataToTree(data);
+    }
+    return parsedRoot;
+  }, [data, collapsedText]);
+
+  const chartHeight = isFullscreen
+    ? Math.max((typeof window === 'undefined' ? height : window.innerHeight) - 82, height)
+    : height;
 
   // 注入 CSS（只执行一次）
   useEffect(() => {
@@ -112,7 +132,7 @@ export default function FlameGraph({ data, collapsedText, url, width = 960, heig
   }, []);
 
   // 渲染火焰图的函数
-  const renderChart = () => {
+  const renderChart = useCallback(() => {
     if (!containerRef.current || !rootRef.current) return;
 
     const el = containerRef.current;
@@ -120,7 +140,7 @@ export default function FlameGraph({ data, collapsedText, url, width = 960, heig
 
     const chart = flamegraph()
       .width(el.offsetWidth || width)
-      .height(height)
+      .height(chartHeight)
       .cellHeight(18)
       .transitionDuration(300)
       .tooltip(true)
@@ -132,20 +152,17 @@ export default function FlameGraph({ data, collapsedText, url, width = 960, heig
     d3Select(el)
       .datum(rootRef.current)
       .call(chart);
-  };
+  }, [chartHeight, width]);
 
   useEffect(() => {
     if (!containerRef.current) return;
 
-    // 优先 collapsed 层次数据，fallback 扁平 top.json
-    let root: FlameNode | null = null;
-    if (collapsedText) {
-      root = parseCollapsedToTree(collapsedText);
+    if (!root) {
+      rootRef.current = null;
+      chartRef.current?.destroy?.();
+      containerRef.current.innerHTML = '';
+      return;
     }
-    if (!root && data && data.length > 0) {
-      root = flatDataToTree(data);
-    }
-    if (!root) return;
 
     rootRef.current = root;
     renderChart();
@@ -156,13 +173,15 @@ export default function FlameGraph({ data, collapsedText, url, width = 960, heig
         containerRef.current.innerHTML = '';
       }
     };
-  }, [data, collapsedText, width, height]);
+  }, [root, renderChart]);
 
   // 监听窗口 resize 事件
   useEffect(() => {
     const handleResize = () => {
-      // 延迟执行，避免频繁重绘
-      setTimeout(() => {
+      if (resizeTimerRef.current) {
+        window.clearTimeout(resizeTimerRef.current);
+      }
+      resizeTimerRef.current = window.setTimeout(() => {
         if (rootRef.current) {
           renderChart();
         }
@@ -172,6 +191,20 @@ export default function FlameGraph({ data, collapsedText, url, width = 960, heig
     window.addEventListener('resize', handleResize);
     return () => {
       window.removeEventListener('resize', handleResize);
+      if (resizeTimerRef.current) {
+        window.clearTimeout(resizeTimerRef.current);
+      }
+    };
+  }, [renderChart]);
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(document.fullscreenElement === wrapperRef.current);
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
     };
   }, []);
 
@@ -184,23 +217,63 @@ export default function FlameGraph({ data, collapsedText, url, width = 960, heig
     }
   }, [searchTerm]);
 
+  const toggleFullscreen = async () => {
+    const el = wrapperRef.current;
+    if (!el) return;
+    try {
+      if (document.fullscreenElement === el) {
+        await document.exitFullscreen();
+      } else {
+        await el.requestFullscreen();
+      }
+    } catch {
+      // Fullscreen can be denied by the browser; keep the chart usable.
+    }
+  };
+
   if (url) {
     return (
-      <iframe
-        src={url}
-        title="flamegraph"
+      <div
+        ref={wrapperRef}
         style={{
-          width: '100%',
-          height,
-          border: 0,
-          background: 'rgba(0,0,0,0.2)',
-          borderRadius: 8,
+          background: isFullscreen ? '#101014' : 'transparent',
+          padding: isFullscreen ? 16 : 0,
+          height: isFullscreen ? '100vh' : 'auto',
+          boxSizing: 'border-box',
         }}
-      />
+      >
+        <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'flex-end' }}>
+          <button
+            onClick={toggleFullscreen}
+            style={{
+              padding: '6px 12px',
+              background: 'rgba(255,255,255,0.06)',
+              border: '0.5px solid rgba(255,255,255,0.1)',
+              borderRadius: 8,
+              color: 'rgba(255,255,255,0.72)',
+              fontSize: 12,
+              cursor: 'pointer',
+            }}
+          >
+            {isFullscreen ? '退出全屏' : '全屏'}
+          </button>
+        </div>
+        <iframe
+          src={url}
+          title="flamegraph"
+          style={{
+            width: '100%',
+            height: chartHeight,
+            border: 0,
+            background: 'rgba(0,0,0,0.2)',
+            borderRadius: 8,
+          }}
+        />
+      </div>
     );
   }
 
-  if ((!data || data.length === 0) && !collapsedText) {
+  if (!root) {
     return (
       <div style={{ padding: 60, textAlign: 'center' }}>
         <div style={{ fontSize: 15, color: 'rgba(255,255,255,0.35)' }}>这里空空如也</div>
@@ -210,8 +283,17 @@ export default function FlameGraph({ data, collapsedText, url, width = 960, heig
   }
 
   return (
-    <div>
-      <div style={{ marginBottom: 12, display: 'flex', gap: 8, alignItems: 'center' }}>
+    <div
+      ref={wrapperRef}
+      style={{
+        background: isFullscreen ? '#101014' : 'transparent',
+        padding: isFullscreen ? 16 : 0,
+        height: isFullscreen ? '100vh' : 'auto',
+        overflow: isFullscreen ? 'auto' : 'visible',
+        boxSizing: 'border-box',
+      }}
+    >
+      <div style={{ marginBottom: 12, display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'space-between' }}>
         <input
           type="text"
           placeholder="搜索函数名..."
@@ -228,22 +310,38 @@ export default function FlameGraph({ data, collapsedText, url, width = 960, heig
             width: 240,
           }}
         />
-        {searchTerm && (
+        <div style={{ display: 'flex', gap: 8 }}>
+          {searchTerm && (
+            <button
+              onClick={() => setSearchTerm('')}
+              style={{
+                padding: '6px 12px',
+                background: 'rgba(255,255,255,0.06)',
+                border: '0.5px solid rgba(255,255,255,0.1)',
+                borderRadius: 8,
+                color: 'rgba(255,255,255,0.6)',
+                fontSize: 12,
+                cursor: 'pointer',
+              }}
+            >
+              清除
+            </button>
+          )}
           <button
-            onClick={() => setSearchTerm('')}
+            onClick={toggleFullscreen}
             style={{
               padding: '6px 12px',
               background: 'rgba(255,255,255,0.06)',
               border: '0.5px solid rgba(255,255,255,0.1)',
               borderRadius: 8,
-              color: 'rgba(255,255,255,0.6)',
+              color: 'rgba(255,255,255,0.72)',
               fontSize: 12,
               cursor: 'pointer',
             }}
           >
-            清除
+            {isFullscreen ? '退出全屏' : '全屏'}
           </button>
-        )}
+        </div>
       </div>
       <div
         ref={containerRef}

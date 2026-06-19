@@ -40,6 +40,40 @@ def test_parse_pprof_text_empty():
     assert parse_pprof_text("flat  flat%\n------") == {}
 
 
+def test_parse_pprof_text_simple_with_sum_pct():
+    """简化格式: flat flat% sum% function (无 cum 列，有 sum%)"""
+    text = """flat  flat%   sum%
+1.23s 45.1% 45.1% runtime.mallocgc
+0.56s 20.5% 65.6% runtime.slicebytetostring
+"""
+    samples = parse_pprof_text(text)
+    assert len(samples) == 2
+    assert abs(samples["runtime.mallocgc"] - 1.23) < 0.01
+    assert abs(samples["runtime.slicebytetostring"] - 0.56) < 0.01
+
+
+def test_parse_pprof_text_simple_without_sum_pct():
+    """简化格式: flat flat% function (无 cum 列，无 sum%)"""
+    text = """flat  flat%
+1.23s 45.1% runtime.mallocgc
+0.56s 20.5% runtime.slicebytetostring
+"""
+    samples = parse_pprof_text(text)
+    assert len(samples) == 2
+    assert abs(samples["runtime.mallocgc"] - 1.23) < 0.01
+    assert abs(samples["runtime.slicebytetostring"] - 0.56) < 0.01
+
+
+def test_parse_pprof_text_unknown_unit():
+    """未知时间单位应抛出异常"""
+    text = """flat  flat%   sum%        cum   cum%
+1.23d 45.1% 45.1%     2.34d 85.7%  runtime.mallocgc
+"""
+    import pytest
+    with pytest.raises(ValueError, match="unknown time unit"):
+        parse_pprof_text(text)
+
+
 def test_parse_pprof_csv_basic():
     """解析 -csv 输出"""
     csv_text = """flat,flat%,sum%,cum,cum%,function
@@ -131,6 +165,35 @@ def test_get_top_allocators():
 def test_parse_heap_text_empty():
     """空输入"""
     assert parse_heap_text("") == []
+
+
+def test_parse_heap_text_objects():
+    """解析 -inuse_objects 输出（对象数格式，无单位）"""
+    text = """flat  flat%   sum%        cum   cum%
+1,234 45.1% 45.1%     5,678 85.7%  runtime.mallocgc
+500   18.7% 63.8%     500   18.7%  runtime.slicebytetostring
+"""
+    samples = parse_heap_text(text)
+    assert len(samples) == 2
+    assert samples[0].func == "runtime.mallocgc"
+    assert samples[0].flat_space == 1234
+    assert samples[0].cum_space == 5678
+    assert samples[1].func == "runtime.slicebytetostring"
+    assert samples[1].flat_space == 500
+
+
+def test_parse_heap_text_no_sum_pct():
+    """解析无 sum% 列的格式"""
+    text = """flat  flat%        cum   cum%
+1.23MB 45.1%     2.34MB 85.7%  runtime.mallocgc
+512KB  18.7%     512KB  18.7%  runtime.slicebytetostring
+"""
+    samples = parse_heap_text(text)
+    assert len(samples) == 2
+    assert samples[0].func == "runtime.mallocgc"
+    assert samples[0].flat_space == int(1.23 * 1024 * 1024)
+    assert samples[1].func == "runtime.slicebytetostring"
+    assert samples[1].flat_space == 512 * 1024
 
 
 if __name__ == "__main__":

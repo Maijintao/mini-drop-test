@@ -30,7 +30,7 @@ def parse_pprof_text(text: str) -> dict[str, float]:
         if not line or line.startswith("flat") or line.startswith("-"):
             continue
 
-        # 匹配: flat_time flat% sum% cum_time cum% function
+        # 完整格式: flat_time flat% sum% cum_time cum% function
         match = re.match(
             r'^([\d.]+)(ms|s|us|m|h)\s+[\d.]+%\s+[\d.]+%\s+[\d.]+(?:ms|s|us|m|h)\s+[\d.]+%\s+(.+)$',
             line
@@ -39,23 +39,43 @@ def parse_pprof_text(text: str) -> dict[str, float]:
             value = float(match.group(1))
             unit = match.group(2)
             func = match.group(3).strip()
-
-            # 转换为秒
-            value = _to_seconds(value, unit)
-            samples[func] = value
+            samples[func] = _to_seconds(value, unit)
             continue
 
-        # 简化格式: flat_time flat% function (无 cum 列)
-        match_simple = re.match(
+        # 简化格式1: flat_time flat% sum% function (无 cum 列，有 sum%)
+        match_simple1 = re.match(
+            r'^([\d.]+)(ms|s|us|m|h)\s+[\d.]+%\s+[\d.]+%\s+(.+)$',
+            line
+        )
+        if match_simple1:
+            value = float(match_simple1.group(1))
+            unit = match_simple1.group(2)
+            func = match_simple1.group(3).strip()
+            samples[func] = _to_seconds(value, unit)
+            continue
+
+        # 简化格式2: flat_time flat% function (无 cum 列，无 sum%)
+        match_simple2 = re.match(
             r'^([\d.]+)(ms|s|us|m|h)\s+[\d.]+%\s+(.+)$',
             line
         )
-        if match_simple:
-            value = float(match_simple.group(1))
-            unit = match_simple.group(2)
-            func = match_simple.group(3).strip()
-            value = _to_seconds(value, unit)
-            samples[func] = value
+        if match_simple2:
+            value = float(match_simple2.group(1))
+            unit = match_simple2.group(2)
+            func = match_simple2.group(3).strip()
+            samples[func] = _to_seconds(value, unit)
+            continue
+
+        # 检测格式异常：以数字开头但所有正则都不匹配
+        if re.match(r'^[\d.]+', line):
+            # 尝试提取单位，检查是否是未知单位
+            unit_match = re.match(r'^[\d.]+([a-zA-Z]+)', line)
+            if unit_match:
+                unit = unit_match.group(1).lower()
+                known_units = {"us", "ms", "s", "m", "h"}
+                if unit not in known_units:
+                    raise ValueError(f"unknown time unit: {unit!r} in line: {line!r}")
+            raise ValueError(f"malformed pprof line: {line!r}")
 
     return samples
 
@@ -147,7 +167,9 @@ def _to_seconds(value: float, unit: str) -> float:
         "m": 60.0,
         "h": 3600.0,
     }
-    return value * multipliers.get(unit, 1.0)
+    if unit not in multipliers:
+        raise ValueError(f"unknown time unit: {unit!r}")
+    return value * multipliers[unit]
 
 
 def flatten_stacks(samples: dict[str, float]) -> dict[str, int]:

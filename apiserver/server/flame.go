@@ -141,7 +141,36 @@ func (s *APIServer) GetFlameData(c *gin.Context) {
 		return
 	}
 
-	// 尝试获取折叠栈 JSON
+	// 尝试获取折叠栈文本，前端可直接渲染层次火焰图
+	collapsedKey := tid + "/collapsed.txt"
+	exists, err = s.Storage.IsExist(c, collapsedKey)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    CodeInternal,
+			"message": "storage error: " + err.Error(),
+		})
+		return
+	}
+	if exists {
+		url, err := s.Storage.PreSign(c, collapsedKey, 1*time.Hour)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"code":    CodeInternal,
+				"message": "presign error: " + err.Error(),
+			})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"code": CodeSuccess,
+			"data": gin.H{
+				"type": "collapsed",
+				"url":  url,
+			},
+		})
+		return
+	}
+
+	// 尝试获取热点函数 JSON
 	topKey := tid + "/top.json"
 	exists, err = s.Storage.IsExist(c, topKey)
 	if err != nil {

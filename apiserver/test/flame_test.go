@@ -30,6 +30,28 @@ func TestGetFlameData_SVG(t *testing.T) {
 	}
 }
 
+func TestGetFlameData_Collapsed(t *testing.T) {
+	db := SetupTestDB()
+	SeedTestData(db)
+	srv, _, mockStore := CreateTestAPIServer(db)
+	r := SetupTestRouter(srv)
+
+	mockStore.objects["test-tid-001/collapsed.txt"] = []byte("main;start;run 10\n")
+
+	w := DoAuthRequest(r, "GET", "/api/v1/tasks/test-tid-001/flame", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	resp := ParseJSON(w)
+	data := resp["data"].(map[string]interface{})
+	if data["type"] != "collapsed" {
+		t.Fatalf("expected type=collapsed, got %v", data["type"])
+	}
+	if data["url"] == nil {
+		t.Fatal("expected url in response")
+	}
+}
+
 func TestGetFlameData_NotFound(t *testing.T) {
 	db := SetupTestDB()
 	SeedTestData(db)

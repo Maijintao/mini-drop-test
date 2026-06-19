@@ -28,11 +28,16 @@ class HeapSample:
 
 def parse_heap_text(text: str) -> list[HeapSample]:
     """
-    解析 pprof -text -inuse_space 或 -alloc_space 输出。
+    解析 pprof -text 输出的 heap 数据。
+    支持 -inuse_space / -alloc_space（字节数格式）和 -inuse_objects / -alloc_objects（对象数格式）。
 
     示例输入 (inuse_space):
         flat  flat%   sum%        cum   cum%
         1.23MB 45.6% 45.6%     2.34MB 85.7%  runtime.mallocgc
+
+    示例输入 (inuse_objects):
+        flat  flat%   sum%        cum   cum%
+        1,234 45.6% 45.6%     5,678 85.7%  runtime.mallocgc
 
     返回 HeapSample 列表。
     """
@@ -42,14 +47,43 @@ def parse_heap_text(text: str) -> list[HeapSample]:
         if not line or line.startswith("flat") or line.startswith("-"):
             continue
 
+        # 完整格式: flat flat% sum% cum cum% function (有 sum%)
         match = re.match(
-            r'^([\d.]+)(B|KB|MB|GB|TB)\s+([\d.]+)%\s+[\d.]+%\s+([\d.]+)(B|KB|MB|GB|TB)\s+([\d.]+)%\s+(.+)$',
+            r'^([\d,.]+)(B|KB|MB|GB|TB)?\s+([\d.]+)%\s+[\d.]+%\s+([\d,.]+)(B|KB|MB|GB|TB)?\s+([\d.]+)%\s+(.+)$',
             line
         )
         if match:
-            flat_space = _to_bytes(float(match.group(1)), match.group(2))
-            cum_space = _to_bytes(float(match.group(4)), match.group(5))
+            flat_str = match.group(1).replace(",", "")
+            flat_unit = match.group(2) or "B"
+            cum_str = match.group(4).replace(",", "")
+            cum_unit = match.group(5) or "B"
             func = match.group(7).strip()
+
+            # 对象数格式（无单位）时用默认 "B"，但实际是对象数
+            flat_space = _to_bytes(float(flat_str), flat_unit)
+            cum_space = _to_bytes(float(cum_str), cum_unit)
+
+            samples.append(HeapSample(
+                func=func,
+                flat_space=flat_space,
+                cum_space=cum_space,
+            ))
+            continue
+
+        # 简化格式: flat flat% cum cum% function (无 sum%)
+        match_simple = re.match(
+            r'^([\d,.]+)(B|KB|MB|GB|TB)?\s+([\d.]+)%\s+([\d,.]+)(B|KB|MB|GB|TB)?\s+([\d.]+)%\s+(.+)$',
+            line
+        )
+        if match_simple:
+            flat_str = match_simple.group(1).replace(",", "")
+            flat_unit = match_simple.group(2) or "B"
+            cum_str = match_simple.group(4).replace(",", "")
+            cum_unit = match_simple.group(5) or "B"
+            func = match_simple.group(7).strip()
+
+            flat_space = _to_bytes(float(flat_str), flat_unit)
+            cum_space = _to_bytes(float(cum_str), cum_unit)
 
             samples.append(HeapSample(
                 func=func,

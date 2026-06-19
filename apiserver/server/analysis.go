@@ -3,11 +3,13 @@ package server
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -129,5 +131,25 @@ func (s *APIServer) analysisProcessEnv(tid string) []string {
 	if llm.Model != "" {
 		env = append(env, "LLM_MODEL="+llm.Model)
 	}
+
+	// 传递任务元数据给分析引擎（用于 LLM 归因报告）
+	env = append(env, "DROP_TASK_TARGET_IP="+task.TargetIP)
+	env = append(env, fmt.Sprintf("DROP_TASK_TYPE=%d", task.Type))
+	// 从 request_params JSON 中提取采集参数
+	// JSON 数字默认是 float64，需要转为 int 避免 "100.0" 这样的浮点字符串
+	var params map[string]interface{}
+	if err := json.Unmarshal(task.RequestParams, &params); err == nil {
+		for _, key := range []string{"pid", "duration", "hz"} {
+			if v, ok := params[key]; ok {
+				switch val := v.(type) {
+				case float64:
+					env = append(env, fmt.Sprintf("DROP_TASK_%s=%d", strings.ToUpper(key), int(val)))
+				case string:
+					env = append(env, "DROP_TASK_"+strings.ToUpper(key)+"="+val)
+				}
+			}
+		}
+	}
+
 	return env
 }
