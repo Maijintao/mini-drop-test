@@ -68,3 +68,8 @@ vcpkg_installed/
 # test output & cache
 Testing/
 .cache/
+.pytest_cache/
+
+# local VM/image bundles
+deploy/
+dist/

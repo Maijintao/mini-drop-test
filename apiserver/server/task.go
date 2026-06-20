@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"log"
+	"net"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -17,6 +20,7 @@ import (
 
 	"mini-drop/apiserver/middleware"
 	"mini-drop/apiserver/model"
+	"mini-drop/apiserver/pkg/storage"
 	pb "mini-drop/apiserver/proto"
 )
 
@@ -40,6 +44,7 @@ func isValidTaskProfilerCombination(taskType int, profilerType int) bool {
 		0:  0, // CPU / perf
 		1:  1, // Java / async-profiler
 		4:  4, // Python / memray
+		5:  6, // Resource / /proc sampler
 		6:  3, // eBPF / bpftrace
 		10: 2, // pprof CPU
 		11: 2, // pprof Heap
@@ -200,14 +205,17 @@ func (s *APIServer) GetTasks(c *gin.Context) {
 	size := parseIntDefault(c.Query("size"), 20)
 	status := c.Query("status")
 	keyword := c.Query("keyword")
+	includeWindows := c.Query("include_windows") == "true"
 
 	// 查自己所在组
 	var gids []uint
 	s.Db.Model(&model.GroupMember{}).Where("uid = ?", uid).Pluck("gid", &gids)
 
-	query := s.Db.Where("uid = ?", uid)
+	query := s.Db.Model(&model.HotmethodTask{})
 	if len(gids) > 0 {
-		query = query.Or("uid IN (SELECT uid FROM group_members WHERE gid IN ?)", gids)
+		query = query.Where("(uid = ? OR uid IN (SELECT uid FROM group_members WHERE gid IN ?))", uid, gids)
+	} else {
+		query = query.Where("uid = ?", uid)
 	}
 
 	if status != "" {
@@ -216,9 +224,12 @@ func (s *APIServer) GetTasks(c *gin.Context) {
 	if keyword != "" {
 		query = query.Where("name LIKE ? OR target_ip LIKE ?", "%"+keyword+"%", "%"+keyword+"%")
 	}
+	if !includeWindows {
+		query = query.Where("(master_task_tid = '' OR master_task_tid IS NULL)")
+	}
 
 	var total int64
-	query.Model(&model.HotmethodTask{}).Count(&total)
+	query.Count(&total)
 
 	var tasks []model.HotmethodTask
 	query.Order("create_time DESC").
@@ -300,7 +311,7 @@ func (s *APIServer) GetTaskDetail(c *gin.Context) {
 			objects = appendUnique(objects, key)
 		}
 		for _, obj := range objects {
-			url, err := s.Storage.PreSign(c, obj, 1*time.Hour)
+			url, err := s.presignPublicURL(c, obj, 1*time.Hour)
 			if err != nil {
 				continue // 跳过签名失败的文件
 			}
@@ -320,6 +331,37 @@ func (s *APIServer) GetTaskDetail(c *gin.Context) {
 			"state_history": stateHistory,
 		},
 	})
+}
+
+// GetTaskArtifact 通过同源 API 读取任务产物内容，避免浏览器直接访问对象存储签名 URL。
+func (s *APIServer) GetTaskArtifact(c *gin.Context) {
+	tid := c.Param("tid")
+	key := strings.TrimSpace(c.Query("key"))
+	if key == "" || strings.Contains(key, "..") || strings.HasPrefix(key, "/") {
+		c.JSON(http.StatusBadRequest, gin.H{"code": CodeParamError, "message": "invalid artifact key"})
+		return
+	}
+	task, ok := s.checkTaskAccess(c, tid)
+	if !ok {
+		return
+	}
+	if !isTaskArtifactKey(task, key) {
+		c.JSON(http.StatusNotFound, gin.H{"code": CodeNotFound, "message": "artifact not found"})
+		return
+	}
+	reader, err := s.Storage.Get(c, key)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": CodeNotFound, "message": "artifact not found"})
+		return
+	}
+	defer reader.Close()
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": CodeInternal, "message": "read artifact failed: " + err.Error()})
+		return
+	}
+	c.Header("Content-Disposition", `inline; filename="`+filepath.Base(key)+`"`)
+	c.Data(http.StatusOK, contentTypeForArtifact(key), data)
 }
 
 // GetTaskStateHistory 查询任务状态迁移历史 — GET /api/v1/tasks/:tid/state_history
@@ -707,7 +749,7 @@ func (s *APIServer) GetCOSFiles(c *gin.Context) {
 
 	var files []gin.H
 	for _, obj := range objects {
-		url, err := s.Storage.PreSign(c, obj, 1*time.Hour)
+		url, err := s.presignPublicURL(c, obj, 1*time.Hour)
 		if err != nil {
 			continue // 跳过签名失败的文件
 		}
@@ -734,13 +776,22 @@ func (s *APIServer) listStorageObjects(c context.Context, prefix string) []strin
 		// fallback: 探测常见文件名
 		known := []string{
 			prefix + "perf.data",
+			prefix + "perf.script.txt",
 			prefix + "flamegraph.svg",
 			prefix + "top.json",
 			prefix + "suggestions.md",
+			prefix + "ai_suggestion.md",
 			prefix + "attribution_report.md",
 			prefix + "attribution_evidence.json",
 			prefix + "attribution_tool_calls.json",
 			prefix + "collapsed.txt",
+			prefix + "biosnoop_stats.json",
+			prefix + "heap_stats.json",
+			prefix + "memleak.json",
+			prefix + "pprof_cpu.json",
+			prefix + "pprof_heap.json",
+			prefix + "resource_stats.json",
+			prefix + "tracing_stats.json",
 		}
 		for _, k := range known {
 			exists, _ := s.Storage.IsExist(c, k)
@@ -759,10 +810,85 @@ func extractCollectorResultKey(statusInfo string) string {
 		return ""
 	}
 	key := strings.TrimSpace(statusInfo[idx+len(marker):])
+	if cut := strings.Index(key, ";"); cut >= 0 {
+		key = strings.TrimSpace(key[:cut])
+	}
 	if key == "" || strings.ContainsAny(key, "\r\n") {
 		return ""
 	}
 	return key
+}
+
+func isTaskArtifactKey(task *model.HotmethodTask, key string) bool {
+	if task == nil || key == "" {
+		return false
+	}
+	tid := task.TID
+	if strings.HasPrefix(key, tid+"/") || strings.HasPrefix(key, "profiler/"+tid+"/") {
+		return true
+	}
+	return key == extractCollectorResultKey(task.StatusInfo)
+}
+
+func contentTypeForArtifact(key string) string {
+	name := strings.ToLower(filepath.Base(key))
+	switch {
+	case strings.HasSuffix(name, ".html"):
+		return "text/html; charset=utf-8"
+	case strings.HasSuffix(name, ".json"):
+		return "application/json; charset=utf-8"
+	case strings.HasSuffix(name, ".txt"), strings.HasSuffix(name, ".collapsed"), strings.HasSuffix(name, ".md"):
+		return "text/plain; charset=utf-8"
+	case strings.HasSuffix(name, ".svg"):
+		return "image/svg+xml"
+	default:
+		return "application/octet-stream"
+	}
+}
+
+func (s *APIServer) presignPublicURL(c *gin.Context, key string, expiry time.Duration) (string, error) {
+	ctx := context.Background()
+	if c.Request != nil {
+		ctx = c.Request.Context()
+	}
+	if endpoint, useSSL := publicObjectEndpointForRequest(c); endpoint != "" {
+		ctx = storage.WithPresignEndpoint(ctx, endpoint, useSSL)
+	}
+	return s.Storage.PreSign(ctx, key, expiry)
+}
+
+func publicObjectEndpointForRequest(c *gin.Context) (string, bool) {
+	requestHost := c.GetHeader("X-Forwarded-Host")
+	if requestHost == "" && c.Request != nil {
+		requestHost = c.Request.Host
+	}
+	if requestHost == "" {
+		return "", false
+	}
+	if comma := strings.Index(requestHost, ","); comma >= 0 {
+		requestHost = strings.TrimSpace(requestHost[:comma])
+	}
+	requestHost = strings.TrimSpace(requestHost)
+
+	publicHost, _, err := net.SplitHostPort(requestHost)
+	if err != nil {
+		publicHost = requestHost
+	}
+	publicHost = strings.Trim(publicHost, "[]")
+	if publicHost == "" {
+		return "", false
+	}
+
+	proto := c.GetHeader("X-Forwarded-Proto")
+	if comma := strings.Index(proto, ","); comma >= 0 {
+		proto = strings.TrimSpace(proto[:comma])
+	}
+	useSSL := strings.EqualFold(proto, "https")
+	if !useSSL && c.Request != nil && c.Request.TLS != nil {
+		useSSL = true
+	}
+
+	return net.JoinHostPort(publicHost, "9000"), useSSL
 }
 
 func appendUnique(items []string, item string) []string {

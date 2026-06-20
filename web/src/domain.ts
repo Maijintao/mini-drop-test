@@ -200,6 +200,7 @@ export const profilerTypeMap: Record<number, string> = {
   3: 'bpftrace',
   4: 'memray',
   5: 'java-heap',
+  6: 'resource',
 };
 
 export const taskTypeMap: Record<number, string> = {

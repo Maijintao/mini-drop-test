@@ -75,6 +75,31 @@ func TestGetFlameData_PrefersCollapsedOverSVG(t *testing.T) {
 	}
 }
 
+func TestGetFlameData_UsesCollectorCollapsed(t *testing.T) {
+	db := SetupTestDB()
+	SeedTestData(db)
+	db.Model(&model.HotmethodTask{}).
+		Where("tid = ?", "test-tid-001").
+		Update("status_info", "collector result ready: profiler/test-tid-001/test-tid-001.collapsed")
+	srv, _, mockStore := CreateTestAPIServer(db)
+	r := SetupTestRouter(srv)
+
+	mockStore.objects["profiler/test-tid-001/test-tid-001.collapsed"] = []byte("main;start;run 10\n")
+
+	w := DoAuthRequest(r, "GET", "/api/v1/tasks/test-tid-001/flame", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	resp := ParseJSON(w)
+	data := resp["data"].(map[string]interface{})
+	if data["type"] != "collapsed" {
+		t.Fatalf("expected type=collapsed, got %v", data["type"])
+	}
+	if data["url"] != "http://mock-presign/profiler/test-tid-001/test-tid-001.collapsed" {
+		t.Fatalf("expected collector collapsed url, got %v", data["url"])
+	}
+}
+
 func TestGetFlameData_NotFound(t *testing.T) {
 	db := SetupTestDB()
 	SeedTestData(db)

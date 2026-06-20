@@ -80,6 +80,7 @@ add_executable(drop_agent
   common/PprofProfiler.cpp
   common/MemrayProfiler.cpp
   common/JavaHeapDumper.cpp
+  common/ResourceProfiler.cpp
   common/Daemon.cpp
   common/Log.cpp
   common/ScriptRunner.cpp

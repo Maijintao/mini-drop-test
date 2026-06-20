@@ -200,6 +200,7 @@ func setupRouter(srv *server.APIServer, logger *zap.Logger, cfg config.Config) *
 			auth.POST("/tasks", srv.CreateTask)
 			auth.GET("/tasks", srv.GetTasks)
 			auth.GET("/tasks/:tid", srv.GetTaskDetail)
+			auth.GET("/tasks/:tid/artifact", srv.GetTaskArtifact)
 			auth.GET("/tasks/:tid/state_history", srv.GetTaskStateHistory)
 			auth.DELETE("/tasks/:tid", srv.DeleteTask)
 			auth.POST("/tasks/:tid/retry", srv.RetryTask)

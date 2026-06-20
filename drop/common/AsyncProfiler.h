@@ -15,6 +15,11 @@ public:
   int Type() const override { return PROFILER_ASYNC_PROFILER; }
 
 private:
+  int RecordWithAsyncProfiler(int pid, int duration_sec, int freq,
+                              const std::string& output_path);
+  int RecordWithJstack(int pid, int duration_sec, int freq,
+                       const std::string& output_path);
+
   // async-profiler 路径
   static constexpr const char* PROFILER_PATH = "/opt/async-profiler/build/bin/asprof";
 };

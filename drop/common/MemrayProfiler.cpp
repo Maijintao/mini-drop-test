@@ -9,17 +9,16 @@ namespace drop {
 
 int MemrayProfiler::Record(int pid, int duration_sec, int /*freq*/,
                             const std::string& output_path) {
-  // memray attach -o <output> -d <duration> <pid>
-  // -d: 采集时长（秒），-o: 输出文件
+  // memray attach --output <output> --duration <duration> <pid>
   std::vector<std::string> args = {
     "memray", "attach",
-    "-o", output_path,
-    "-d", std::to_string(duration_sec),
+    "--output", output_path,
+    "--duration", std::to_string(duration_sec),
     std::to_string(pid)
   };
 
-  LOG_INFO("Executing: memray attach -o " + output_path +
-           " -d " + std::to_string(duration_sec) +
+  LOG_INFO("Executing: memray attach --output " + output_path +
+           " --duration " + std::to_string(duration_sec) +
            " " + std::to_string(pid));
 
   // 超时 = 采集时长 + 60 秒缓冲（Python 内存 dump 可能较慢）

@@ -48,6 +48,7 @@ from analyzers.topn import analyze_topn, topn_to_json
 from analyzers.advisor import load_rules, match_rules, suggestions_to_markdown
 from ai_advisor import generate_ai_suggestion, generate_ai_summary, is_llm_enabled
 from ai_advisor import generate_attribution_artifacts
+from ai_advisor import generate_task_attribution_report
 from analyzers.pprof_data_parser import parse_pprof_text, parse_pprof_csv
 from analyzers.pprof_heap_parser import parse_heap_text, parse_heap_csv
 from analyzers.resource_analyzer import ResourceSample, parse_pidstat_csv, analyze_resources, samples_to_json
@@ -209,8 +210,8 @@ def main():
             1:  ["collapsed.txt", f"{tid}.collapsed", f"{tid}.txt"],          # Java async-profiler collapsed stacks
             2:  ["tracing.json", "tracing.csv", f"{tid}.json", f"{tid}.csv"], # Tracing
             4:  ["memleak.xml", "memleak.txt", "memleak.json", "memray.json", "memray.html", f"{tid}.json", f"{tid}.html", f"{tid}.bin"],  # MemCheck / memray
-            5:  ["pidstat.csv", "pidstat.json"],                             # Resource Analysis
-            6:  ["biosnoop.csv", "biosnoop.json"],                           # eBPF Biosnoop
+            5:  ["pidstat.csv", "pidstat.json", f"{tid}.json"],              # Resource Analysis
+            6:  ["biosnoop.csv", "biosnoop.json", f"{tid}.json", f"{tid}.txt"],  # eBPF Biosnoop
             7:  ["bw_sync.json", "bw_sync.csv"],                             # BW Sync
             8:  ["namespace.txt"],                                           # Namespace
             9:  ["assembly.txt", "objdump.txt"],                             # Assembly
@@ -311,6 +312,8 @@ def main():
             result = run_pprof_heap(raw_path, work_dir, tid)
         else:
             error_exit(f"unsupported task_type={task_type}", ERR_UNSUPPORTED, api=api, tid=tid)
+
+        _attach_task_attribution_report(result, work_dir, tid, task_type, api)
 
         # 8. 上传产物
         for local_path, key_name in result.items():
@@ -441,6 +444,97 @@ def _truncate_collapsed(collapsed_path: str):
             f.writelines(truncated_lines)
         log.info("truncated collapsed: %d -> %d lines (max_depth=%d)",
                  original_count, len(truncated_lines), MAX_STACK_DEPTH)
+
+
+TASK_TYPE_NAMES = {
+    0: "CPU / perf",
+    1: "Java / async-profiler",
+    2: "Tracing",
+    4: "Python / memray",
+    5: "Resource Analysis",
+    6: "eBPF / bpftrace",
+    7: "BW Sync",
+    8: "Namespace",
+    9: "Assembly",
+    10: "pprof CPU",
+    11: "pprof Heap",
+    12: "Java Heap",
+}
+
+
+def _attach_task_attribution_report(result: dict, work_dir: str, tid: str,
+                                    task_type: int, api: APIServerClient = None):
+    """每次分析都尽量生成一份整体 LLM 归因报告。"""
+    if any(name == "attribution_report.md" for name in result.values()):
+        return
+    if not is_llm_enabled():
+        return
+
+    artifact_summaries = _summarize_analysis_products(result)
+    if not artifact_summaries:
+        return
+
+    task_meta = _extract_task_meta_from_env()
+    task_meta["type_name"] = TASK_TYPE_NAMES.get(task_type, f"task_type={task_type}")
+    report = generate_task_attribution_report(tid, task_meta, artifact_summaries)
+    if not report:
+        return
+
+    report_path = os.path.join(work_dir, "attribution_report.md")
+    with open(report_path, "w") as f:
+        f.write(report)
+    result[report_path] = "attribution_report.md"
+    log.info("task attribution_report -> %s", report_path)
+
+    if api:
+        try:
+            api.create_suggestion(
+                tid=tid,
+                func="整体归因报告",
+                suggestion="基于本任务分析产物生成的 LLM 归因报告。",
+                ai_suggestion=report,
+            )
+        except Exception as e:
+            log.warning("failed to create task attribution suggestion: %s", e)
+
+
+def _summarize_analysis_products(result: dict) -> list[dict]:
+    summaries = []
+    for local_path, key_name in result.items():
+        name = os.path.basename(key_name)
+        if name in {"flamegraph.svg"} or name.endswith(".html"):
+            summaries.append({
+                "name": name,
+                "kind": "artifact",
+                "size_bytes": _safe_file_size(local_path),
+            })
+            continue
+        if name.endswith(".json") or name.endswith(".md") or name.endswith(".txt"):
+            summaries.append({
+                "name": name,
+                "kind": "text",
+                "size_bytes": _safe_file_size(local_path),
+                "content": _read_product_excerpt(local_path),
+            })
+    return summaries[:8]
+
+
+def _safe_file_size(path: str) -> int:
+    try:
+        return os.path.getsize(path)
+    except OSError:
+        return 0
+
+
+def _read_product_excerpt(path: str, limit: int = 6000) -> str:
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            content = f.read(limit + 1)
+    except OSError:
+        return ""
+    if len(content) > limit:
+        return content[:limit] + "\n...<truncated>"
+    return content
 
 
 def run_cpu_flamegraph(perf_data_path: str, work_dir: str, tid: str,
@@ -574,10 +668,18 @@ def run_java_heap(hprof_path: str, work_dir: str, tid: str) -> dict:
         raise RuntimeError(f"not a valid HPROF file: {hprof_path}")
 
     result_path = os.path.join(work_dir, "heap_stats.json")
+    analyzer_dir = os.path.join(os.path.dirname(__file__), "java_heap_analyzer")
+    analyzer_bin = os.path.join(analyzer_dir, "java_heap_analyzer")
+    if os.path.exists(analyzer_bin) and os.access(analyzer_bin, os.X_OK):
+        cmd = [analyzer_bin, "--output", result_path, hprof_path]
+        cwd = None
+    else:
+        cmd = ["go", "run", ".", "--output", result_path, hprof_path]
+        cwd = analyzer_dir
     proc = subprocess.run(
-        ["go", "run", ".", "--output", result_path, hprof_path],
+        cmd,
         capture_output=True, text=True, timeout=600,
-        cwd=os.path.join(os.path.dirname(__file__), "java_heap_analyzer"),
+        cwd=cwd,
     )
     if proc.returncode != 0:
         raise RuntimeError(f"java_heap_analyzer failed: {proc.stderr}")
@@ -846,12 +948,12 @@ def run_memleak(data_path: str, work_dir: str, tid: str, api=None) -> dict:
             "total_leaked_blocks": 0,
             "analysis_kind": "memray_artifact",
             "summary": (
-                "Memray 采集产物已生成。当前离线分析器不会把 memray HTML 反解析为泄漏栈；"
-                "请在文件下载中查看 memray flamegraph HTML，用于定位 Python 分配热点。"
+                "Memray 采集产物已生成，Web 会默认渲染 memray flamegraph HTML，"
+                "用于定位 Python 分配热点。"
             ),
             "leaks": [],
             "suggestions": [
-                "若需要泄漏级别归因，请导出 memray summary/table JSON 或使用 Valgrind/ASan 文本产物。"
+                "若需要泄漏级别归因，请补充 memray summary/table JSON 或使用 Valgrind/ASan 文本产物。"
             ],
             "artifact": name,
         }

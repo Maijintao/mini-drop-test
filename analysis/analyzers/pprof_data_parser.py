@@ -30,15 +30,22 @@ def parse_pprof_text(text: str) -> dict[str, float]:
         if not line or line.startswith("flat") or line.startswith("-"):
             continue
 
-        # 完整格式: flat_time flat% sum% cum_time cum% function
+        # 完整格式: flat_time flat% sum% cum_time cum% function.
+        # go tool pprof may print zero values without units, e.g.
+        # "0 0% 87.47% 0.12s 0.92% runtime.gcBgMarkWorker".
         match = re.match(
-            r'^([\d.]+)(ms|s|us|m|h)\s+[\d.]+%\s+[\d.]+%\s+[\d.]+(?:ms|s|us|m|h)\s+[\d.]+%\s+(.+)$',
+            r'^([\d.]+)(ms|s|us|m|h)?\s+[\d.]+%\s+[\d.]+%\s+([\d.]+)(ms|s|us|m|h)?\s+[\d.]+%\s+(.+)$',
             line
         )
         if match:
             value = float(match.group(1))
-            unit = match.group(2)
-            func = match.group(3).strip()
+            unit = match.group(2) or "s"
+            cum_unit = match.group(4)
+            func = match.group(5).strip()
+            if not match.group(2) and value != 0:
+                raise ValueError(f"missing flat time unit in line: {line!r}")
+            if not cum_unit and float(match.group(3)) != 0:
+                raise ValueError(f"missing cumulative time unit in line: {line!r}")
             samples[func] = _to_seconds(value, unit)
             continue
 

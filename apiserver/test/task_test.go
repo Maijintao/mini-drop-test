@@ -4,8 +4,11 @@ import (
 	"context"
 	"net/http"
 	"testing"
+	"time"
 
+	"mini-drop/apiserver/model"
 	pb "mini-drop/apiserver/proto"
+	"mini-drop/apiserver/server"
 )
 
 // 测试创建任务正常路径
@@ -147,6 +150,40 @@ func TestGetTasks_OK(t *testing.T) {
 	}
 }
 
+func TestGetTasks_HidesContinuousWindowsByDefault(t *testing.T) {
+	db := SetupTestDB()
+	SeedTestData(db)
+	db.Create(&model.HotmethodTask{
+		TID: "test-tid-001_w1", Name: "window", Type: 0, ProfilerType: 0,
+		TargetIP: "10.0.0.1", Status: server.TaskStatusFailed,
+		UID: "test-user-1", UserName: "TestUser1",
+		MasterTaskTID: "test-tid-001",
+		CreateTime:    time.Now(),
+	})
+	srv, _, _ := CreateTestAPIServer(db)
+	r := SetupTestRouter(srv)
+
+	w := DoAuthRequest(r, "GET", "/api/v1/tasks", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	resp := ParseJSON(w)
+	data := resp["data"].(map[string]interface{})
+	if data["total"].(float64) != 1 {
+		t.Fatalf("expected only parent task in default list, got total=%v", data["total"])
+	}
+
+	w = DoAuthRequest(r, "GET", "/api/v1/tasks?include_windows=true", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	resp = ParseJSON(w)
+	data = resp["data"].(map[string]interface{})
+	if data["total"].(float64) != 2 {
+		t.Fatalf("expected parent + window when include_windows=true, got total=%v", data["total"])
+	}
+}
+
 // 测试获取任务列表带筛选
 func TestGetTasks_WithFilter(t *testing.T) {
 	db := SetupTestDB()
@@ -179,6 +216,40 @@ func TestGetTaskDetail_OK(t *testing.T) {
 	task := data["task"].(map[string]interface{})
 	if task["tid"] != "test-tid-001" {
 		t.Fatalf("expected tid=test-tid-001, got %v", task["tid"])
+	}
+}
+
+func TestGetTaskArtifact_OK(t *testing.T) {
+	db := SetupTestDB()
+	SeedTestData(db)
+	srv, _, mockStore := CreateTestAPIServer(db)
+	r := SetupTestRouter(srv)
+
+	mockStore.objects["profiler/test-tid-001/test-tid-001.html"] = []byte("<html>memray</html>")
+
+	w := DoAuthRequest(r, "GET", "/api/v1/tasks/test-tid-001/artifact?key=profiler/test-tid-001/test-tid-001.html", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if w.Body.String() != "<html>memray</html>" {
+		t.Fatalf("unexpected body: %q", w.Body.String())
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "text/html; charset=utf-8" {
+		t.Fatalf("unexpected content-type: %q", ct)
+	}
+}
+
+func TestGetTaskArtifact_RejectsForeignKey(t *testing.T) {
+	db := SetupTestDB()
+	SeedTestData(db)
+	srv, _, mockStore := CreateTestAPIServer(db)
+	r := SetupTestRouter(srv)
+
+	mockStore.objects["profiler/other/secret.html"] = []byte("<html>secret</html>")
+
+	w := DoAuthRequest(r, "GET", "/api/v1/tasks/test-tid-001/artifact?key=profiler/other/secret.html", nil)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", w.Code, w.Body.String())
 	}
 }
 

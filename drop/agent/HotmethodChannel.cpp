@@ -6,6 +6,7 @@
 #include "PprofProfiler.h"
 #include "MemrayProfiler.h"
 #include "JavaHeapDumper.h"
+#include "ResourceProfiler.h"
 #include "ScriptRunner.h"
 #include "Log.h"
 #include <iostream>
@@ -125,6 +126,8 @@ static std::unique_ptr<IProfiler> CreateProfiler(int profiler_type, const Config
       return std::make_unique<MemrayProfiler>();
     case PROFILER_JAVA_HEAP:
       return std::make_unique<JavaHeapDumper>();
+    case PROFILER_RESOURCE:
+      return std::make_unique<ResourceProfiler>();
     default:
       return nullptr;
   }
@@ -170,6 +173,8 @@ void HotmethodChannel::WorkerLoop() {
       ext = ".bin";
     } else if (task.profiler_type() == PROFILER_JAVA_HEAP) {
       ext = ".hprof";
+    } else if (task.profiler_type() == PROFILER_RESOURCE) {
+      ext = ".json";
     }
 
     std::string output_path = "/tmp/profiler_" + task.task_id() + ext;

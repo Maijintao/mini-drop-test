@@ -26,7 +26,7 @@ func TestHPROFParserEmpty(t *testing.T) {
 
 	// 写入头部: "JAVA PROFILE 1.0.1\0" + 4字节ID大小 + 8字节时间戳
 	header := []byte("JAVA PROFILE 1.0.1\x00")
-	header = append(header, 0, 0, 0, 4) // ID size = 4
+	header = append(header, 0, 0, 0, 4)             // ID size = 4
 	header = append(header, 0, 0, 0, 0, 0, 0, 0, 0) // timestamp
 	if _, err := tmpFile.Write(header); err != nil {
 		t.Fatal(err)

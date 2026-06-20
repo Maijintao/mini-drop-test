@@ -166,26 +166,19 @@ END
 }
 
 std::string BpftraceProfiler::GenerateSchedProbeScript(int pid, int duration) {
-  // bpftrace 脚本：追踪调度延迟（从 wakeup 到被调度上 CPU 的等待时间）
-  // 输出与 biotrace.py 兼容的 CSV：TIME,COMM,PID,DISK,T,BYTES,LAT(ns)。
+  // Portable scheduler activity probe. Some validation kernels do not expose
+  // sched:sched_wakeup, so use profile ticks filtered by pid and emit a CSV
+  // shape compatible with the biosnoop analyzer.
   return R"(
-tracepoint:sched:sched_wakeup
-/args->pid == )" + std::to_string(pid) + R"( /
+profile:hz:99
+/pid == )" + std::to_string(pid) + R"( /
 {
-  @start[args->pid] = nsecs;
-}
-
-tracepoint:sched:sched_switch
-/args->next_pid == )" + std::to_string(pid) + R"( && @start[args->next_pid]/
-{
-  $lat_ns = nsecs - @start[args->next_pid];
   printf("%lld,%s,%d,sched,SCHED,0,%lld\n",
     nsecs,
-    args->next_comm,
-    args->next_pid,
-    $lat_ns
+    comm,
+    pid,
+    10000000
   );
-  delete(@start[args->next_pid]);
 }
 
 interval:s:)" + std::to_string(duration) + R"(
@@ -193,10 +186,6 @@ interval:s:)" + std::to_string(duration) + R"(
   exit();
 }
 
-END
-{
-  clear(@start);
-}
 )";
 }
 

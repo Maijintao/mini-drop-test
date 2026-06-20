@@ -106,6 +106,10 @@ export const getTaskStateHistory = (tid: string) => typedGet<TaskStateHistory[]>
 export const deleteTask = (tid: string) => typedDelete<unknown>(`/tasks/${tid}`);
 export const retryTask = (tid: string) => typedPost<{ tid: string }>(`/tasks/${tid}/retry`);
 export const getCosFiles = (tid: string) => typedGet<CosFile[]>('/cosfiles', { tid });
+export const fetchArtifactText = (tid: string, key: string) =>
+  api.get(`/tasks/${tid}/artifact`, { params: { key }, responseType: 'text' }) as unknown as Promise<string>;
+export const fetchArtifactJson = <T>(tid: string, key: string) =>
+  api.get(`/tasks/${tid}/artifact`, { params: { key } }) as unknown as Promise<T>;
 
 // Continuous Profiling
 export const createContinuousTask = (data: CreateContinuousParams) =>
@@ -120,7 +124,7 @@ export const getSuggestions = (tid: string) => typedGet<AnalysisSuggestion[]>(`/
 export const triggerAnalysis = (tid: string) => typedPost<unknown>(`/tasks/${tid}/analyze`);
 
 // Flame
-export const getFlameData = (tid: string) => typedGet<{ type: string; url: string }>(`/tasks/${tid}/flame`);
+export const getFlameData = (tid: string) => typedGet<{ type: string; key?: string; url: string }>(`/tasks/${tid}/flame`);
 export const flameDiff = (tid1: string, tid2: string) =>
   typedPost<FlameDiffResult>('/flame/diff', { tid1, tid2 });
 

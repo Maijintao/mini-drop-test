@@ -13,23 +13,23 @@ import (
 
 // HeapStats 堆统计结果
 type HeapStats struct {
-	TotalObjects    int64            `json:"total_objects"`
-	TotalSize       int64            `json:"total_bytes"`
-	GCRoots         int              `json:"gc_roots"`
-	ClassCount      int              `json:"class_count"`
-	InstanceCount   int              `json:"instance_count"`
-	ArrayCount      int              `json:"array_count"`
-	TopClasses      []ClassStats     `json:"top_classes"`
-	TopSizes        []ClassStats     `json:"top_sizes"`
-	Summary         string           `json:"summary"`
+	TotalObjects  int64        `json:"total_objects"`
+	TotalSize     int64        `json:"total_bytes"`
+	GCRoots       int          `json:"gc_roots"`
+	ClassCount    int          `json:"class_count"`
+	InstanceCount int          `json:"instance_count"`
+	ArrayCount    int          `json:"array_count"`
+	TopClasses    []ClassStats `json:"top_classes"`
+	TopSizes      []ClassStats `json:"top_sizes"`
+	Summary       string       `json:"summary"`
 }
 
 // ClassStats 类统计
 type ClassStats struct {
-	Name         string `json:"name"`
-	InstanceCount int   `json:"instance_count"`
-	TotalSize    int64  `json:"total_bytes"`
-	AvgSize      int64  `json:"avg_bytes"`
+	Name          string `json:"name"`
+	InstanceCount int    `json:"instance_count"`
+	TotalSize     int64  `json:"total_bytes"`
+	AvgSize       int64  `json:"avg_bytes"`
 }
 
 func main() {

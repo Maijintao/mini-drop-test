@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sync"
 	"time"
 
 	"github.com/minio/minio-go/v7"
@@ -13,9 +14,14 @@ import (
 )
 
 type MinIOStorage struct {
-	client        *minio.Client
-	presignClient *minio.Client
-	bucket        string
+	client         *minio.Client
+	presignClient  *minio.Client
+	presignClients map[string]*minio.Client
+	presignMu      sync.Mutex
+	accessKey      string
+	secretKey      string
+	region         string
+	bucket         string
 }
 
 // New 创建 MinIO 存储客户端，自动创建 bucket
@@ -57,7 +63,15 @@ func New(endpoint, publicEndpoint, accessKey, secretKey, bucket string, useSSL, 
 		}
 	}
 
-	return &MinIOStorage{client: client, presignClient: presignClient, bucket: bucket}, nil
+	return &MinIOStorage{
+		client:         client,
+		presignClient:  presignClient,
+		presignClients: make(map[string]*minio.Client),
+		accessKey:      accessKey,
+		secretKey:      secretKey,
+		region:         region,
+		bucket:         bucket,
+	}, nil
 }
 
 func (m *MinIOStorage) Get(ctx context.Context, key string) (io.ReadCloser, error) {
@@ -79,11 +93,42 @@ func (m *MinIOStorage) Put(ctx context.Context, key string, reader io.Reader, si
 }
 
 func (m *MinIOStorage) PreSign(ctx context.Context, key string, expiry time.Duration) (string, error) {
-	url, err := m.presignClient.PresignedGetObject(ctx, m.bucket, key, expiry, nil)
+	client := m.presignClient
+	if endpoint, useSSL, ok := storage.PresignEndpointFromContext(ctx); ok {
+		var err error
+		client, err = m.presignClientFor(endpoint, useSSL)
+		if err != nil {
+			return "", err
+		}
+	}
+
+	url, err := client.PresignedGetObject(ctx, m.bucket, key, expiry, nil)
 	if err != nil {
 		return "", fmt.Errorf("minio presign %s: %w", key, err)
 	}
 	return url.String(), nil
+}
+
+func (m *MinIOStorage) presignClientFor(endpoint string, useSSL bool) (*minio.Client, error) {
+	cacheKey := fmt.Sprintf("%t|%s", useSSL, endpoint)
+
+	m.presignMu.Lock()
+	defer m.presignMu.Unlock()
+
+	if client, ok := m.presignClients[cacheKey]; ok {
+		return client, nil
+	}
+
+	client, err := minio.New(endpoint, &minio.Options{
+		Creds:  credentials.NewStaticV4(m.accessKey, m.secretKey, ""),
+		Secure: useSSL,
+		Region: m.region,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("minio new presign client %s: %w", endpoint, err)
+	}
+	m.presignClients[cacheKey] = client
+	return client, nil
 }
 
 func (m *MinIOStorage) Delete(ctx context.Context, key string) error {

@@ -71,7 +71,7 @@ export default function TaskList() {
     target_ip: '',
     pid: 0,
     hz: 10,
-    window_sec: 300,
+    window_sec: 15,
     callgraph: 'dwarf',
   });
 
@@ -153,7 +153,7 @@ export default function TaskList() {
         name: form.name || `常驻采集 - ${continuousForm.target_ip}`,
         pid: Number(continuousForm.pid),
         hz: Number(continuousForm.hz || 10),
-        window_sec: Number(continuousForm.window_sec || 300),
+        window_sec: Number(continuousForm.window_sec || 15),
       };
       const res = await createContinuousTask(payload);
       if (res.code !== 0) throw new Error(res.message || '创建常驻任务失败');

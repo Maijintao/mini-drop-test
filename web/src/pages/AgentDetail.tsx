@@ -148,7 +148,7 @@ export default function AgentDetail() {
                       <td style={{ padding: '13px 16px', color: s.color, fontSize: 13 }}>{s.label}</td>
                       <td style={{ padding: '13px 16px', color: 'rgba(255,255,255,0.45)', fontSize: 13 }}>{formatDate(task.create_time)}</td>
                       <td style={{ padding: '13px 16px', textAlign: 'right' }}>
-                        <button onClick={() => navigate(`/task/result?tid=${task.tid}`)} style={{ background: 'none', border: 'none', color: 'rgba(96,165,250,0.9)', cursor: 'pointer', fontSize: 13 }}>详情</button>
+                        <button onClick={() => navigate(task.type === 2 ? `/continuous?tid=${task.tid}` : `/task/result?tid=${task.tid}`)} style={{ background: 'none', border: 'none', color: 'rgba(96,165,250,0.9)', cursor: 'pointer', fontSize: 13 }}>详情</button>
                       </td>
                     </tr>
                   );

@@ -62,7 +62,9 @@ while [[ -z "$AGENT_IP" ]]; do
 done
 echo "[demo] using agent $AGENT_IP"
 
-sleep 300 &
+python3 -c 'import time; end=time.time()+300; x=0
+while time.time() < end:
+    x = (x * 1664525 + 1013904223) & 0xffffffff' &
 TARGET_PID=$!
 cleanup() {
   kill "$TARGET_PID" >/dev/null 2>&1 || true

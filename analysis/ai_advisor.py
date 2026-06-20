@@ -75,6 +75,30 @@ def generate_ai_summary(suggestions: list[dict], tid: str = "") -> str:
         return ""
 
 
+def generate_task_attribution_report(
+    tid: str,
+    task_meta: dict,
+    artifact_summaries: list[dict],
+) -> str:
+    """
+    为非火焰图类任务生成整体归因报告。
+
+    CPU/async-profiler 走 generate_attribution_artifacts，它有 TopN/热路径证据。
+    pprof、eBPF、memray、资源、Java Heap 等任务没有同一类证据结构，
+    这里基于各自分析产物的 JSON 摘要做一次 LLM 归因。
+    """
+    if not is_llm_enabled() or not artifact_summaries:
+        return ""
+
+    prompt = _build_task_attribution_prompt(tid, task_meta, artifact_summaries)
+    try:
+        content = _call_llm(prompt, max_tokens=1024)
+        return _format_task_attribution_markdown(content, tid, task_meta, artifact_summaries)
+    except Exception as e:
+        log.warning("task attribution LLM call failed: %s", e)
+        return ""
+
+
 def _build_prompt(func_name: str, suggestion: str, topn_data: dict = None) -> str:
     """构建单函数分析的 LLM prompt"""
     context = ""
@@ -105,6 +129,22 @@ def _build_summary_prompt(tid: str, func_list: str) -> str:
     )
 
 
+def _build_task_attribution_prompt(tid: str, task_meta: dict, artifact_summaries: list[dict]) -> str:
+    return (
+        "你是性能诊断系统的归因模块。只能基于输入的本次采集产物做判断，"
+        "不能编造源码、业务背景、外部监控或未给出的机器指标。\n"
+        "请输出 Markdown，必须包含以下小节：\n"
+        "## 结论\n"
+        "## 证据\n"
+        "## 可验证假设\n"
+        "## 优先修复\n"
+        "## 需要补充的数据\n\n"
+        f"任务ID: {tid}\n"
+        f"采集元数据: {json.dumps(task_meta, ensure_ascii=False)}\n"
+        f"分析产物摘要: {json.dumps(artifact_summaries, ensure_ascii=False)}\n"
+    )
+
+
 def _format_summary_markdown(content: str, tid: str) -> str:
     content = content.strip()
     header = (
@@ -112,6 +152,27 @@ def _format_summary_markdown(content: str, tid: str) -> str:
         f"- 生成时间: {_utc_timestamp()}\n"
         f"- 模型: {LLM_MODEL}\n"
         "- 证据边界: 仅基于本次分析产物和规则建议\n\n"
+    )
+    if content.startswith("#"):
+        return header + content + "\n"
+    return header + content + "\n"
+
+
+def _format_task_attribution_markdown(
+    content: str,
+    tid: str,
+    task_meta: dict,
+    artifact_summaries: list[dict],
+) -> str:
+    content = content.strip()
+    artifact_names = ", ".join(str(item.get("name", "")) for item in artifact_summaries if item.get("name"))
+    header = (
+        f"# LLM 归因报告 - {tid}\n\n"
+        f"- 生成时间: {_utc_timestamp()}\n"
+        f"- 模型: {LLM_MODEL}\n"
+        f"- 任务类型: {task_meta.get('type_name') or task_meta.get('type')}\n"
+        f"- 证据产物: {artifact_names or '无'}\n"
+        "- 证据边界: 仅基于本次采集产物和分析 JSON\n\n"
     )
     if content.startswith("#"):
         return header + content + "\n"
@@ -129,8 +190,28 @@ def _chat_completions_url() -> str:
     return base + "/chat/completions"
 
 
+def _anthropic_messages_url() -> str:
+    base = LLM_BASE_URL.rstrip("/")
+    if base.endswith("/v1/messages"):
+        return base
+    if base.endswith("/messages"):
+        return base
+    return base + "/v1/messages"
+
+
+def _is_anthropic_endpoint() -> bool:
+    base = LLM_BASE_URL.lower().rstrip("/")
+    return "/anthropic" in base or base.endswith("/v1/messages") or base.endswith("/messages")
+
+
 def _call_llm(prompt: str, max_tokens: int = 512) -> str:
     """调用 LLM API（OpenAI 兼容接口）"""
+    if _is_anthropic_endpoint():
+        return _call_anthropic(prompt, max_tokens)
+    return _call_openai_compatible(prompt, max_tokens)
+
+
+def _call_openai_compatible(prompt: str, max_tokens: int = 512) -> str:
     import urllib.request
     import urllib.error
 
@@ -154,6 +235,33 @@ def _call_llm(prompt: str, max_tokens: int = 512) -> str:
     with urllib.request.urlopen(req, timeout=60) as resp:
         data = json.loads(resp.read().decode("utf-8"))
         return data["choices"][0]["message"]["content"].strip()
+
+
+def _call_anthropic(prompt: str, max_tokens: int = 512) -> str:
+    import urllib.request
+
+    body = json.dumps({
+        "model": LLM_MODEL,
+        "max_tokens": max_tokens,
+        "messages": [
+            {"role": "user", "content": prompt},
+        ],
+    }).encode("utf-8")
+
+    req = urllib.request.Request(_anthropic_messages_url(), data=body, method="POST")
+    req.add_header("Content-Type", "application/json")
+    req.add_header("x-api-key", LLM_TOKEN)
+    req.add_header("anthropic-version", "2023-06-01")
+
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+        parts = []
+        for item in data.get("content", []):
+            if isinstance(item, dict) and item.get("type") == "text":
+                text = item.get("text", "")
+                if text:
+                    parts.append(text)
+        return "\n".join(parts).strip()
 
 
 # ============================================================

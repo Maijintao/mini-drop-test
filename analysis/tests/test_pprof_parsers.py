@@ -34,6 +34,17 @@ def test_parse_pprof_text_millisecond():
     assert abs(samples["main.helper"] - 0.045) < 0.001
 
 
+def test_parse_pprof_text_zero_flat_without_unit():
+    """兼容 go tool pprof 对 0 flat 值不带单位的输出。"""
+    text = """flat  flat%   sum%        cum   cum%
+0     0% 87.47%      0.12s  0.92%  runtime.(*gcControllerState).enlistWorker
+10ms  5% 92.47%      10ms   5%     main.work
+"""
+    samples = parse_pprof_text(text)
+    assert samples["runtime.(*gcControllerState).enlistWorker"] == 0
+    assert abs(samples["main.work"] - 0.01) < 0.001
+
+
 def test_parse_pprof_text_empty():
     """空输入"""
     assert parse_pprof_text("") == {}

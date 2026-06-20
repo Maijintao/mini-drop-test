@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -92,6 +93,8 @@ var windowTIDPattern = regexp.MustCompile(`^(.+)_w\d+$`)
 
 func (s *APIServer) GetFlameData(c *gin.Context) {
 	tid := c.Param("tid")
+	var task *model.HotmethodTask
+	var cosKey string
 
 	// 检查是否是窗口 TID（如 parent_tid_w0）
 	if matches := windowTIDPattern.FindStringSubmatch(tid); len(matches) == 2 {
@@ -105,16 +108,19 @@ func (s *APIServer) GetFlameData(c *gin.Context) {
 		if _, ok := s.checkTaskAccess(c, parentTID); !ok {
 			return
 		}
+		cosKey = window.COSKey
 	} else {
 		// 普通任务
-		if _, ok := s.checkTaskAccess(c, tid); !ok {
+		var ok bool
+		task, ok = s.checkTaskAccess(c, tid)
+		if !ok {
 			return
 		}
+		cosKey = extractCollectorResultKey(task.StatusInfo)
 	}
 
 	// 尝试获取折叠栈文本，前端可直接渲染层次火焰图
-	collapsedKey := tid + "/collapsed.txt"
-	exists, err := s.Storage.IsExist(c, collapsedKey)
+	collapsedKey, err := s.firstExistingStorageKey(c, flameCollapsedCandidateKeys(tid, cosKey))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    CodeInternal,
@@ -122,8 +128,8 @@ func (s *APIServer) GetFlameData(c *gin.Context) {
 		})
 		return
 	}
-	if exists {
-		url, err := s.Storage.PreSign(c, collapsedKey, 1*time.Hour)
+	if collapsedKey != "" {
+		url, err := s.presignPublicURL(c, collapsedKey, 1*time.Hour)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"code":    CodeInternal,
@@ -135,6 +141,7 @@ func (s *APIServer) GetFlameData(c *gin.Context) {
 			"code": CodeSuccess,
 			"data": gin.H{
 				"type": "collapsed",
+				"key":  collapsedKey,
 				"url":  url,
 			},
 		})
@@ -143,7 +150,7 @@ func (s *APIServer) GetFlameData(c *gin.Context) {
 
 	// 尝试获取热点函数 JSON
 	topKey := tid + "/top.json"
-	exists, err = s.Storage.IsExist(c, topKey)
+	exists, err := s.Storage.IsExist(c, topKey)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    CodeInternal,
@@ -152,7 +159,7 @@ func (s *APIServer) GetFlameData(c *gin.Context) {
 		return
 	}
 	if exists {
-		url, err := s.Storage.PreSign(c, topKey, 1*time.Hour)
+		url, err := s.presignPublicURL(c, topKey, 1*time.Hour)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"code":    CodeInternal,
@@ -164,6 +171,7 @@ func (s *APIServer) GetFlameData(c *gin.Context) {
 			"code": CodeSuccess,
 			"data": gin.H{
 				"type": "json",
+				"key":  topKey,
 				"url":  url,
 			},
 		})
@@ -181,7 +189,7 @@ func (s *APIServer) GetFlameData(c *gin.Context) {
 		return
 	}
 	if exists {
-		url, err := s.Storage.PreSign(c, svgKey, 1*time.Hour)
+		url, err := s.presignPublicURL(c, svgKey, 1*time.Hour)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"code":    CodeInternal,
@@ -193,6 +201,7 @@ func (s *APIServer) GetFlameData(c *gin.Context) {
 			"code": CodeSuccess,
 			"data": gin.H{
 				"type": "svg",
+				"key":  svgKey,
 				"url":  url,
 			},
 		})
@@ -320,7 +329,10 @@ type DiffTreeNode struct {
 
 // loadCollapsed 从存储加载 collapsed.txt
 func (s *APIServer) loadCollapsed(c *gin.Context, tid string) string {
-	key := tid + "/collapsed.txt"
+	key, err := s.firstExistingStorageKey(c, flameCollapsedCandidateKeys(tid, ""))
+	if err != nil || key == "" {
+		return ""
+	}
 	reader, err := s.Storage.Get(c, key)
 	if err != nil {
 		return ""
@@ -332,6 +344,55 @@ func (s *APIServer) loadCollapsed(c *gin.Context, tid string) string {
 		return ""
 	}
 	return string(data)
+}
+
+func (s *APIServer) firstExistingStorageKey(c context.Context, keys []string) (string, error) {
+	for _, key := range keys {
+		if key == "" {
+			continue
+		}
+		exists, err := s.Storage.IsExist(c, key)
+		if err != nil {
+			return "", err
+		}
+		if exists {
+			return key, nil
+		}
+	}
+	return "", nil
+}
+
+func flameCollapsedCandidateKeys(tid, cosKey string) []string {
+	keys := []string{
+		tid + "/collapsed.txt",
+		"profiler/" + tid + "/" + tid + ".collapsed",
+		"profiler/" + tid + "/collapsed.txt",
+	}
+	if isCollapsedObjectKey(cosKey) {
+		keys = append([]string{cosKey}, keys...)
+	}
+	return dedupeStrings(keys)
+}
+
+func isCollapsedObjectKey(key string) bool {
+	name := strings.ToLower(key)
+	return strings.HasSuffix(name, "/collapsed.txt") || strings.HasSuffix(name, ".collapsed")
+}
+
+func dedupeStrings(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
 }
 
 // buildDiffTree 从两个 collapsed 文本计算差异火焰图树。

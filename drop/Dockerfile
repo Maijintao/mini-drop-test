@@ -30,22 +30,39 @@ RUN mkdir -p build && cd build \
 # 运行阶段：最小镜像
 FROM ubuntu:22.04
 
-# 安装运行时依赖（perf/bpftrace/curl/mc）
-RUN apt-get update && apt-get install -y \
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=Etc/UTC
+
+# 安装运行时依赖（perf/bpftrace/curl/mc/memray/jmap）
+RUN apt-get update && apt-get install -y --no-install-recommends \
     libgrpc++1 \
     libprotobuf23 \
     libsqlite3-0 \
     linux-tools-common \
     linux-tools-generic \
     bpftrace \
+    gdb \
     curl \
     wget \
+    python3 \
+    python3-pip \
+    openjdk-17-jdk-headless \
+    ca-certificates \
+    tzdata \
+    && pip3 install --no-cache-dir memray \
     && wget -qO /usr/local/bin/mc https://dl.min.io/client/mc/release/linux-amd64/mc \
     && chmod +x /usr/local/bin/mc \
     && rm -rf /var/lib/apt/lists/*
 
 # 创建配置目录
 RUN mkdir -p /etc/drop
+
+# Ubuntu's /usr/bin/perf is a wrapper that expects a host-kernel-matched
+# linux-tools package. Validation VMs may run non-Ubuntu kernels, so prefer the
+# generic perf binary bundled in this image.
+RUN set -eux; \
+    perf_bin="$(find /usr/lib/linux-tools /usr/lib/linux-tools-* -name perf 2>/dev/null | sort | tail -n 1 || true)"; \
+    if [ -n "$perf_bin" ]; then ln -sf "$perf_bin" /usr/local/bin/perf; fi
 
 # 从构建阶段复制二进制
 COPY --from=builder /build/build/drop_server /usr/local/bin/

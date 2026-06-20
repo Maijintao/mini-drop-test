@@ -6,6 +6,31 @@ import (
 	"time"
 )
 
+type presignEndpointContextKey struct{}
+
+type PresignEndpoint struct {
+	Endpoint string
+	UseSSL   bool
+}
+
+func WithPresignEndpoint(ctx context.Context, endpoint string, useSSL bool) context.Context {
+	if endpoint == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, presignEndpointContextKey{}, PresignEndpoint{
+		Endpoint: endpoint,
+		UseSSL:   useSSL,
+	})
+}
+
+func PresignEndpointFromContext(ctx context.Context) (endpoint string, useSSL bool, ok bool) {
+	v, ok := ctx.Value(presignEndpointContextKey{}).(PresignEndpoint)
+	if !ok || v.Endpoint == "" {
+		return "", false, false
+	}
+	return v.Endpoint, v.UseSSL, true
+}
+
 // Storage 对象存储抽象接口
 type Storage interface {
 	// Get 获取文件内容

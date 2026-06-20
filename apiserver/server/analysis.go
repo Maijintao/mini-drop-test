@@ -37,10 +37,6 @@ func (s *APIServer) TriggerAnalysis(c *gin.Context) {
 		c.JSON(http.StatusConflict, gin.H{"code": CodeInternal, "message": "analysis already running"})
 		return
 	}
-	if task.AnalysisStatus == AnalysisStatusSuccess {
-		c.JSON(http.StatusConflict, gin.H{"code": CodeInternal, "message": "analysis already completed"})
-		return
-	}
 	if s.AnalysisCmd.Command == "" || s.AnalysisCmd.ScriptPath == "" {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": CodeInternal, "message": "analysis command not configured"})
 		return

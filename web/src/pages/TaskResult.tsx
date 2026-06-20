@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import axios from 'axios';
 import { useGSAP } from '@gsap/react';
 import gsap from 'gsap';
 import { Button, Card, Table, Tabs, Typography, Space, message, Spin, Statistic, Row, Col, Timeline } from 'antd';
 import { ReloadOutlined, PlayCircleOutlined, ArrowLeftOutlined, FireOutlined } from '@ant-design/icons';
-import { fetchSignedJson, getCosFiles, getFlameData, getSuggestions, getTaskDetail, triggerAnalysis } from '@/api';
+import { fetchArtifactJson, fetchArtifactText, getCosFiles, getFlameData, getSuggestions, getTaskDetail, triggerAnalysis } from '@/api';
 import type { AnalysisSuggestion, CosFile, HotmethodTask, TaskStateHistory, TopFunction } from '@/domain';
 import { analysisMap, basename, formatDate, formatDuration, parseTaskParams, profilerTypeMap, statusMap, taskTypeMap } from '@/domain';
 import FlameGraph from '@/components/FlameGraph';
@@ -46,6 +45,43 @@ function stateHistoryColor(item: TaskStateHistory) {
   return mapping[item.to_state]?.color || 'gray';
 }
 
+type ResultPanelKey = 'flame' | 'topn' | 'suggestions' | 'ebpf' | 'pprof' | 'memory';
+
+const panelMeta: Record<ResultPanelKey, { label: string; artifacts: string[] }> = {
+  flame: { label: '火焰图', artifacts: ['collapsed.txt', 'flamegraph.svg', 'top.json'] },
+  topn: { label: '热点函数', artifacts: ['top.json'] },
+  suggestions: { label: '归因分析', artifacts: ['suggestions.md', 'attribution_evidence.json'] },
+  ebpf: { label: 'eBPF 分析', artifacts: ['biosnoop_stats.json'] },
+  pprof: { label: 'pprof 分析', artifacts: ['pprof_cpu.json', 'pprof_heap.json'] },
+  memory: { label: '内存/资源', artifacts: ['memleak.json', 'heap_stats.json', 'resource_stats.json'] },
+};
+
+const expectedPanelsByTaskType: Record<number, ResultPanelKey[]> = {
+  0: ['flame', 'topn', 'suggestions'],
+  1: ['flame', 'topn', 'suggestions'],
+  4: ['suggestions', 'memory'],
+  5: ['suggestions', 'memory'],
+  6: ['suggestions', 'ebpf'],
+  10: ['suggestions', 'pprof'],
+  11: ['suggestions', 'pprof'],
+  12: ['suggestions', 'memory'],
+};
+
+const primaryPanelByTaskType: Record<number, ResultPanelKey> = {
+  0: 'flame',
+  1: 'flame',
+  4: 'memory',
+  5: 'memory',
+  6: 'ebpf',
+  10: 'pprof',
+  11: 'pprof',
+  12: 'memory',
+};
+
+function expectedPanelsForTask(task?: HotmethodTask | null): Set<ResultPanelKey> {
+  return new Set(expectedPanelsByTaskType[task?.type ?? -1] || []);
+}
+
 export default function TaskResult() {
   const [searchParams] = useSearchParams();
   const tid = searchParams.get('tid') || '';
@@ -53,7 +89,6 @@ export default function TaskResult() {
   const [task, setTask] = useState<HotmethodTask | null>(null);
   const [suggestions, setSuggestions] = useState<AnalysisSuggestion[]>([]);
   const [stateHistory, setStateHistory] = useState<TaskStateHistory[]>([]);
-  const [flameUrl, setFlameUrl] = useState('');
   const [flameError, setFlameError] = useState('');
   const [topn, setTopn] = useState<TopFunction[]>([]);
   const [collapsedText, setCollapsedText] = useState('');
@@ -66,12 +101,24 @@ export default function TaskResult() {
   const [pprofHeapData, setPprofHeapData] = useState<any[] | null>(null);
   const [pprofLoading, setPprofLoading] = useState(false);
   const [memoryData, setMemoryData] = useState<any>(null);
+  const [memrayHtmlUrl, setMemrayHtmlUrl] = useState('');
+  const [memrayLoading, setMemrayLoading] = useState(false);
+  const [memrayError, setMemrayError] = useState('');
   const [heapData, setHeapData] = useState<any>(null);
   const [resourceData, setResourceData] = useState<any>(null);
   const [attributionEvidence, setAttributionEvidence] = useState<any>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const taskRef = useRef<HotmethodTask | null>(null);
+  const memrayObjectUrlRef = useRef('');
   const navigate = useNavigate();
+
+  const clearMemrayHtmlUrl = useCallback(() => {
+    if (memrayObjectUrlRef.current) {
+      URL.revokeObjectURL(memrayObjectUrlRef.current);
+      memrayObjectUrlRef.current = '';
+    }
+    setMemrayHtmlUrl('');
+  }, []);
 
   useGSAP(() => {
     gsap.fromTo('.result-header', { y: -10, autoAlpha: 0 }, { y: 0, autoAlpha: 1, duration: 0.35, clearProps: 'transform,opacity,visibility' });
@@ -80,11 +127,11 @@ export default function TaskResult() {
   }, { scope: containerRef });
 
   useEffect(() => {
+    setActiveTab('flame');
     setTask(null);
     setSuggestions([]);
     setStateHistory([]);
     setCosFiles([]);
-    setFlameUrl('');
     setFlameError('');
     setTopn([]);
     setCollapsedText('');
@@ -94,10 +141,13 @@ export default function TaskResult() {
     setPprofHeapData(null);
     setPprofLoading(false);
     setMemoryData(null);
+    clearMemrayHtmlUrl();
+    setMemrayLoading(false);
+    setMemrayError('');
     setHeapData(null);
     setResourceData(null);
     setAttributionEvidence(null);
-  }, [tid]);
+  }, [tid, clearMemrayHtmlUrl]);
 
   const loadTask = useCallback(async () => {
     if (!tid) {
@@ -112,6 +162,7 @@ export default function TaskResult() {
     setPprofHeapData(null);
     setPprofLoading(false);
     setMemoryData(null);
+    setMemrayError('');
     setHeapData(null);
     setResourceData(null);
     setAttributionEvidence(null);
@@ -137,22 +188,18 @@ export default function TaskResult() {
       try {
         const flameRes = await getFlameData(tid);
         setFlameError('');
-        if (flameRes.code === 0 && flameRes.data?.url) {
+        if (flameRes.code === 0 && flameRes.data?.key) {
           if (flameRes.data.type === 'svg') {
-            // COS 返回的 SVG 会触发下载，不在 iframe 中渲染；继续走 collapsed.txt / top.json 的 D3 渲染路径。
-            setFlameUrl('');
+            // COS 返回的 SVG 可能触发下载，不在 iframe 中渲染；继续走 collapsed/top.json 的 D3 渲染路径。
           } else if (flameRes.data.type === 'json') {
-            const data = await fetchSignedJson<TopFunction[]>(flameRes.data.url);
+            const data = await fetchArtifactJson<TopFunction[]>(tid, flameRes.data.key);
             setTopn(Array.isArray(data) ? data : []);
-            setFlameUrl('');
           } else if (flameRes.data.type === 'collapsed') {
-            const res = await axios.get<string>(flameRes.data.url, { withCredentials: false, timeout: 30000, responseType: 'text' });
-            setCollapsedText(typeof res.data === 'string' ? res.data : '');
-            setFlameUrl('');
+            const text = await fetchArtifactText(tid, flameRes.data.key);
+            setCollapsedText(typeof text === 'string' ? text : '');
           }
         }
       } catch {
-        setFlameUrl('');
         setFlameError('暂无可渲染的火焰图数据');
       }
 
@@ -171,25 +218,27 @@ export default function TaskResult() {
 
       // 加载 top.json（如果 getFlameData 没有返回，从 cos_files 加载）
       const topFile = files.find(file => basename(file.key || file.name).toLowerCase() === 'top.json');
-      if (topFile?.url) {
+      if (topFile?.key) {
         try {
-          const data = await fetchSignedJson<TopFunction[]>(topFile.url);
+          const data = await fetchArtifactJson<TopFunction[]>(tid, topFile.key);
           setTopn(Array.isArray(data) ? data : []);
         } catch {
           setTopn([]);
         }
       }
 
-      // 加载 collapsed.txt 用于层次火焰图渲染
-      const collapsedFile = files.find(file => basename(file.key || file.name).toLowerCase() === 'collapsed.txt');
-      if (collapsedFile?.url) {
+      // 加载 collapsed 文本用于层次火焰图渲染；优先分析产物，回退采集器原始 .collapsed。
+      const collapsedFile = files
+        .filter(file => isCollapsedArtifact(file))
+        .sort((a, b) => Number(!isAnalysisArtifact(a)) - Number(!isAnalysisArtifact(b)))[0];
+      if (collapsedFile?.key) {
         try {
-          const res = await axios.get<string>(collapsedFile.url, { withCredentials: false, timeout: 30000, responseType: 'text' });
-          if (typeof res.data === 'string' && res.data.length > 0) {
-            setCollapsedText(res.data);
+          const text = await fetchArtifactText(tid, collapsedFile.key);
+          if (typeof text === 'string' && text.length > 0) {
+            setCollapsedText(text);
           }
         } catch {
-          setCollapsedText('');
+          // Keep any data returned by /flame.
         }
       }
 
@@ -199,10 +248,10 @@ export default function TaskResult() {
         const name = basename(f.key || f.name || '').toLowerCase();
         return name === 'biosnoop_stats.json';
       });
-      if (eBpfFile?.url) {
+      if (eBpfFile?.key) {
         setEBpfLoading(true);
         try {
-          const data = await fetchSignedJson<any>(eBpfFile.url);
+          const data = await fetchArtifactJson<any>(tid, eBpfFile.key);
           setEBpfData(data);
         } catch {
           setEBpfData(null);
@@ -214,16 +263,16 @@ export default function TaskResult() {
       // 加载用户态语言级采集器分析数据（pprof CPU / Heap）
       const pprofCpuFile = allFiles.find(f => basename(f.key || f.name || '').toLowerCase() === 'pprof_cpu.json');
       const pprofHeapFile = allFiles.find(f => basename(f.key || f.name || '').toLowerCase() === 'pprof_heap.json');
-      if (pprofCpuFile?.url || pprofHeapFile?.url) {
+      if (pprofCpuFile?.key || pprofHeapFile?.key) {
         setPprofLoading(true);
         try {
-          if (pprofCpuFile?.url) {
-            const data = await fetchSignedJson<any>(pprofCpuFile.url);
+          if (pprofCpuFile?.key) {
+            const data = await fetchArtifactJson<any>(tid, pprofCpuFile.key);
             const samples = data?.samples ?? data;
             setPprofCpuData(samples && typeof samples === 'object' && !Array.isArray(samples) ? samples : null);
           }
-          if (pprofHeapFile?.url) {
-            const data = await fetchSignedJson<any>(pprofHeapFile.url);
+          if (pprofHeapFile?.key) {
+            const data = await fetchArtifactJson<any>(tid, pprofHeapFile.key);
             const samples = data?.samples ?? data;
             setPprofHeapData(Array.isArray(samples) ? samples : null);
           }
@@ -236,16 +285,35 @@ export default function TaskResult() {
       }
 
       const memleakFile = allFiles.find(f => basename(f.key || f.name || '').toLowerCase() === 'memleak.json');
+      const memrayHtmlFile = allFiles.find(f => isMemrayHtmlArtifact(f));
       const heapFile = allFiles.find(f => basename(f.key || f.name || '').toLowerCase() === 'heap_stats.json');
       const resourceFile = allFiles.find(f => basename(f.key || f.name || '').toLowerCase() === 'resource_stats.json');
       const attributionEvidenceFile = allFiles.find(f => basename(f.key || f.name || '').toLowerCase() === 'attribution_evidence.json');
       try {
-        if (memleakFile?.url) setMemoryData(await fetchSignedJson<any>(memleakFile.url));
-        if (heapFile?.url) setHeapData(await fetchSignedJson<any>(heapFile.url));
-        if (resourceFile?.url) setResourceData(await fetchSignedJson<any>(resourceFile.url));
-        if (attributionEvidenceFile?.url) setAttributionEvidence(await fetchSignedJson<any>(attributionEvidenceFile.url));
+        if (memleakFile?.key) setMemoryData(await fetchArtifactJson<any>(tid, memleakFile.key));
+        if (heapFile?.key) setHeapData(await fetchArtifactJson<any>(tid, heapFile.key));
+        if (resourceFile?.key) setResourceData(await fetchArtifactJson<any>(tid, resourceFile.key));
+        if (attributionEvidenceFile?.key) setAttributionEvidence(await fetchArtifactJson<any>(tid, attributionEvidenceFile.key));
       } catch {
         // Optional extended artifacts should not block the main result page.
+      }
+      if (memrayHtmlFile?.key && !memrayObjectUrlRef.current) {
+        setMemrayLoading(true);
+        try {
+          const html = await fetchArtifactText(tid, memrayHtmlFile.key);
+          if (typeof html === 'string' && html.length > 0) {
+            if (memrayObjectUrlRef.current) {
+              URL.revokeObjectURL(memrayObjectUrlRef.current);
+            }
+            const objectUrl = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }));
+            memrayObjectUrlRef.current = objectUrl;
+            setMemrayHtmlUrl(objectUrl);
+          }
+        } catch (e: any) {
+          setMemrayError(e?.message || 'Memray 可视化加载失败');
+        } finally {
+          setMemrayLoading(false);
+        }
       }
     } catch (e: any) {
       setError(e?.response?.data?.message || e?.message || '任务详情加载失败');
@@ -255,6 +323,14 @@ export default function TaskResult() {
   }, [tid]);
 
   useEffect(() => {
+    return () => {
+      if (memrayObjectUrlRef.current) {
+        URL.revokeObjectURL(memrayObjectUrlRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
     setLoading(true);
     loadTask();
   }, [loadTask]);
@@ -262,6 +338,12 @@ export default function TaskResult() {
   useEffect(() => {
     taskRef.current = task;
   }, [task]);
+
+  useEffect(() => {
+    if (task?.type === 2) {
+      navigate(`/continuous?tid=${task.tid}`, { replace: true });
+    }
+  }, [navigate, task]);
 
   useEffect(() => {
     if (!loadTask) return;
@@ -346,6 +428,43 @@ export default function TaskResult() {
   }, [heapData]);
   const resourceSummary = resourceData?.summary || resourceData;
   const attributionEvidenceRows = useMemo(() => flattenAttributionEvidence(attributionEvidence), [attributionEvidence]);
+  const expectedPanels = useMemo(() => expectedPanelsForTask(task), [task]);
+  const panelAvailable: Record<ResultPanelKey, boolean> = {
+    flame: Boolean(collapsedText || topn.length > 0),
+    topn: topn.length > 0,
+    suggestions: suggestions.length > 0 || attributionEvidenceRows.length > 0,
+    ebpf: Boolean(eBpfData),
+    pprof: pprofCpuRows.length > 0 || pprofHeapRows.length > 0,
+    memory: Boolean(memoryData || memrayHtmlUrl || memrayLoading || heapRows.length > 0 || resourceSummary),
+  };
+  const visiblePanel = (key: ResultPanelKey) => expectedPanels.has(key) || panelAvailable[key];
+  const visibleTabKeys = useMemo(() => {
+    const keys = ['info', 'states'];
+    (Object.keys(panelMeta) as ResultPanelKey[]).forEach((key) => {
+      if (visiblePanel(key)) keys.push(key);
+    });
+    keys.push('files');
+    return keys;
+  }, [expectedPanels, panelAvailable.flame, panelAvailable.topn, panelAvailable.suggestions, panelAvailable.ebpf, panelAvailable.pprof, panelAvailable.memory]);
+  useEffect(() => {
+    if (!task) return;
+    if (!visibleTabKeys.includes(activeTab)) {
+      const primary = primaryPanelByTaskType[task?.type ?? -1];
+      setActiveTab(primary && visibleTabKeys.includes(primary) ? primary : 'info');
+    }
+  }, [activeTab, task, task?.type, visibleTabKeys]);
+  const emptyPanel = (key: ResultPanelKey) => {
+    const artifacts = panelMeta[key].artifacts.join(' / ');
+    const messageText = task?.analysis_status === 3
+      ? '分析失败，查看状态迁移里的错误信息。'
+      : `分析已完成但未找到预期产物：${artifacts}`;
+    return (
+      <div style={{ padding: 60, textAlign: 'center' }}>
+        <div style={{ fontSize: 15, color: '#fbbf24' }}>缺少分析产物</div>
+        <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.24)', marginTop: 6 }}>{messageText}</div>
+      </div>
+    );
+  };
 
   // TopN 表格列定义
   const topnColumns = [
@@ -551,45 +670,44 @@ export default function TaskResult() {
                     )
                   ),
                 },
-                {
+                ...(visiblePanel('flame') ? [{
                   key: 'flame',
                   label: '火焰图',
                   children: (
-                    flameUrl ? (
-                      <FlameGraph url={flameUrl} width={900} height={560} />
-                    ) : (topn.length > 0 || collapsedText) ? (
+                    (topn.length > 0 || collapsedText) ? (
                       <FlameGraph data={topn} collapsedText={collapsedText} width={900} height={400} />
                     ) : (
-                      <div style={{ padding: 60, textAlign: 'center' }}>
-                        <div style={{ fontSize: 15, color: 'rgba(255,255,255,0.35)' }}>这里空空如也</div>
-                        <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.2)', marginTop: 6 }}>{flameError || '暂无可渲染的火焰图数据'}</div>
-                      </div>
+                      flameError ? (
+                        <div style={{ padding: 60, textAlign: 'center' }}>
+                          <div style={{ fontSize: 15, color: '#fbbf24' }}>火焰图加载失败</div>
+                          <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.24)', marginTop: 6 }}>{flameError}</div>
+                        </div>
+                      ) : emptyPanel('flame')
                     )
                   ),
-                },
-                {
+                }] : []),
+                ...(visiblePanel('topn') ? [{
                   key: 'topn',
                   label: '热点函数',
                   children: (
-                    <Table
-                      dataSource={topn}
-                      columns={topnColumns}
-                      rowKey={(record) => `${record.func}-${record.self}`}
-                      pagination={false}
-                      size="small"
-                      style={{ background: 'transparent' }}
-                    />
+                    topn.length > 0 ? (
+                      <Table
+                        dataSource={topn}
+                        columns={topnColumns}
+                        rowKey={(record) => `${record.func}-${record.self}`}
+                        pagination={false}
+                        size="small"
+                        style={{ background: 'transparent' }}
+                      />
+                    ) : emptyPanel('topn')
                   ),
-                },
-                {
+                }] : []),
+                ...(visiblePanel('suggestions') ? [{
                   key: 'suggestions',
                   label: '归因分析',
                   children: (
                     suggestions.length === 0 ? (
-                      <div style={{ padding: 60, textAlign: 'center' }}>
-                        <div style={{ fontSize: 15, color: 'rgba(255,255,255,0.35)' }}>这里空空如也</div>
-                        <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.2)', marginTop: 6 }}>暂无归因分析</div>
-                      </div>
+                      emptyPanel('suggestions')
                     ) : (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                         {suggestions.map((item) => {
@@ -630,8 +748,8 @@ export default function TaskResult() {
                       </div>
                     )
                   ),
-                },
-                {
+                }] : []),
+                ...(visiblePanel('ebpf') ? [{
                   key: 'ebpf',
                   label: 'eBPF 分析',
                   children: (
@@ -714,14 +832,11 @@ export default function TaskResult() {
                         )}
                       </div>
                     ) : (
-                      <div style={{ padding: 60, textAlign: 'center' }}>
-                        <div style={{ fontSize: 15, color: 'rgba(255,255,255,0.35)' }}>这里空空如也</div>
-                        <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.2)', marginTop: 6 }}>暂无 eBPF 分析数据（需先触发分析）</div>
-                      </div>
+                      emptyPanel('ebpf')
                     )
                   ),
-                },
-                {
+                }] : []),
+                ...(visiblePanel('pprof') ? [{
                   key: 'pprof',
                   label: 'pprof 分析',
                   children: (
@@ -781,30 +896,54 @@ export default function TaskResult() {
                         )}
                       </div>
                     ) : (
-                      <div style={{ padding: 60, textAlign: 'center' }}>
-                        <div style={{ fontSize: 15, color: 'rgba(255,255,255,0.35)' }}>这里空空如也</div>
-                        <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.2)', marginTop: 6 }}>暂无 pprof 分析数据（需使用 pprof 采集器并触发分析）</div>
-                      </div>
+                      emptyPanel('pprof')
                     )
                   ),
-                },
-                {
+                }] : []),
+                ...(visiblePanel('memory') ? [{
                   key: 'memory',
                   label: '内存/资源',
                   children: (
-                    memoryData || heapRows.length > 0 || resourceSummary ? (
+                    memrayLoading || memrayHtmlUrl || memoryData || heapRows.length > 0 || resourceSummary ? (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+                        {memrayLoading && (
+                          <Spin tip="加载 Memray 可视化中..." />
+                        )}
+                        {!memrayLoading && memrayHtmlUrl && (
+                          <div>
+                            <Typography.Text strong style={{ display: 'block', marginBottom: 12 }}>Memray Flamegraph</Typography.Text>
+                            <iframe
+                              src={memrayHtmlUrl}
+                              title="Memray flamegraph"
+                              sandbox="allow-scripts allow-same-origin"
+                              style={{
+                                width: '100%',
+                                height: 680,
+                                border: '0.5px solid rgba(255,255,255,0.085)',
+                                borderRadius: 8,
+                                background: '#fff',
+                              }}
+                            />
+                          </div>
+                        )}
+                        {!memrayLoading && !memrayHtmlUrl && memrayError && (
+                          <Card size="small" style={{ background: 'rgba(251,191,36,0.06)', border: '0.5px solid rgba(251,191,36,0.18)' }}>
+                            <Typography.Text style={{ color: '#fbbf24' }}>{memrayError}</Typography.Text>
+                          </Card>
+                        )}
                         {memoryData && (
                           <>
-                            <Row gutter={[16, 16]}>
-                              <Col span={6}>
-                                <Statistic title="泄漏字节" value={formatBytes(Number(memoryData.total_leaked_bytes) || 0)} />
-                              </Col>
-                              <Col span={6}>
-                                <Statistic title="泄漏块数" value={Number(memoryData.total_leaked_blocks) || 0} />
-                              </Col>
-                            </Row>
-                            {memoryData.summary && (
+                            {memoryData.analysis_kind !== 'memray_artifact' && (
+                              <Row gutter={[16, 16]}>
+                                <Col span={6}>
+                                  <Statistic title="泄漏字节" value={formatBytes(Number(memoryData.total_leaked_bytes) || 0)} />
+                                </Col>
+                                <Col span={6}>
+                                  <Statistic title="泄漏块数" value={Number(memoryData.total_leaked_blocks) || 0} />
+                                </Col>
+                              </Row>
+                            )}
+                            {memoryData.summary && memoryData.analysis_kind !== 'memray_artifact' && (
                               <Card size="small" style={{ background: 'rgba(255,255,255,0.02)', border: '0.5px solid rgba(255,255,255,0.085)' }}>
                                 <Typography.Text style={{ color: 'rgba(255,255,255,0.65)' }}>{memoryData.summary}</Typography.Text>
                               </Card>
@@ -853,13 +992,10 @@ export default function TaskResult() {
                         )}
                       </div>
                     ) : (
-                      <div style={{ padding: 60, textAlign: 'center' }}>
-                        <div style={{ fontSize: 15, color: 'rgba(255,255,255,0.35)' }}>这里空空如也</div>
-                        <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.2)', marginTop: 6 }}>暂无内存或资源分析数据</div>
-                      </div>
+                      emptyPanel('memory')
                     )
                   ),
-                },
+                }] : []),
                 {
                   key: 'files',
                   label: '文件下载',
@@ -893,6 +1029,22 @@ function formatBytes(value: number): string {
     unitIndex += 1;
   }
   return `${size.toFixed(unitIndex === 0 ? 0 : 2)} ${units[unitIndex]}`;
+}
+
+function isCollapsedArtifact(file: CosFile): boolean {
+  const name = basename(file.key || file.name || '').toLowerCase();
+  return name === 'collapsed.txt' || name.endsWith('.collapsed');
+}
+
+function isAnalysisArtifact(file: CosFile): boolean {
+  const key = file.key || file.name || '';
+  return key !== '' && !key.startsWith('profiler/');
+}
+
+function isMemrayHtmlArtifact(file: CosFile): boolean {
+  const key = (file.key || file.name || '').toLowerCase();
+  const name = basename(key);
+  return name.endsWith('.html') && (key.includes('memray') || key.startsWith('profiler/'));
 }
 
 function AttributionSection({ title, content, extra }: { title: string; content?: string; extra?: string }) {

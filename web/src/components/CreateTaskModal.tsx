@@ -227,7 +227,8 @@ export default function CreateTaskModal({
 	                        (type === 6 ? 3 :
 	                          (type === 10 || type === 11 ? 2 :
 	                            (type === 4 ? 4 :
-	                              (type === 12 ? 5 : 0))));
+	                              (type === 12 ? 5 :
+                                  (type === 5 ? 6 : 0)))));
 	                    onChange({
 	                      type,
 	                      profiler_type: profilerType,
@@ -244,6 +245,7 @@ export default function CreateTaskModal({
 	                  <option value={6} style={{ background: '#151515' }}>eBPF / bpftrace</option>
 	                  <option value={10} style={{ background: '#151515' }}>pprof CPU</option>
 	                  <option value={11} style={{ background: '#151515' }}>pprof Heap</option>
+	                  <option value={5} style={{ background: '#151515' }}>Resource Analysis</option>
 	                  <option value={4} style={{ background: '#151515' }}>Python / memray</option>
 	                  <option value={12} style={{ background: '#151515' }}>Java Heap</option>
 	                </select>
@@ -268,10 +270,10 @@ export default function CreateTaskModal({
                   <div style={{ position: 'relative' }}>
                     <input
                       type="number"
-                      min={60}
+                      min={15}
                       max={3600}
-                      value={continuousForm?.window_sec || 300}
-                      onChange={(event) => onContinuousChange?.({ window_sec: Math.max(60, Math.min(3600, Math.floor(Number(event.target.value)))) })}
+                      value={continuousForm?.window_sec || 15}
+                      onChange={(event) => onContinuousChange?.({ window_sec: Math.max(15, Math.min(3600, Math.floor(Number(event.target.value)))) })}
                       style={{ ...fieldStyle, paddingRight: 38 }}
                     />
                     <span style={{ position: 'absolute', right: 12, top: 11, color: 'rgba(255,255,255,0.34)', fontSize: 12 }}>s</span>

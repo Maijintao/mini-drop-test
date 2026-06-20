@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { getContinuousWindows, stopContinuousTask, getFlameData } from '@/api';
-import type { ContinuousWindow } from '@/domain';
+import { fetchArtifactJson, fetchArtifactText, getContinuousWindows, stopContinuousTask, getFlameData } from '@/api';
+import type { ContinuousWindow, TopFunction } from '@/domain';
 import FlameGraph from '@/components/FlameGraph';
 
 export default function ContinuousTimeline() {
@@ -10,7 +10,9 @@ export default function ContinuousTimeline() {
 
   const [windows, setWindows] = useState<ContinuousWindow[]>([]);
   const [selected, setSelected] = useState<ContinuousWindow | null>(null);
-  const [flameUrl, setFlameUrl] = useState<string>('');
+  const [collapsedText, setCollapsedText] = useState('');
+  const [topn, setTopn] = useState<TopFunction[]>([]);
+  const [flameError, setFlameError] = useState('');
   const [loading, setLoading] = useState(false);
   const [stopping, setStopping] = useState(false);
 
@@ -51,18 +53,48 @@ export default function ContinuousTimeline() {
   // 加载选中窗口的火焰图
   useEffect(() => {
     if (!selected || !selected.cos_key) {
-      setFlameUrl('');
+      setCollapsedText('');
+      setTopn([]);
+      setFlameError('');
       return;
     }
+    if (selected.status !== 1) {
+      setCollapsedText('');
+      setTopn([]);
+      setFlameError(selected.status === 2 ? '该窗口采集失败' : '该窗口仍在采集中');
+      return;
+    }
+    let cancelled = false;
     setLoading(true);
+    setCollapsedText('');
+    setTopn([]);
+    setFlameError('');
     getFlameData(selected.window_tid)
-      .then((res) => {
-        if (res.code === 0 && res.data?.url) {
-          setFlameUrl(res.data.url);
+      .then(async (res) => {
+        if (cancelled) return;
+        if (res.code !== 0 || !res.data?.key) {
+          setFlameError(res.message || '该窗口暂无可渲染的火焰图数据');
+          return;
+        }
+        if (res.data.type === 'collapsed') {
+          const text = await fetchArtifactText(selected.window_tid, res.data.key);
+          if (!cancelled) setCollapsedText(typeof text === 'string' ? text : '');
+        } else if (res.data.type === 'json') {
+          const data = await fetchArtifactJson<TopFunction[]>(selected.window_tid, res.data.key);
+          if (!cancelled) setTopn(Array.isArray(data) ? data : []);
+        } else {
+          setFlameError('当前只有 SVG 下载产物，暂无可直接渲染的 collapsed/top 数据');
         }
       })
-      .catch(() => {})
-      .finally(() => setLoading(false));
+      .catch((e) => {
+        if (!cancelled) setFlameError(e?.response?.data?.message || e?.message || '火焰图加载失败');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [selected]);
 
   const handleStop = async () => {
@@ -286,11 +318,11 @@ export default function ContinuousTimeline() {
                 <div style={{ padding: 40, textAlign: 'center', color: 'rgba(255,255,255,0.4)' }}>
                   加载火焰图中...
                 </div>
-              ) : flameUrl ? (
-                <FlameGraph url={flameUrl} />
+              ) : collapsedText || topn.length > 0 ? (
+                <FlameGraph collapsedText={collapsedText} data={topn} />
               ) : (
                 <div style={{ padding: 40, textAlign: 'center', color: 'rgba(255,255,255,0.3)' }}>
-                  该窗口暂无火焰图数据
+                  {flameError || '该窗口暂无火焰图数据'}
                 </div>
               )}
             </div>

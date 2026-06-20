@@ -9,30 +9,30 @@ import (
 
 // HPROF 记录类型
 const (
-	TagString        = 0x01
-	TagLoadClass     = 0x02
-	TagStackFrame    = 0x04
-	TagStackTrace    = 0x05
-	TagHeapDump      = 0x0C
-	TagHeapDumpSeg   = 0x1C
-	TagHeapDumpEnd   = 0x2C
+	TagString      = 0x01
+	TagLoadClass   = 0x02
+	TagStackFrame  = 0x04
+	TagStackTrace  = 0x05
+	TagHeapDump    = 0x0C
+	TagHeapDumpSeg = 0x1C
+	TagHeapDumpEnd = 0x2C
 )
 
 // Heap Dump 子记录类型
 const (
-	SubRootUnknown       = 0xFF
-	SubRootJNIglobal     = 0x01
-	SubRootJNIlocal      = 0x02
-	SubRootJavaFrame     = 0x03
-	SubRootNativeStack   = 0x04
-	SubRootStickyClass   = 0x05
-	SubRootThreadBlock   = 0x06
-	SubRootMonitorUsed   = 0x07
-	SubThreadObject      = 0x08
-	SubClassDump         = 0x20
-	SubInstanceDump      = 0x21
-	SubObjArrayDump      = 0x22
-	SubPrimArrayDump     = 0x23
+	SubRootUnknown     = 0xFF
+	SubRootJNIglobal   = 0x01
+	SubRootJNIlocal    = 0x02
+	SubRootJavaFrame   = 0x03
+	SubRootNativeStack = 0x04
+	SubRootStickyClass = 0x05
+	SubRootThreadBlock = 0x06
+	SubRootMonitorUsed = 0x07
+	SubThreadObject    = 0x08
+	SubClassDump       = 0x20
+	SubInstanceDump    = 0x21
+	SubObjArrayDump    = 0x22
+	SubPrimArrayDump   = 0x23
 )
 
 // 类型大小映射（不包含 object 引用，引用大小为 idSize）
@@ -49,24 +49,24 @@ var primTypeSizes = map[byte]int{
 
 // HPROFParser HPROF 解析器
 type HPROFParser struct {
-	reader     io.ReadSeeker
-	idSize     int
-	strings    map[uint64]string
-	classes    map[uint64]*ClassInfo
-	instances  []*InstanceInfo
- arrays     []*ArrayInfo
-	gcRoots    int
-	byteOrder  binary.ByteOrder
+	reader    io.ReadSeeker
+	idSize    int
+	strings   map[uint64]string
+	classes   map[uint64]*ClassInfo
+	instances []*InstanceInfo
+	arrays    []*ArrayInfo
+	gcRoots   int
+	byteOrder binary.ByteOrder
 }
 
 // ClassInfo 类信息
 type ClassInfo struct {
-	ID         uint64
-	Name       string
-	Fields     []FieldInfo
-	InstanceSize int
+	ID            uint64
+	Name          string
+	Fields        []FieldInfo
+	InstanceSize  int
 	InstanceCount int
-	TotalSize   int64
+	TotalSize     int64
 }
 
 // FieldInfo 字段信息
@@ -270,7 +270,7 @@ func (p *HPROFParser) parseHeapDump(length uint32) error {
 				if _, err := readBytes(p.reader, 4); err != nil {
 					return err
 				}
-			// SubRootStickyClass, SubRootMonitorUsed: 无额外字段
+				// SubRootStickyClass, SubRootMonitorUsed: 无额外字段
 			}
 		case SubThreadObject:
 			p.gcRoots++
@@ -326,10 +326,22 @@ func (p *HPROFParser) parseClassDump() error {
 		return err
 	}
 
-	// 实例字段
-	instanceFieldCount, err := readUint16(p.reader, p.byteOrder)
+	// Constant pool: u2 count, then repeated u2 index + typed value.
+	constantPoolCount, err := readUint16(p.reader, p.byteOrder)
 	if err != nil {
 		return err
+	}
+	for i := 0; i < int(constantPoolCount); i++ {
+		if _, err := readBytes(p.reader, 2); err != nil {
+			return err
+		}
+		valueType, err := readByte(p.reader)
+		if err != nil {
+			return err
+		}
+		if _, err := readBytes(p.reader, p.valueSize(valueType)); err != nil {
+			return err
+		}
 	}
 
 	class := p.classes[classID]
@@ -338,6 +350,29 @@ func (p *HPROFParser) parseClassDump() error {
 		p.classes[classID] = class
 	}
 
+	// Static fields: u2 count, then field name ID + type + typed value.
+	staticFieldCount, err := readUint16(p.reader, p.byteOrder)
+	if err != nil {
+		return err
+	}
+	for i := 0; i < int(staticFieldCount); i++ {
+		if _, err := readID(p.reader, p.idSize); err != nil {
+			return err
+		}
+		fieldType, err := readByte(p.reader)
+		if err != nil {
+			return err
+		}
+		if _, err := readBytes(p.reader, p.valueSize(fieldType)); err != nil {
+			return err
+		}
+	}
+
+	// Instance fields: u2 count, then field name ID + type.
+	instanceFieldCount, err := readUint16(p.reader, p.byteOrder)
+	if err != nil {
+		return err
+	}
 	class.Fields = make([]FieldInfo, instanceFieldCount)
 	for i := 0; i < int(instanceFieldCount); i++ {
 		if _, err := readID(p.reader, p.idSize); err != nil {
@@ -348,36 +383,6 @@ func (p *HPROFParser) parseClassDump() error {
 			return err
 		}
 		class.Fields[i] = FieldInfo{Type: fieldType}
-	}
-
-	// 静态字段
-	staticFieldCount, err := readUint16(p.reader, p.byteOrder)
-	if err != nil {
-		return err
-	}
-	for i := 0; i < int(staticFieldCount); i++ {
-		// skip field name id
-		if _, err := readID(p.reader, p.idSize); err != nil {
-			return err
-		}
-		fieldType, err := readByte(p.reader)
-		if err != nil {
-			return err
-		}
-		// skip field value based on type
-		if fieldType == 2 {
-			// object reference: size = idSize
-			if _, err := readBytes(p.reader, p.idSize); err != nil {
-				return err
-			}
-		} else {
-			size := primTypeSizes[fieldType]
-			if size > 0 {
-				if _, err := readBytes(p.reader, size); err != nil {
-					return err
-				}
-			}
-		}
 	}
 
 	// 计算实例大小
@@ -392,6 +397,13 @@ func (p *HPROFParser) parseClassDump() error {
 	class.InstanceSize = size
 
 	return nil
+}
+
+func (p *HPROFParser) valueSize(valueType byte) int {
+	if valueType == 2 {
+		return p.idSize
+	}
+	return primTypeSizes[valueType]
 }
 
 func (p *HPROFParser) parseInstanceDump() error {

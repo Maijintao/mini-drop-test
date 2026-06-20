@@ -36,5 +36,6 @@ constexpr int PROFILER_PPROF = 2;
 constexpr int PROFILER_BPFTRACE = 3;
 constexpr int PROFILER_MEMRAY = 4;
 constexpr int PROFILER_JAVA_HEAP = 5;
+constexpr int PROFILER_RESOURCE = 6;
 
 }  // namespace drop
