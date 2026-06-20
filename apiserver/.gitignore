@@ -1,9 +1,9 @@
 # 二进制
 apiserver
 
-# 配置（只保留 example）
-config/apiserver.yaml
+# 配置
 config/*.yaml
+!config/apiserver.yaml
 !config/apiserver.yaml.example
 
 # Go

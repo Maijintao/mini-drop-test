@@ -37,7 +37,7 @@ find "$PACKAGE_DIR" -name '.DS_Store' -delete
 find "$PACKAGE_DIR" -name '._*' -delete
 find "$PACKAGE_DIR" -name '__pycache__' -type d -prune -exec rm -rf {} +
 find "$PACKAGE_DIR" -name '.pytest_cache' -type d -prune -exec rm -rf {} +
-chmod +x "$PACKAGE_DIR/scripts/demo.sh" "$PACKAGE_DIR/scripts/demo_full_matrix.sh"
+chmod +x "$PACKAGE_DIR/scripts/demo.sh" "$PACKAGE_DIR/scripts/demo_full_matrix.sh" "$PACKAGE_DIR/scripts/run_all_features.sh"
 
 echo "[package] saving images"
 docker save \

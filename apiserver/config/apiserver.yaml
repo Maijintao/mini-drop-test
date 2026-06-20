@@ -1,0 +1,43 @@
+server:
+  port: 8191
+  mode: debug
+
+database:
+  driver: postgres
+  host: postgres
+  port: 5432
+  user: postgres
+  password: dev
+  dbname: drop
+  sslmode: disable
+
+grpc:
+  target: "drop-server:50051"
+
+storage:
+  backend: "minio"
+
+minio:
+  endpoint: "minio:9000"
+  public_endpoint: "localhost:9000"
+  access_key: minioadmin
+  secret_key: minioadmin
+  bucket: drop-data
+  use_ssl: false
+  public_use_ssl: false
+  region: ""
+
+log:
+  level: info
+  path: ""
+
+analysis:
+  command: "python3"
+  script_path: "/app/analysis/hotmethod_analyzer.py"
+  config_path: "/app/analysis/config.ini"
+
+auth:
+  secret: "mini-drop-demo-secret"
+
+cors:
+  allowed_origins: []
