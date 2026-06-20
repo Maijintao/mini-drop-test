@@ -14,6 +14,8 @@ drop_server (C++) ←→ drop_agent (C++)
 analysis (Python)
 ```
 
+详细设计、状态机、取舍、AI 协作和工程自证见 [docs/DESIGN.md](docs/DESIGN.md)。
+
 ## 快速启动
 
 ```bash
@@ -37,14 +39,23 @@ make smoke
 
 ## Docker 交付说明
 
-评审环境只需要 Docker 和 Docker Compose，不需要手工安装 Go、Node、Python、gRPC、MinIO、PostgreSQL 或 perf 分析脚本。依赖被打进各镜像：
+评审环境只需要 Docker 和 Docker Compose，不需要手工安装 Go、Node、Python、gRPC、MinIO、PostgreSQL 或 perf 分析脚本。发布运行使用 `docker-compose.release.yml`，四个业务组件镜像已推送到 Docker Hub：
 
 | 镜像 | 作用 | 主要内置依赖 |
 |------|------|--------------|
-| `drop` | `drop_server` + `drop_agent` | C++ gRPC 运行时、`perf`、`bpftrace`、MinIO `mc` |
-| `apiserver` | Go API 编排层 | Go 二进制、Python3、分析引擎运行依赖、`perf` |
-| `web-frontend` | React UI | Nginx 静态服务 |
-| `postgres` / `minio` | 数据库和对象存储 | 官方镜像 |
+| `maijintao/mini-drop-drop:latest` | `drop_server` + `drop_agent` | C++ gRPC 运行时、`perf`、`bpftrace`、MinIO `mc` |
+| `maijintao/mini-drop-apiserver:latest` | Go API 编排层 | Go 二进制、Python3、Analyzer 代码和运行依赖、`perf` |
+| `maijintao/mini-drop-analysis:latest` | 独立 Analyzer 调试镜像 | Python 分析引擎 |
+| `maijintao/mini-drop-web:latest` | React UI | Nginx 静态服务 |
+
+直接拉取发布镜像运行：
+
+```bash
+docker compose -f docker-compose.release.yml pull
+docker compose -f docker-compose.release.yml up -d
+```
+
+启动后访问 `http://localhost`，首次使用在登录页注册账号即可。若评审机访问 Docker Hub 慢，可通过 `.env` 覆盖镜像源，例如把业务镜像改为 `docker.1ms.run/maijintao/...`。
 
 常用交付命令：
 

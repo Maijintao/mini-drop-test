@@ -9,6 +9,7 @@ DURATION="${DEMO_DURATION:-10}"
 HZ="${DEMO_HZ:-99}"
 CONTINUOUS_WINDOW="${DEMO_CONTINUOUS_WINDOW:-15}"
 DOCKER="${DOCKER:-docker}"
+PPROF_TARGET_IMAGE="${PPROF_TARGET_IMAGE:-${APISERVER_IMAGE:-maijintao/mini-drop-apiserver:latest}}"
 cp_tid=""
 
 if ! $DOCKER ps >/dev/null 2>&1 && command -v sudo >/dev/null 2>&1; then
@@ -106,7 +107,7 @@ start_pprof_target() {
   if $DOCKER ps --format '{{.Names}}' | grep -qx pprof-target; then
     return
   fi
-  $DOCKER run -d --name pprof-target --network host --entrypoint sh mini-drop-vm/apiserver:verify -c 'cat >/tmp/pprof_target.go <<'"'"'GO'"'"'
+  $DOCKER run -d --name pprof-target --network host --entrypoint sh "$PPROF_TARGET_IMAGE" -c 'cat >/tmp/pprof_target.go <<'"'"'GO'"'"'
 package main
 import (
   _ "net/http/pprof"

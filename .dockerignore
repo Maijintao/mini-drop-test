@@ -1,0 +1,16 @@
+*
+!apiserver
+!apiserver/**
+!analysis
+!analysis/**
+
+.git
+.gitignore
+.pytest_cache
+dist
+deploy
+web/dist
+**/__pycache__
+**/.pytest_cache
+**/.DS_Store
+**/._*

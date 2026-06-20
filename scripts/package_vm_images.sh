@@ -2,49 +2,53 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PACKAGE_DIR="$ROOT_DIR/dist/mini-drop-vm"
+PACKAGE_DIR="$ROOT_DIR/dist/mini-drop-release"
 IMAGE_DIR="$PACKAGE_DIR/images"
 PLATFORM="${PLATFORM:-linux/amd64}"
+IMAGE_NAMESPACE="${IMAGE_NAMESPACE:-maijintao}"
+DROP_IMAGE="${DROP_IMAGE:-$IMAGE_NAMESPACE/mini-drop-drop:latest}"
+APISERVER_IMAGE="${APISERVER_IMAGE:-$IMAGE_NAMESPACE/mini-drop-apiserver:latest}"
+ANALYSIS_IMAGE="${ANALYSIS_IMAGE:-$IMAGE_NAMESPACE/mini-drop-analysis:latest}"
+WEB_IMAGE="${WEB_IMAGE:-$IMAGE_NAMESPACE/mini-drop-web:latest}"
 
+rm -rf "$PACKAGE_DIR"
 mkdir -p "$IMAGE_DIR"
 
 echo "[package] building app images for $PLATFORM"
-docker buildx build --platform "$PLATFORM" --load -t mini-drop-vm/drop:verify "$ROOT_DIR/drop"
-docker buildx build --platform "$PLATFORM" --load -t mini-drop-vm/apiserver:verify "$ROOT_DIR/apiserver"
-docker buildx build --platform "$PLATFORM" --load -t mini-drop-vm/web-frontend:verify "$ROOT_DIR/web"
-
-echo "[package] building pinned service images for $PLATFORM"
-docker buildx build --platform "$PLATFORM" --load -t mini-drop-vm/postgres:14-amd64 "$ROOT_DIR/deploy/vm/service-images/postgres"
-docker buildx build --platform "$PLATFORM" --load -t mini-drop-vm/minio:latest-amd64 "$ROOT_DIR/deploy/vm/service-images/minio"
+docker buildx build --platform "$PLATFORM" --load -t "$DROP_IMAGE" "$ROOT_DIR/drop"
+docker buildx build --platform "$PLATFORM" --load -f "$ROOT_DIR/apiserver/Dockerfile" -t "$APISERVER_IMAGE" "$ROOT_DIR"
+docker buildx build --platform "$PLATFORM" --load -t "$ANALYSIS_IMAGE" "$ROOT_DIR/analysis"
+docker buildx build --platform "$PLATFORM" --load -t "$WEB_IMAGE" "$ROOT_DIR/web"
 
 echo "[package] assembling package files"
-rm -rf "$PACKAGE_DIR/apiserver" "$PACKAGE_DIR/analysis" "$PACKAGE_DIR/drop" "$PACKAGE_DIR/scripts"
 mkdir -p "$PACKAGE_DIR/apiserver" "$PACKAGE_DIR/drop"
-cp "$ROOT_DIR/deploy/vm/docker-compose.vm.yml" "$PACKAGE_DIR/docker-compose.vm.yml"
-cp "$ROOT_DIR/deploy/vm/load-and-run.sh" "$PACKAGE_DIR/load-and-run.sh"
-cp "$ROOT_DIR/deploy/vm/README.md" "$PACKAGE_DIR/README.md"
-cp "$ROOT_DIR/deploy/vm/demo-existing.sh" "$PACKAGE_DIR/demo-existing.sh"
+cp "$ROOT_DIR/docker-compose.release.yml" "$PACKAGE_DIR/docker-compose.release.yml"
+cat >"$PACKAGE_DIR/.env" <<EOF
+DROP_IMAGE=$DROP_IMAGE
+APISERVER_IMAGE=$APISERVER_IMAGE
+ANALYSIS_IMAGE=$ANALYSIS_IMAGE
+WEB_IMAGE=$WEB_IMAGE
+EOF
+cp "$ROOT_DIR/README.md" "$PACKAGE_DIR/README.md"
 cp -R "$ROOT_DIR/apiserver/config" "$PACKAGE_DIR/apiserver/config"
 cp -R "$ROOT_DIR/drop/etc" "$PACKAGE_DIR/drop/etc"
-cp -R "$ROOT_DIR/analysis" "$PACKAGE_DIR/analysis"
 cp -R "$ROOT_DIR/scripts" "$PACKAGE_DIR/scripts"
 find "$PACKAGE_DIR" -name '.DS_Store' -delete
 find "$PACKAGE_DIR" -name '._*' -delete
 find "$PACKAGE_DIR" -name '__pycache__' -type d -prune -exec rm -rf {} +
 find "$PACKAGE_DIR" -name '.pytest_cache' -type d -prune -exec rm -rf {} +
-chmod +x "$PACKAGE_DIR/load-and-run.sh" "$PACKAGE_DIR/demo-existing.sh" "$PACKAGE_DIR/scripts/demo.sh" "$PACKAGE_DIR/scripts/demo_full_matrix.sh"
+chmod +x "$PACKAGE_DIR/scripts/demo.sh" "$PACKAGE_DIR/scripts/demo_full_matrix.sh"
 
 echo "[package] saving images"
 docker save \
-  mini-drop-vm/drop:verify \
-  mini-drop-vm/apiserver:verify \
-  mini-drop-vm/web-frontend:verify \
-  mini-drop-vm/postgres:14-amd64 \
-  mini-drop-vm/minio:latest-amd64 \
-  -o "$IMAGE_DIR/mini-drop-vm-images-amd64.tar"
+  "$DROP_IMAGE" \
+  "$APISERVER_IMAGE" \
+  "$ANALYSIS_IMAGE" \
+  "$WEB_IMAGE" \
+  -o "$IMAGE_DIR/mini-drop-release-images-amd64.tar"
 
 echo "[package] creating archive"
-COPYFILE_DISABLE=1 tar -C "$ROOT_DIR/dist" -czf "$ROOT_DIR/dist/mini-drop-vm-amd64.tar.gz" mini-drop-vm
+COPYFILE_DISABLE=1 tar -C "$ROOT_DIR/dist" -czf "$ROOT_DIR/dist/mini-drop-release-amd64.tar.gz" mini-drop-release
 
 echo "[package] done"
-echo "$ROOT_DIR/dist/mini-drop-vm-amd64.tar.gz"
+echo "$ROOT_DIR/dist/mini-drop-release-amd64.tar.gz"
