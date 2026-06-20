@@ -167,6 +167,47 @@ PY
   json_get /tmp/mini_drop_create_task.json 'd["data"]["tid"]'
 }
 
+nl_plan_case() {
+  local label="$1"
+  local text="$2"
+  local expected_type="$3"
+  local expected_profiler="$4"
+  local body
+  body="$(TEXT="$text" AGENT_IP="$AGENT_IP" python3 - <<'PY'
+import json, os
+print(json.dumps({
+  "text": os.environ["TEXT"],
+  "target_ip": os.environ["AGENT_IP"],
+}))
+PY
+)"
+  curl -fsS -X POST "$API/tasks/nl" "${AUTH_HEADERS[@]}" -H 'Content-Type: application/json' -d "$body" >/tmp/mini_drop_nl_plan.json
+  python3 - "$expected_type" "$expected_profiler" <<'PY'
+import json, sys
+d = json.load(open("/tmp/mini_drop_nl_plan.json"))
+plan = d["data"]["plan"]
+if int(plan["type"]) != int(sys.argv[1]) or int(plan["profiler_type"]) != int(sys.argv[2]):
+    raise SystemExit(f"unexpected plan: {plan}")
+PY
+  echo "[matrix] PASS NL plan $label"
+}
+
+create_nl_task() {
+  local text="$1"
+  local body
+  body="$(TEXT="$text" AGENT_IP="$AGENT_IP" python3 - <<'PY'
+import json, os
+print(json.dumps({
+  "text": os.environ["TEXT"],
+  "target_ip": os.environ["AGENT_IP"],
+  "execute": True,
+}))
+PY
+)"
+  curl -fsS -X POST "$API/tasks/nl" "${AUTH_HEADERS[@]}" -H 'Content-Type: application/json' -d "$body" >/tmp/mini_drop_nl_create.json
+  json_get /tmp/mini_drop_nl_create.json 'd["data"]["tid"]'
+}
+
 create_continuous() {
   local pid="$1"
   local body
@@ -310,11 +351,22 @@ main() {
   run_case "eBPF / bpftrace" matrix-ebpf-sched 6 3 "$PY_PID" sched
   run_case "pprof CPU" matrix-pprof-cpu 10 2 1 cpu
   run_case "pprof Heap" matrix-pprof-heap 11 2 1 heap
-  run_case "Resource Analysis" matrix-resource 5 6 "$PY_PID" resource
-  run_case "Python / memray" matrix-memray 4 4 "$PY_PID" memray
-  run_case "Java Heap" matrix-java-heap 12 5 "$JAVA_PID" heap
+	  run_case "Resource Analysis" matrix-resource 5 6 "$PY_PID" resource
+	  run_case "Python / memray" matrix-memray 4 4 "$PY_PID" memray
+	  run_case "Java Heap" matrix-java-heap 12 5 "$JAVA_PID" heap
 
-  cp_tid="$(create_continuous "$PY_PID")"
+	  nl_plan_case "Java async-profiler" "pid $JAVA_PID Java 线程 CPU 高，用 async-profiler 采 10 秒" 1 1
+	  nl_plan_case "eBPF sched" "pid $PY_PID 调度抖动，用 eBPF sched 看延迟" 6 3
+	  nl_plan_case "Python memray" "pid $PY_PID Python 内存泄漏，用 memray 看分配热点" 4 4
+
+	  local nl_tid
+	  nl_tid="$(create_nl_task "pid $PY_PID CPU 飙高，采 $DURATION 秒火焰图，频率 $HZ Hz")"
+	  if ! wait_task "$nl_tid" "Natural Language / CPU perf"; then
+	    failed=1
+	  fi
+	  echo "[matrix] URL Natural Language: $WEB/task/result?tid=$nl_tid"
+
+	  cp_tid="$(create_continuous "$PY_PID")"
   if ! wait_continuous_window "$cp_tid"; then
     failed=1
   fi

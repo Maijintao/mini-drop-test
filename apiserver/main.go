@@ -92,7 +92,7 @@ func main() {
 	grpcClient, err := control.NewControlClient(cfg.GRPC.Target)
 	if err != nil {
 		logger.Warn("grpc connect failed, task dispatch will be unavailable", zap.Error(err))
-		// 不 fatal，允许 apiserver 独立启动（mock 模式）
+		// 不 fatal，允许 apiserver 在 drop_server 暂不可用时先启动健康检查和只读接口。
 	}
 	if grpcClient != nil {
 		defer grpcClient.Close()
@@ -198,6 +198,7 @@ func setupRouter(srv *server.APIServer, logger *zap.Logger, cfg config.Config) *
 
 			// Task CRUD
 			auth.POST("/tasks", srv.CreateTask)
+			auth.POST("/tasks/nl", srv.CreateNaturalLanguageTask)
 			auth.GET("/tasks", srv.GetTasks)
 			auth.GET("/tasks/:tid", srv.GetTaskDetail)
 			auth.GET("/tasks/:tid/artifact", srv.GetTaskArtifact)

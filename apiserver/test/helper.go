@@ -172,6 +172,7 @@ func SetupTestRouter(srv *server.APIServer) *gin.Engine {
 			auth.GET("/agent/stat", srv.StatAgent)
 			auth.GET("/agent/audit-log", srv.GetAgentAuditLog)
 			auth.POST("/tasks", srv.CreateTask)
+			auth.POST("/tasks/nl", srv.CreateNaturalLanguageTask)
 			auth.GET("/tasks", srv.GetTasks)
 			auth.GET("/tasks/:tid", srv.GetTaskDetail)
 			auth.GET("/tasks/:tid/artifact", srv.GetTaskArtifact)

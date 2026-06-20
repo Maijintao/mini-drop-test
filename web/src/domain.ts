@@ -241,6 +241,32 @@ export interface CreateContinuousParams {
   event?: string;
 }
 
+export type TaskCreateMode = 'oneshot' | 'continuous' | 'natural';
+
+export interface NaturalLanguageTaskPlan {
+  name: string;
+  mode: 'oneshot' | 'continuous';
+  type: number;
+  profiler_type: number;
+  target_ip: string;
+  pid: number;
+  duration: number;
+  hz: number;
+  window_sec?: number;
+  callgraph: string;
+  subprocess: boolean;
+  event: string;
+  confidence: number;
+  rationale: string[];
+  missing_fields: string[];
+  clarifying_question: string;
+}
+
+export interface NaturalLanguageTaskResult {
+  tid?: string;
+  plan: NaturalLanguageTaskPlan;
+}
+
 export interface LLMSettings {
   base_url: string;
   model: string;

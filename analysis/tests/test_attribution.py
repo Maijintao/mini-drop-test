@@ -247,6 +247,11 @@ class TestAttributionArtifacts:
             "read_concentration",
             "read_rule_hits",
         ]
+        first_call = artifacts.tool_calls["calls"][0]
+        assert first_call["executor"] == "local_deterministic_tool"
+        assert first_call["status"] == "ok"
+        assert first_call["result"]["evidence_id"] == "E1"
+        assert first_call["evidence_ids"] == ["E1"]
 
     @patch("ai_advisor._call_llm")
     @patch("ai_advisor.is_llm_enabled", return_value=True)

@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -39,6 +40,32 @@ type CreateTaskReq struct {
 	Event        string `json:"event"`
 }
 
+type NaturalLanguageTaskReq struct {
+	Text     string `json:"text" binding:"required"`
+	TargetIP string `json:"target_ip"`
+	PID      int32  `json:"pid"`
+	Execute  bool   `json:"execute"`
+}
+
+type NaturalLanguageTaskPlan struct {
+	Name               string   `json:"name"`
+	Mode               string   `json:"mode"`
+	Type               int      `json:"type"`
+	ProfilerType       int      `json:"profiler_type"`
+	TargetIP           string   `json:"target_ip"`
+	PID                int32    `json:"pid"`
+	Duration           uint64   `json:"duration"`
+	Hz                 uint32   `json:"hz"`
+	WindowSec          uint32   `json:"window_sec,omitempty"`
+	Callgraph          string   `json:"callgraph"`
+	Subprocess         bool     `json:"subprocess"`
+	Event              string   `json:"event"`
+	Confidence         float64  `json:"confidence"`
+	Rationale          []string `json:"rationale"`
+	MissingFields      []string `json:"missing_fields"`
+	ClarifyingQuestion string   `json:"clarifying_question"`
+}
+
 func isValidTaskProfilerCombination(taskType int, profilerType int) bool {
 	valid := map[int]int{
 		0:  0, // CPU / perf
@@ -67,8 +94,19 @@ func (s *APIServer) CreateTask(c *gin.Context) {
 		return
 	}
 
-	uid := c.GetString(middleware.CtxUID)
-	userName := c.GetString(middleware.CtxUserName)
+	tid, httpStatus, code, message := s.createTaskInternal(c.Request.Context(), c.GetString(middleware.CtxUID), c.GetString(middleware.CtxUserName), req)
+	if code != CodeSuccess {
+		c.JSON(httpStatus, gin.H{"code": code, "message": message})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code": CodeSuccess,
+		"data": gin.H{"tid": tid},
+	})
+}
+
+func (s *APIServer) createTaskInternal(ctx context.Context, uid string, userName string, req CreateTaskReq) (string, int, int, string) {
 	tid := uuid.New().String()[:12]
 
 	// 默认值
@@ -79,15 +117,10 @@ func (s *APIServer) CreateTask(c *gin.Context) {
 		req.Callgraph = "dwarf"
 	}
 	if !s.canAccessAgentIP(uid, req.TargetIP) {
-		c.JSON(http.StatusNotFound, gin.H{"code": CodeNotFound, "message": "agent not found"})
-		return
+		return "", http.StatusNotFound, CodeNotFound, "agent not found"
 	}
 	if !isValidTaskProfilerCombination(req.Type, req.ProfilerType) {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    CodeParamError,
-			"message": fmt.Sprintf("invalid task_type/profiler_type combination: type=%d profiler_type=%d", req.Type, req.ProfilerType),
-		})
-		return
+		return "", http.StatusBadRequest, CodeParamError, fmt.Sprintf("invalid task_type/profiler_type combination: type=%d profiler_type=%d", req.Type, req.ProfilerType)
 	}
 
 	// 1) 写库
@@ -111,11 +144,7 @@ func (s *APIServer) CreateTask(c *gin.Context) {
 		CreateTime: time.Now(),
 	}
 	if err := s.Db.Create(task).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    CodeInternal,
-			"message": err.Error(),
-		})
-		return
+		return "", http.StatusInternalServerError, CodeInternal, err.Error()
 	}
 	s.recordStateChange(tid, -1, TaskStatusNew, "task created and pending dispatch", ChangeTypeTask)
 
@@ -145,14 +174,10 @@ func (s *APIServer) CreateTask(c *gin.Context) {
 			"status_info": "drop_server unavailable (gRPC not connected)",
 		})
 		s.recordStateChange(tid, TaskStatusNew, TaskStatusFailed, "drop_server unavailable (gRPC not connected)", ChangeTypeTask)
-		c.JSON(http.StatusServiceUnavailable, gin.H{
-			"code":    CodeGRPCError,
-			"message": "drop_server unavailable",
-		})
-		return
+		return "", http.StatusServiceUnavailable, CodeGRPCError, "drop_server unavailable"
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
 	resp, err := s.GRPC.CreateTask(ctx, pbReq)
@@ -163,11 +188,7 @@ func (s *APIServer) CreateTask(c *gin.Context) {
 			"status_info": "dispatch failed: " + err.Error(),
 		})
 		s.recordStateChange(tid, TaskStatusNew, TaskStatusFailed, "dispatch failed: "+err.Error(), ChangeTypeTask)
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    CodeGRPCError,
-			"message": "dispatch failed: " + err.Error(),
-		})
-		return
+		return "", http.StatusInternalServerError, CodeGRPCError, "dispatch failed: " + err.Error()
 	}
 	if resp.GetCode() != 0 {
 		s.Db.Model(task).Updates(map[string]interface{}{
@@ -175,11 +196,7 @@ func (s *APIServer) CreateTask(c *gin.Context) {
 			"status_info": "drop_server rejected: " + resp.GetMessage(),
 		})
 		s.recordStateChange(tid, TaskStatusNew, TaskStatusFailed, "drop_server rejected: "+resp.GetMessage(), ChangeTypeTask)
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    CodeGRPCError,
-			"message": "drop_server rejected: " + resp.GetMessage(),
-		})
-		return
+		return "", http.StatusInternalServerError, CodeGRPCError, "drop_server rejected: " + resp.GetMessage()
 	}
 
 	// 下发成功后仍保持 PENDING，等待 drop_server/Agent 上报真实 RUNNING/UPLOADING 状态。
@@ -191,10 +208,315 @@ func (s *APIServer) CreateTask(c *gin.Context) {
 		s.waitTaskResult(context.Background(), tid, req.Duration+60)
 	}()
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": CodeSuccess,
-		"data": gin.H{"tid": tid},
+	return tid, http.StatusOK, CodeSuccess, ""
+}
+
+// CreateNaturalLanguageTask 解析自然语言采集意图，可选择直接执行。
+func (s *APIServer) CreateNaturalLanguageTask(c *gin.Context) {
+	var req NaturalLanguageTaskReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": CodeParamError, "message": err.Error()})
+		return
+	}
+
+	uid := c.GetString(middleware.CtxUID)
+	plan := s.buildNaturalLanguagePlan(uid, req)
+	if !req.Execute {
+		c.JSON(http.StatusOK, gin.H{"code": CodeSuccess, "data": gin.H{"plan": plan}})
+		return
+	}
+	if len(plan.MissingFields) > 0 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    CodeParamError,
+			"data":    gin.H{"plan": plan},
+			"message": plan.ClarifyingQuestion,
+		})
+		return
+	}
+
+	if plan.Mode == "continuous" {
+		tid, httpStatus, code, message := s.createContinuousInternal(c.Request.Context(), uid, c.GetString(middleware.CtxUserName), CreateContinuousReq{
+			Name:         plan.Name,
+			TargetIP:     plan.TargetIP,
+			PID:          plan.PID,
+			Hz:           plan.Hz,
+			WindowSec:    plan.WindowSec,
+			ProfilerType: plan.ProfilerType,
+			Callgraph:    plan.Callgraph,
+			Event:        plan.Event,
+		})
+		if code != CodeSuccess {
+			c.JSON(httpStatus, gin.H{"code": code, "data": gin.H{"plan": plan}, "message": message})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"code": CodeSuccess, "data": gin.H{"tid": tid, "plan": plan}})
+		return
+	}
+
+	tid, httpStatus, code, message := s.createTaskInternal(c.Request.Context(), uid, c.GetString(middleware.CtxUserName), CreateTaskReq{
+		Name:         plan.Name,
+		Type:         plan.Type,
+		ProfilerType: plan.ProfilerType,
+		TargetIP:     plan.TargetIP,
+		PID:          plan.PID,
+		Duration:     plan.Duration,
+		Hz:           plan.Hz,
+		Callgraph:    plan.Callgraph,
+		Subprocess:   plan.Subprocess,
+		Event:        plan.Event,
 	})
+	if code != CodeSuccess {
+		c.JSON(httpStatus, gin.H{"code": code, "data": gin.H{"plan": plan}, "message": message})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"code": CodeSuccess, "data": gin.H{"tid": tid, "plan": plan}})
+}
+
+func (s *APIServer) buildNaturalLanguagePlan(uid string, req NaturalLanguageTaskReq) NaturalLanguageTaskPlan {
+	text := strings.TrimSpace(req.Text)
+	lower := strings.ToLower(text)
+	plan := NaturalLanguageTaskPlan{
+		Name:         "自然语言采集",
+		Mode:         "oneshot",
+		Type:         0,
+		ProfilerType: 0,
+		TargetIP:     strings.TrimSpace(req.TargetIP),
+		PID:          req.PID,
+		Duration:     30,
+		Hz:           99,
+		WindowSec:    300,
+		Callgraph:    "dwarf",
+		Subprocess:   true,
+		Event:        "cpu-cycles",
+		Confidence:   0.55,
+		Rationale:    []string{"默认按 CPU/perf 采集生成火焰图"},
+	}
+
+	if ip := firstRegexGroup(text, `(?i)\b(\d{1,3}(?:\.\d{1,3}){3})\b`); ip != "" {
+		plan.TargetIP = ip
+		plan.Rationale = append(plan.Rationale, "从描述中识别到目标 IP")
+	}
+	if plan.TargetIP == "" {
+		plan.TargetIP = s.firstAccessibleOnlineAgentIP(uid)
+		if plan.TargetIP != "" {
+			plan.Rationale = append(plan.Rationale, "未指定 Agent，自动选择第一个在线 Agent")
+		}
+	}
+
+	if pid := parseNaturalPID(lower); pid > 0 {
+		plan.PID = pid
+		plan.Rationale = append(plan.Rationale, "从描述中识别到 PID")
+	}
+	if dur := parseNaturalSeconds(lower); dur > 0 {
+		plan.Duration = uint64(clampInt(dur, 1, 3600))
+		plan.Rationale = append(plan.Rationale, "从描述中识别到采样时长")
+	}
+	if hz := parseNaturalHz(lower); hz > 0 {
+		plan.Hz = uint32(clampInt(hz, 1, 1000))
+		plan.Rationale = append(plan.Rationale, "从描述中识别到采样频率")
+	}
+
+	if containsAny(lower, "常驻", "持续", "连续", "continuous", "过去", "最近", "一小时", "1小时", "半小时") {
+		plan.Mode = "continuous"
+		plan.Duration = 0
+		plan.Hz = minUint32(plan.Hz, 10)
+		plan.WindowSec = 300
+		plan.Rationale = append(plan.Rationale, "识别到持续观察意图，选择 Continuous Profiling")
+	}
+	if containsAny(lower, "java", "jvm", "async", "线程") {
+		plan.Type = 1
+		plan.ProfilerType = 1
+		plan.Event = "cpu"
+		plan.Name = "自然语言 Java async-profiler"
+		plan.Confidence = 0.78
+		plan.Rationale = append(plan.Rationale, "识别到 Java/JVM 语义，选择 async-profiler")
+	} else if containsAny(lower, "pprof", "goroutine", "go ", "golang") {
+		plan.Type = 10
+		plan.ProfilerType = 2
+		plan.Event = "cpu"
+		plan.Name = "自然语言 pprof CPU"
+		plan.Confidence = 0.78
+		plan.Rationale = append(plan.Rationale, "识别到 Go/pprof 语义，选择 pprof CPU")
+	} else if containsAny(lower, "heap", "堆", "内存快照") && containsAny(lower, "go", "pprof") {
+		plan.Type = 11
+		plan.ProfilerType = 2
+		plan.Event = "heap"
+		plan.Name = "自然语言 pprof Heap"
+		plan.Confidence = 0.8
+		plan.Rationale = append(plan.Rationale, "识别到 Go heap 语义，选择 pprof Heap")
+	} else if containsAny(lower, "io", "i/o", "磁盘", "块设备", "延迟", "抖动", "sched", "调度") {
+		plan.Type = 6
+		plan.ProfilerType = 3
+		plan.Event = "io"
+		if containsAny(lower, "sched", "调度") {
+			plan.Event = "sched"
+		}
+		plan.Name = "自然语言 eBPF 采集"
+		plan.Confidence = 0.82
+		plan.Rationale = append(plan.Rationale, "识别到 IO/调度异常，选择 bpftrace eBPF")
+	} else if containsAny(lower, "memray", "python 内存", "python内存", "分配", "泄漏", "leak") {
+		plan.Type = 4
+		plan.ProfilerType = 4
+		plan.Event = "memray"
+		plan.Name = "自然语言 Python memray"
+		plan.Confidence = 0.8
+		plan.Rationale = append(plan.Rationale, "识别到 Python 内存/泄漏语义，选择 memray")
+	} else if containsAny(lower, "rss", "资源", "cpu 使用率", "内存使用率", "读写速率") {
+		plan.Type = 5
+		plan.ProfilerType = 6
+		plan.Event = "resource"
+		plan.Name = "自然语言资源采样"
+		plan.Confidence = 0.72
+		plan.Rationale = append(plan.Rationale, "识别到资源指标语义，选择 Resource Analysis")
+	} else {
+		plan.Name = "自然语言 CPU perf"
+	}
+
+	if plan.Mode == "continuous" {
+		plan.Type = 0
+		if plan.ProfilerType == 0 {
+			plan.Event = "cpu-cycles"
+		}
+		plan.Name = "自然语言 Continuous Profiling"
+	}
+
+	if plan.TargetIP == "" {
+		plan.MissingFields = append(plan.MissingFields, "target_ip")
+	}
+	if plan.PID <= 0 {
+		plan.MissingFields = append(plan.MissingFields, "pid")
+	}
+	if len(plan.MissingFields) > 0 {
+		plan.Confidence = minFloat(plan.Confidence, 0.45)
+		plan.ClarifyingQuestion = naturalClarifyingQuestion(plan.MissingFields)
+	}
+	return plan
+}
+
+func (s *APIServer) firstAccessibleOnlineAgentIP(uid string) string {
+	var agents []model.AgentInfo
+	if err := s.Db.Where("online = ?", true).Order("updated_at DESC").Find(&agents).Error; err != nil {
+		return ""
+	}
+	for _, agent := range agents {
+		if agent.IPAddr != "" && s.canAccessAgentIP(uid, agent.IPAddr) {
+			return agent.IPAddr
+		}
+	}
+	return ""
+}
+
+func parseNaturalPID(text string) int32 {
+	patterns := []string{
+		`(?i)\bpid\s*[:=]?\s*(\d{1,10})\b`,
+		`(?i)\bprocess\s+(\d{1,10})\b`,
+		`(?i)进程\s*(\d{1,10})`,
+	}
+	for _, pattern := range patterns {
+		if raw := firstRegexGroup(text, pattern); raw != "" {
+			if v, err := strconv.Atoi(raw); err == nil && v > 0 {
+				return int32(v)
+			}
+		}
+	}
+	return 0
+}
+
+func parseNaturalSeconds(text string) int {
+	re := regexp.MustCompile(`(?i)(\d{1,4})\s*(秒|s|sec|secs|second|seconds|分钟|分|min|mins|minute|minutes|小时|h|hour|hours)`)
+	matches := re.FindAllStringSubmatch(text, -1)
+	for _, match := range matches {
+		if len(match) < 3 {
+			continue
+		}
+		value, err := strconv.Atoi(match[1])
+		if err != nil || value <= 0 {
+			continue
+		}
+		unit := strings.ToLower(match[2])
+		if unit == "分钟" || unit == "分" || strings.HasPrefix(unit, "min") || strings.HasPrefix(unit, "minute") {
+			return value * 60
+		}
+		if unit == "小时" || unit == "h" || strings.HasPrefix(unit, "hour") {
+			return value * 3600
+		}
+		return value
+	}
+	return 0
+}
+
+func parseNaturalHz(text string) int {
+	raw := firstRegexGroup(text, `(?i)(\d{1,4})\s*(hz|赫兹)`)
+	if raw == "" {
+		return 0
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0
+	}
+	return v
+}
+
+func firstRegexGroup(text string, pattern string) string {
+	re := regexp.MustCompile(pattern)
+	match := re.FindStringSubmatch(text)
+	if len(match) < 2 {
+		return ""
+	}
+	return strings.TrimSpace(match[1])
+}
+
+func containsAny(text string, needles ...string) bool {
+	for _, needle := range needles {
+		if strings.Contains(text, strings.ToLower(needle)) {
+			return true
+		}
+	}
+	return false
+}
+
+func naturalClarifyingQuestion(fields []string) string {
+	needPID := false
+	needAgent := false
+	for _, field := range fields {
+		if field == "pid" {
+			needPID = true
+		}
+		if field == "target_ip" {
+			needAgent = true
+		}
+	}
+	if needPID && needAgent {
+		return "请补充目标 Agent/IP 和 PID，例如：在 127.0.0.1 上采集 pid 1234 的 CPU 火焰图。"
+	}
+	if needPID {
+		return "请补充目标 PID，例如：pid 1234 CPU 飙高，采 30 秒火焰图。"
+	}
+	return "请补充目标 Agent 或 IP。"
+}
+
+func clampInt(v int, min int, max int) int {
+	if v < min {
+		return min
+	}
+	if v > max {
+		return max
+	}
+	return v
+}
+
+func minUint32(a uint32, b uint32) uint32 {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func minFloat(a float64, b float64) float64 {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // GetTasks 任务列表（分页，自己+组内共享） — GET /api/v1/tasks
@@ -1222,6 +1544,21 @@ func (s *APIServer) CreateContinuousTask(c *gin.Context) {
 		return
 	}
 
+	tid, httpStatus, code, message := s.createContinuousInternal(c.Request.Context(), uid, userName, req)
+	if code != CodeSuccess {
+		c.JSON(httpStatus, gin.H{"code": code, "message": message})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code": CodeSuccess,
+		"data": gin.H{
+			"tid": tid,
+		},
+	})
+}
+
+func (s *APIServer) createContinuousInternal(ctx context.Context, uid string, userName string, req CreateContinuousReq) (string, int, int, string) {
 	if req.Hz == 0 {
 		req.Hz = 10 // 低频默认 10Hz
 	}
@@ -1238,19 +1575,14 @@ func (s *APIServer) CreateContinuousTask(c *gin.Context) {
 		req.Name = fmt.Sprintf("continuous-pid%d", req.PID)
 	}
 	if !s.canAccessAgentIP(uid, req.TargetIP) {
-		c.JSON(http.StatusNotFound, gin.H{"code": CodeNotFound, "message": "agent not found"})
-		return
+		return "", http.StatusNotFound, CodeNotFound, "agent not found"
 	}
 
 	if s.GRPC == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{
-			"code":    CodeGRPCError,
-			"message": "drop_server unavailable",
-		})
-		return
+		return "", http.StatusServiceUnavailable, CodeGRPCError, "drop_server unavailable"
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
 	resp, err := s.GRPC.StartContinuous(ctx, &pb.StartContinuousRequest{
@@ -1264,18 +1596,10 @@ func (s *APIServer) CreateContinuousTask(c *gin.Context) {
 		Name:         req.Name,
 	})
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    CodeGRPCError,
-			"message": err.Error(),
-		})
-		return
+		return "", http.StatusInternalServerError, CodeGRPCError, err.Error()
 	}
 	if resp.Code != 0 {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    CodeInternal,
-			"message": resp.Message,
-		})
-		return
+		return "", http.StatusInternalServerError, CodeInternal, resp.Message
 	}
 
 	tid := resp.TaskId
@@ -1307,20 +1631,11 @@ func (s *APIServer) CreateContinuousTask(c *gin.Context) {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cleanupCancel()
 		_, _ = s.GRPC.StopContinuous(cleanupCtx, &pb.StopContinuousRequest{TaskId: tid})
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    CodeInternal,
-			"message": "db error: " + err.Error(),
-		})
-		return
+		return "", http.StatusInternalServerError, CodeInternal, "db error: " + err.Error()
 	}
 	s.recordStateChange(tid, -1, TaskStatusRunning, "continuous profiling started", ChangeTypeTask)
 
-	c.JSON(http.StatusOK, gin.H{
-		"code": CodeSuccess,
-		"data": gin.H{
-			"tid": tid,
-		},
-	})
+	return tid, http.StatusOK, CodeSuccess, ""
 }
 
 // GetContinuousWindows 获取连续任务窗口列表 — GET /api/v1/tasks/:tid/windows

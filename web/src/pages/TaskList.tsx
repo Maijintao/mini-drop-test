@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useGSAP } from '@gsap/react';
 import gsap from 'gsap';
 import { createTask, createContinuousTask, deleteTask, getAgents, getTasks, retryTask } from '@/api';
-import type { AgentInfo, CreateContinuousParams, CreateTaskParams, HotmethodTask } from '@/domain';
+import type { AgentInfo, CreateContinuousParams, CreateTaskParams, HotmethodTask, NaturalLanguageTaskPlan, TaskCreateMode } from '@/domain';
 import { analysisMap, formatDate, formatDuration, statusMap } from '@/domain';
 import { createTaskPoller } from '@/taskPolling';
 import CreateTaskModal from '@/components/CreateTaskModal';
@@ -66,12 +66,12 @@ export default function TaskList() {
   const [showCreate, setShowCreate] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState<CreateTaskParams>(defaultForm);
-  const [taskMode, setTaskMode] = useState<'oneshot' | 'continuous'>('oneshot');
+  const [taskMode, setTaskMode] = useState<TaskCreateMode>('oneshot');
   const [continuousForm, setContinuousForm] = useState<CreateContinuousParams>({
     target_ip: '',
     pid: 0,
     hz: 10,
-    window_sec: 15,
+    window_sec: 300,
     callgraph: 'dwarf',
   });
 
@@ -153,7 +153,7 @@ export default function TaskList() {
         name: form.name || `常驻采集 - ${continuousForm.target_ip}`,
         pid: Number(continuousForm.pid),
         hz: Number(continuousForm.hz || 10),
-        window_sec: Number(continuousForm.window_sec || 15),
+        window_sec: Number(continuousForm.window_sec || 300),
       };
       const res = await createContinuousTask(payload);
       if (res.code !== 0) throw new Error(res.message || '创建常驻任务失败');
@@ -201,6 +201,11 @@ export default function TaskList() {
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const handleNaturalLanguageCreated = (tid: string, plan: NaturalLanguageTaskPlan) => {
+    setShowCreate(false);
+    navigate(plan.mode === 'continuous' ? `/continuous?tid=${tid}` : `/task/result?tid=${tid}`);
   };
 
   const removeTask = async (tid: string) => {
@@ -367,6 +372,7 @@ export default function TaskList() {
               continuousForm={continuousForm}
               onContinuousChange={(patch) => setContinuousForm(prev => ({ ...prev, ...patch }))}
               onContinuousSubmit={handleContinuousSubmit}
+              onNaturalLanguageCreated={handleNaturalLanguageCreated}
             />
           )}
         </>

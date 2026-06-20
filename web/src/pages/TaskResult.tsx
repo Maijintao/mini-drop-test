@@ -90,8 +90,9 @@ export default function TaskResult() {
   const [suggestions, setSuggestions] = useState<AnalysisSuggestion[]>([]);
   const [stateHistory, setStateHistory] = useState<TaskStateHistory[]>([]);
   const [flameError, setFlameError] = useState('');
-  const [topn, setTopn] = useState<TopFunction[]>([]);
-  const [collapsedText, setCollapsedText] = useState('');
+	  const [topn, setTopn] = useState<TopFunction[]>([]);
+	  const [collapsedText, setCollapsedText] = useState('');
+	  const [svgMarkup, setSvgMarkup] = useState('');
   const [cosFiles, setCosFiles] = useState<CosFile[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -134,7 +135,8 @@ export default function TaskResult() {
     setCosFiles([]);
     setFlameError('');
     setTopn([]);
-    setCollapsedText('');
+	    setCollapsedText('');
+	    setSvgMarkup('');
     setEBpfData(null);
     setEBpfLoading(false);
     setPprofCpuData(null);
@@ -188,10 +190,11 @@ export default function TaskResult() {
       try {
         const flameRes = await getFlameData(tid);
         setFlameError('');
-        if (flameRes.code === 0 && flameRes.data?.key) {
-          if (flameRes.data.type === 'svg') {
-            // COS 返回的 SVG 可能触发下载，不在 iframe 中渲染；继续走 collapsed/top.json 的 D3 渲染路径。
-          } else if (flameRes.data.type === 'json') {
+	        if (flameRes.code === 0 && flameRes.data?.key) {
+	          if (flameRes.data.type === 'svg') {
+	            const text = await fetchArtifactText(tid, flameRes.data.key);
+	            setSvgMarkup(typeof text === 'string' ? text : '');
+	          } else if (flameRes.data.type === 'json') {
             const data = await fetchArtifactJson<TopFunction[]>(tid, flameRes.data.key);
             setTopn(Array.isArray(data) ? data : []);
           } else if (flameRes.data.type === 'collapsed') {
@@ -429,8 +432,8 @@ export default function TaskResult() {
   const resourceSummary = resourceData?.summary || resourceData;
   const attributionEvidenceRows = useMemo(() => flattenAttributionEvidence(attributionEvidence), [attributionEvidence]);
   const expectedPanels = useMemo(() => expectedPanelsForTask(task), [task]);
-  const panelAvailable: Record<ResultPanelKey, boolean> = {
-    flame: Boolean(collapsedText || topn.length > 0),
+	  const panelAvailable: Record<ResultPanelKey, boolean> = {
+	    flame: Boolean(collapsedText || topn.length > 0 || svgMarkup),
     topn: topn.length > 0,
     suggestions: suggestions.length > 0 || attributionEvidenceRows.length > 0,
     ebpf: Boolean(eBpfData),
@@ -445,7 +448,7 @@ export default function TaskResult() {
     });
     keys.push('files');
     return keys;
-  }, [expectedPanels, panelAvailable.flame, panelAvailable.topn, panelAvailable.suggestions, panelAvailable.ebpf, panelAvailable.pprof, panelAvailable.memory]);
+	  }, [expectedPanels, panelAvailable.flame, panelAvailable.topn, panelAvailable.suggestions, panelAvailable.ebpf, panelAvailable.pprof, panelAvailable.memory]);
   useEffect(() => {
     if (!task) return;
     if (!visibleTabKeys.includes(activeTab)) {
@@ -671,12 +674,23 @@ export default function TaskResult() {
                   ),
                 },
                 ...(visiblePanel('flame') ? [{
-                  key: 'flame',
-                  label: '火焰图',
-                  children: (
-                    (topn.length > 0 || collapsedText) ? (
-                      <FlameGraph data={topn} collapsedText={collapsedText} width={900} height={400} />
-                    ) : (
+	                  key: 'flame',
+	                  label: task?.type === 1 ? 'Java 火焰图' : '火焰图',
+	                  children: (
+	                    (topn.length > 0 || collapsedText || svgMarkup) ? (
+	                      <div style={{ display: 'grid', gap: 14 }}>
+	                        {task?.type === 1 && (
+	                          <div style={{ padding: '12px 14px', borderRadius: 8, background: 'rgba(96,165,250,0.08)', border: '0.5px solid rgba(96,165,250,0.18)', color: 'rgba(255,255,255,0.68)', fontSize: 13 }}>
+	                            Java async-profiler 用户态栈视图 · event {params.event || 'cpu'} · collapsed stack · PID {params.pid || '-'}
+	                          </div>
+	                        )}
+	                        {collapsedText || topn.length > 0 ? (
+	                          <FlameGraph data={topn} collapsedText={collapsedText} width={900} height={400} />
+	                        ) : (
+	                          <div style={{ overflow: 'auto', background: '#fff', borderRadius: 8, padding: 8 }} dangerouslySetInnerHTML={{ __html: svgMarkup }} />
+	                        )}
+	                      </div>
+	                    ) : (
                       flameError ? (
                         <div style={{ padding: 60, textAlign: 'center' }}>
                           <div style={{ fontSize: 15, color: '#fbbf24' }}>火焰图加载失败</div>

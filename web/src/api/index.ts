@@ -15,6 +15,7 @@ import type {
   GroupMemberInfo,
   HotmethodTask,
   LLMSettings,
+  NaturalLanguageTaskResult,
   TaskStateHistory,
   TaskDetailData,
   TaskListData,
@@ -99,6 +100,8 @@ export const getAgentAuditLog = (params?: { ip?: string; limit?: number }) =>
 
 // Task
 export const createTask = (data: CreateTaskParams) => typedPost<{ tid: string }>('/tasks', data);
+export const createNaturalLanguageTask = (data: { text: string; target_ip?: string; pid?: number; execute?: boolean }) =>
+  typedPost<NaturalLanguageTaskResult>('/tasks/nl', data);
 export const getTasks = (params?: { page?: number; size?: number; status?: string; keyword?: string }) =>
   typedGet<TaskListData>('/tasks', params);
 export const getTaskDetail = (tid: string) => typedGet<TaskDetailData>(`/tasks/${tid}`);

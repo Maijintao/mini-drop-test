@@ -11,7 +11,7 @@ import (
 	pb "mini-drop/apiserver/proto"
 )
 
-// GRPCClient gRPC 客户端接口（方便 mock 测试）
+// GRPCClient gRPC 客户端接口，便于在测试中替换外部依赖。
 type GRPCClient interface {
 	CreateTask(ctx context.Context, req *pb.CreateTaskRequest) (*pb.CreateTaskResponse, error)
 	FetchData(ctx context.Context, req *pb.FetchDataRequest) (*pb.FetchDataResponse, error)

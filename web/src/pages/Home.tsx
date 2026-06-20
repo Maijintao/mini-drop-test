@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useGSAP } from '@gsap/react';
 import gsap from 'gsap';
 import { createTask, createContinuousTask, getAgents, getTasks } from '@/api';
-import type { AgentInfo, CreateContinuousParams, CreateTaskParams, HotmethodTask } from '@/domain';
+import type { AgentInfo, CreateContinuousParams, CreateTaskParams, HotmethodTask, NaturalLanguageTaskPlan, TaskCreateMode } from '@/domain';
 import { formatDate, formatRelativeTime, statusMap } from '@/domain';
 import { createTaskPoller } from '@/taskPolling';
 import CreateTaskModal from '@/components/CreateTaskModal';
@@ -48,12 +48,12 @@ export default function Home() {
     subprocess: true,
     event: 'cpu-cycles',
   });
-  const [taskMode, setTaskMode] = useState<'oneshot' | 'continuous'>('oneshot');
+  const [taskMode, setTaskMode] = useState<TaskCreateMode>('oneshot');
   const [continuousForm, setContinuousForm] = useState<CreateContinuousParams>({
     target_ip: '',
     pid: 0,
     hz: 10,
-    window_sec: 15,
+    window_sec: 300,
     callgraph: 'dwarf',
   });
 
@@ -104,7 +104,7 @@ export default function Home() {
         name: form.name || `常驻采集 - ${continuousForm.target_ip}`,
         pid: Number(continuousForm.pid),
         hz: Number(continuousForm.hz || 10),
-        window_sec: Number(continuousForm.window_sec || 15),
+        window_sec: Number(continuousForm.window_sec || 300),
       };
       const res = await createContinuousTask(payload);
       if (res.code !== 0) throw new Error(res.message || '创建常驻任务失败');
@@ -153,6 +153,11 @@ export default function Home() {
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const handleNaturalLanguageCreated = (tid: string, plan: NaturalLanguageTaskPlan) => {
+    setShowCreate(false);
+    navigate(plan.mode === 'continuous' ? `/continuous?tid=${tid}` : `/task/result?tid=${tid}`);
   };
 
   return (
@@ -377,6 +382,7 @@ export default function Home() {
           continuousForm={continuousForm}
           onContinuousChange={(patch) => setContinuousForm(prev => ({ ...prev, ...patch }))}
           onContinuousSubmit={handleContinuousSubmit}
+          onNaturalLanguageCreated={handleNaturalLanguageCreated}
         />
       )}
     </div>

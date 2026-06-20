@@ -1,18 +1,21 @@
-import type { AgentInfo, CreateContinuousParams, CreateTaskParams } from '@/domain';
+import { useState } from 'react';
+import { createNaturalLanguageTask } from '@/api';
+import type { AgentInfo, CreateContinuousParams, CreateTaskParams, NaturalLanguageTaskPlan, TaskCreateMode } from '@/domain';
 
 interface CreateTaskModalProps {
   agents: AgentInfo[];
   form: CreateTaskParams;
   submitting: boolean;
   title?: string;
-  mode?: 'oneshot' | 'continuous';
+  mode?: TaskCreateMode;
   onChange: (patch: Partial<CreateTaskParams>) => void;
   onCancel: () => void;
   onSubmit: () => void;
-  onModeChange?: (mode: 'oneshot' | 'continuous') => void;
+  onModeChange?: (mode: TaskCreateMode) => void;
   continuousForm?: CreateContinuousParams;
   onContinuousChange?: (patch: Partial<CreateContinuousParams>) => void;
   onContinuousSubmit?: () => void;
+  onNaturalLanguageCreated?: (tid: string, plan: NaturalLanguageTaskPlan) => void;
 }
 
 const panelStyle: React.CSSProperties = {
@@ -85,17 +88,50 @@ export default function CreateTaskModal({
   continuousForm,
   onContinuousChange,
   onContinuousSubmit,
+  onNaturalLanguageCreated,
 }: CreateTaskModalProps) {
+  const [nlText, setNlText] = useState('');
+  const [nlPlan, setNlPlan] = useState<NaturalLanguageTaskPlan | null>(null);
+  const [nlError, setNlError] = useState('');
+  const [nlSubmitting, setNlSubmitting] = useState(false);
   const onlineAgents = agents.filter(agent => agent.online);
   const isContinuous = mode === 'continuous';
+  const isNatural = mode === 'natural';
 
   // N21: 范围校验 — pid>0, duration 1~3600, hz 1~1000
   const pidValid = form.pid > 0 && Number.isInteger(form.pid);
   const durationValid = form.duration >= 1 && form.duration <= 3600;
   const hzValid = !form.hz || (form.hz >= 1 && form.hz <= 1000);
-  const canSubmit = isContinuous
+  const canSubmit = isNatural
+    ? Boolean(nlText.trim() && !submitting && !nlSubmitting)
+    : isContinuous
     ? Boolean(continuousForm?.target_ip && pidValid && hzValid && !submitting)
     : Boolean(form.target_ip && pidValid && durationValid && hzValid && !submitting);
+
+  const handleNaturalLanguage = async (execute: boolean) => {
+    if (!nlText.trim()) return;
+    setNlSubmitting(true);
+    setNlError('');
+    try {
+      const res = await createNaturalLanguageTask({
+        text: nlText,
+        target_ip: form.target_ip || undefined,
+        pid: form.pid || undefined,
+        execute,
+      });
+      const plan = res.data?.plan;
+      if (plan) setNlPlan(plan);
+      if (res.code !== 0) throw new Error(res.message || plan?.clarifying_question || '自然语言采集失败');
+      const tid = res.data?.tid;
+      if (execute && tid && plan) onNaturalLanguageCreated?.(tid, plan);
+    } catch (e: any) {
+      const plan = e?.response?.data?.data?.plan as NaturalLanguageTaskPlan | undefined;
+      if (plan) setNlPlan(plan);
+      setNlError(e?.response?.data?.message || e?.message || '自然语言采集失败');
+    } finally {
+      setNlSubmitting(false);
+    }
+  };
 
   return (
     <div
@@ -126,8 +162,8 @@ export default function CreateTaskModal({
         }}>
           <div>
             <h3 style={{ fontSize: 18, lineHeight: 1.2, fontWeight: 700, color: '#fff', margin: '0 0 6px' }}>{title}</h3>
-            <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.42)' }}>
-              {isContinuous ? '常驻低频采样，定时切割窗口，按时间轴回溯。' : '选择在线 Agent，配置采样目标和采集参数。'}
+	            <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.42)' }}>
+	              {isNatural ? '用一句话描述采集意图，系统会识别工具、参数和缺失信息。' : isContinuous ? '常驻低频采样，定时切割窗口，按时间轴回溯。' : '选择在线 Agent，配置采样目标和采集参数。'}
             </div>
           </div>
           <button
@@ -153,7 +189,7 @@ export default function CreateTaskModal({
           {/* 模式切换 */}
           {onModeChange && (
             <div style={{ display: 'flex', gap: 8 }}>
-              {(['oneshot', 'continuous'] as const).map(m => (
+	              {(['oneshot', 'continuous', 'natural'] as const).map(m => (
                 <button
                   key={m}
                   onClick={() => onModeChange(m)}
@@ -168,14 +204,48 @@ export default function CreateTaskModal({
                     fontSize: 13,
                   }}
                 >
-                  {m === 'oneshot' ? '单次采集' : '常驻采集'}
-                </button>
-              ))}
-            </div>
-          )}
+	                  {m === 'oneshot' ? '单次采集' : m === 'continuous' ? '常驻采集' : '自然语言'}
+	                </button>
+	              ))}
+	            </div>
+	          )}
 
-          <div style={sectionStyle}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 14 }}>
+	          {isNatural ? (
+	            <div style={sectionStyle}>
+	              <Field label="采集意图">
+	                <textarea
+	                  value={nlText}
+	                  onChange={(event) => setNlText(event.target.value)}
+	                  placeholder="例: 过去一小时 pid 1234 CPU 飙高，帮我持续观察；或 pid 1234 IO 延迟，用 eBPF sched 采 30 秒"
+	                  style={{ ...fieldStyle, height: 96, paddingTop: 10, resize: 'vertical', lineHeight: 1.5 }}
+	                />
+	              </Field>
+	              <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+	                <button
+	                  onClick={() => handleNaturalLanguage(false)}
+	                  disabled={!nlText.trim() || nlSubmitting}
+	                  style={{ padding: '7px 13px', borderRadius: 8, border: '0.5px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.04)', color: 'rgba(255,255,255,0.62)', cursor: nlText.trim() && !nlSubmitting ? 'pointer' : 'not-allowed', fontWeight: 600 }}
+	                >
+	                  解析
+	                </button>
+	              </div>
+	              {nlError && (
+	                <div style={{ marginTop: 10, color: '#fbbf24', fontSize: 12 }}>{nlError}</div>
+	              )}
+	              {nlPlan && (
+	                <div style={{ marginTop: 14, display: 'grid', gap: 8, color: 'rgba(255,255,255,0.58)', fontSize: 12 }}>
+	                  <div style={{ color: '#fff', fontWeight: 700 }}>{nlPlan.name} · {nlPlan.mode === 'continuous' ? '常驻采集' : '单次采集'}</div>
+	                  <div>Agent {nlPlan.target_ip || '-'} / PID {nlPlan.pid || '-'} / 类型 {nlPlan.type} / 采集器 {nlPlan.profiler_type} / event {nlPlan.event || '-'}</div>
+	                  <div>{nlPlan.mode === 'continuous' ? `窗口 ${nlPlan.window_sec || 300}s @ ${nlPlan.hz}Hz` : `时长 ${nlPlan.duration}s @ ${nlPlan.hz}Hz`}</div>
+	                  {nlPlan.rationale?.length > 0 && <div>{nlPlan.rationale.join('；')}</div>}
+	                  {nlPlan.clarifying_question && <div style={{ color: '#fbbf24' }}>{nlPlan.clarifying_question}</div>}
+	                </div>
+	              )}
+	            </div>
+	          ) : (
+	          <>
+	          <div style={sectionStyle}>
+	            <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 14 }}>
               <Field label="任务名称">
                 <input
                   value={form.name}
@@ -215,7 +285,7 @@ export default function CreateTaskModal({
             )}
           </div>
 
-          <div style={sectionStyle}>
+	          <div style={sectionStyle}>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
               <Field label="采集类型">
                 <select
@@ -260,8 +330,8 @@ export default function CreateTaskModal({
                   style={fieldStyle}
                 />
               </Field>
-            </div>
-          </div>
+		          </div>
+	          </div>
 
           <div style={sectionStyle}>
             <div style={{ display: 'grid', gridTemplateColumns: isContinuous ? 'repeat(3, 1fr)' : 'repeat(3, 1fr)', gap: 14 }}>
@@ -272,7 +342,7 @@ export default function CreateTaskModal({
                       type="number"
                       min={15}
                       max={3600}
-                      value={continuousForm?.window_sec || 15}
+	                      value={continuousForm?.window_sec || 300}
                       onChange={(event) => onContinuousChange?.({ window_sec: Math.max(15, Math.min(3600, Math.floor(Number(event.target.value)))) })}
                       style={{ ...fieldStyle, paddingRight: 38 }}
                     />
@@ -336,9 +406,11 @@ export default function CreateTaskModal({
 	                    <option value="sched" style={{ background: '#151515' }}>Scheduler latency</option>
 	                  </select>
 	                </Field>
-	              )}
-	            </div>
-	          </div>
+		              )}
+		            </div>
+		            </div>
+		          </>
+		          )}
         </div>
 
         <div style={{
@@ -369,7 +441,7 @@ export default function CreateTaskModal({
             </button>
             <button
               disabled={!canSubmit}
-              onClick={isContinuous ? onContinuousSubmit : onSubmit}
+	              onClick={isNatural ? () => handleNaturalLanguage(true) : isContinuous ? onContinuousSubmit : onSubmit}
               style={{
                 padding: '9px 18px',
                 background: canSubmit ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.04)',
@@ -380,8 +452,8 @@ export default function CreateTaskModal({
                 fontWeight: 700,
               }}
             >
-              {submitting ? '创建中...' : (isContinuous ? '启动常驻采集' : '创建任务')}
-            </button>
+	              {submitting || nlSubmitting ? '创建中...' : (isNatural ? '按意图创建' : isContinuous ? '启动常驻采集' : '创建任务')}
+	            </button>
           </div>
         </div>
       </div>

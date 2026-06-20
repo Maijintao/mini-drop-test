@@ -373,18 +373,25 @@ def build_attribution_evidence(
     started_at = _utc_timestamp()
     calls = []
 
-    def call_tool(name: str, payload: Any) -> Any:
+    def call_tool(name: str, arguments: dict, payload: Any) -> Any:
+        evidence_ids = _extract_evidence_ids(payload)
         calls.append({
+            "tool_call_id": f"tc_{len(calls) + 1}",
             "tool": name,
+            "executor": "local_deterministic_tool",
             "called_at": _utc_timestamp(),
+            "arguments": arguments,
+            "status": "ok",
             "result_count": len(payload) if isinstance(payload, list) else 1,
+            "evidence_ids": evidence_ids,
+            "result": payload,
         })
         return payload
 
     total_samples = stats.get("total_samples", 0)
     concentration = stats.get("concentration", {})
 
-    metadata = call_tool("read_collection_metadata", {
+    metadata = call_tool("read_collection_metadata", {"tid": tid}, {
         "evidence_id": "E1",
         "tid": tid,
         "pid": task_meta.get("pid", "N/A"),
@@ -407,7 +414,7 @@ def build_attribution_evidence(
             "total": item.get("total", 0),
             "self_pct": round(pct, 2),
         })
-    topn_payload = call_tool("read_topn_hotspots", topn_payload)
+    topn_payload = call_tool("read_topn_hotspots", {"limit": 15}, topn_payload)
 
     hot_paths = []
     for i, hp in enumerate(stats.get("hot_paths", [])[:5], 1):
@@ -419,9 +426,9 @@ def build_attribution_evidence(
             "frames": hp.get("frames", []),
             "stack_tail": hp.get("frames", [])[-5:],
         })
-    hot_paths = call_tool("read_hot_paths", hot_paths)
+    hot_paths = call_tool("read_hot_paths", {"limit": 5}, hot_paths)
 
-    concentration_payload = call_tool("read_concentration", {
+    concentration_payload = call_tool("read_concentration", {"stats": ["top_pct", "gini"]}, {
         "evidence_id": "E4",
         "total_samples": total_samples,
         "total_functions": stats.get("total_functions", 0),
@@ -440,7 +447,7 @@ def build_attribution_evidence(
             "total": s.get("total", 0),
             "advice": s.get("advice") or s.get("suggestion", ""),
         })
-    rules = call_tool("read_rule_hits", rules)
+    rules = call_tool("read_rule_hits", {"limit": 10}, rules)
 
     evidence = {
         "schema_version": 1,
@@ -458,11 +465,28 @@ def build_attribution_evidence(
     tool_calls = {
         "schema_version": 1,
         "tid": tid,
-        "llm_visibility": "LLM prompt is built only from the following local tool outputs.",
+        "llm_visibility": "LLM prompt is built only from the following local tool call results.",
+        "tool_call_policy": "LLM cannot access raw profiles, source code, host metrics, network, or external tools. It can only cite evidence returned by these local deterministic tools.",
         "available_tools": ATTRIBUTION_TOOL_SCHEMA,
         "calls": calls,
     }
     return evidence, tool_calls
+
+
+def _extract_evidence_ids(payload: Any) -> list[str]:
+    ids: list[str] = []
+    def visit(value: Any):
+        if isinstance(value, dict):
+            evidence_id = value.get("evidence_id")
+            if isinstance(evidence_id, str) and evidence_id not in ids:
+                ids.append(evidence_id)
+            for item in value.values():
+                visit(item)
+        elif isinstance(value, list):
+            for item in value:
+                visit(item)
+    visit(payload)
+    return ids
 
 
 def _build_attribution_prompt(
@@ -482,7 +506,7 @@ def _build_attribution_prompt(
         "2. 只基于工具输出做判断，不能编造未给出的代码、业务背景或指标\n"
         "3. 无法确认时明确写'需要代码/运行时证据确认'\n\n"
         f"任务ID: {tid}\n\n"
-        "## 可调用工具与调用记录\n"
+        "## 可调用工具与调用记录（已执行的本地工具调用）\n"
         f"```json\n{calls_json}\n```\n\n"
         "## 工具返回的证据 JSON\n"
         f"```json\n{evidence_json}\n```\n\n"

@@ -12,6 +12,7 @@ export default function ContinuousTimeline() {
   const [selected, setSelected] = useState<ContinuousWindow | null>(null);
   const [collapsedText, setCollapsedText] = useState('');
   const [topn, setTopn] = useState<TopFunction[]>([]);
+  const [svgMarkup, setSvgMarkup] = useState('');
   const [flameError, setFlameError] = useState('');
   const [loading, setLoading] = useState(false);
   const [stopping, setStopping] = useState(false);
@@ -55,12 +56,14 @@ export default function ContinuousTimeline() {
     if (!selected || !selected.cos_key) {
       setCollapsedText('');
       setTopn([]);
+      setSvgMarkup('');
       setFlameError('');
       return;
     }
     if (selected.status !== 1) {
       setCollapsedText('');
       setTopn([]);
+      setSvgMarkup('');
       setFlameError(selected.status === 2 ? '该窗口采集失败' : '该窗口仍在采集中');
       return;
     }
@@ -68,6 +71,7 @@ export default function ContinuousTimeline() {
     setLoading(true);
     setCollapsedText('');
     setTopn([]);
+    setSvgMarkup('');
     setFlameError('');
     getFlameData(selected.window_tid)
       .then(async (res) => {
@@ -82,8 +86,11 @@ export default function ContinuousTimeline() {
         } else if (res.data.type === 'json') {
           const data = await fetchArtifactJson<TopFunction[]>(selected.window_tid, res.data.key);
           if (!cancelled) setTopn(Array.isArray(data) ? data : []);
+        } else if (res.data.type === 'svg') {
+          const text = await fetchArtifactText(selected.window_tid, res.data.key);
+          if (!cancelled) setSvgMarkup(typeof text === 'string' ? text : '');
         } else {
-          setFlameError('当前只有 SVG 下载产物，暂无可直接渲染的 collapsed/top 数据');
+          setFlameError('该窗口暂无可直接渲染的火焰图数据');
         }
       })
       .catch((e) => {
@@ -113,6 +120,25 @@ export default function ContinuousTimeline() {
     setIsFiltering(true);
   };
 
+  const handleLastFiveMinutes = () => {
+    const end = new Date();
+    const start = new Date(end.getTime() - 5 * 60 * 1000);
+    setFromTime(toDateTimeLocalValue(start));
+    setToTime(toDateTimeLocalValue(end));
+    setSelected(null);
+    setIsFiltering(true);
+  };
+
+  const handleFiveMinuteWindow = () => {
+    if (!toTime) return;
+    const end = new Date(toTime);
+    if (Number.isNaN(end.getTime())) return;
+    const start = new Date(end.getTime() - 5 * 60 * 1000);
+    setFromTime(toDateTimeLocalValue(start));
+    setSelected(null);
+    setIsFiltering(true);
+  };
+
   const handleReset = () => {
     setFromTime('');
     setToTime('');
@@ -126,6 +152,11 @@ export default function ContinuousTimeline() {
     } catch {
       return ts;
     }
+  };
+
+  const toDateTimeLocalValue = (date: Date) => {
+    const pad = (value: number) => String(value).padStart(2, '0');
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
   };
 
   return (
@@ -167,12 +198,12 @@ export default function ContinuousTimeline() {
             </button>
           </div>
 
-          {/* 时间范围搜索 */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {/* 时间范围搜索 */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)', fontWeight: 600 }}>
               按时间范围查询
             </div>
-            <input
+                <input
               type="datetime-local"
               value={fromTime}
               onChange={(e) => setFromTime(e.target.value)}
@@ -207,8 +238,24 @@ export default function ContinuousTimeline() {
                 outline: 'none',
                 boxSizing: 'border-box',
               }}
-            />
-            <div style={{ display: 'flex', gap: 6 }}>
+                />
+                <button
+                  onClick={handleFiveMinuteWindow}
+                  disabled={!toTime}
+                  style={{
+                    height: 28,
+                    borderRadius: 6,
+                    border: '0.5px solid rgba(255,255,255,0.08)',
+                    background: toTime ? 'rgba(255,255,255,0.055)' : 'rgba(255,255,255,0.03)',
+                    color: toTime ? 'rgba(255,255,255,0.62)' : 'rgba(255,255,255,0.3)',
+                    cursor: toTime ? 'pointer' : 'not-allowed',
+                    fontSize: 11,
+                    fontWeight: 600,
+                  }}
+                >
+                  取结束前 5 分钟
+                </button>
+                <div style={{ display: 'flex', gap: 6 }}>
               <button
                 onClick={handleSearch}
                 disabled={!fromTime && !toTime}
@@ -244,8 +291,23 @@ export default function ContinuousTimeline() {
                   重置
                 </button>
               )}
-            </div>
-            {isFiltering && (
+                </div>
+                <button
+                  onClick={handleLastFiveMinutes}
+                  style={{
+                    height: 28,
+                    borderRadius: 6,
+                    border: '0.5px solid rgba(96,165,250,0.28)',
+                    background: 'rgba(96,165,250,0.08)',
+                    color: '#93c5fd',
+                    cursor: 'pointer',
+                    fontSize: 11,
+                    fontWeight: 600,
+                  }}
+                >
+                  最近 5 分钟
+                </button>
+                {isFiltering && (
               <div style={{ fontSize: 10, color: 'rgba(96,165,250,0.6)', textAlign: 'center' }}>
                 已启用时间过滤，自动轮询已暂停
               </div>
@@ -320,6 +382,8 @@ export default function ContinuousTimeline() {
                 </div>
               ) : collapsedText || topn.length > 0 ? (
                 <FlameGraph collapsedText={collapsedText} data={topn} />
+              ) : svgMarkup ? (
+                <div style={{ overflow: 'auto', background: '#fff', borderRadius: 8, margin: 12, padding: 8 }} dangerouslySetInnerHTML={{ __html: svgMarkup }} />
               ) : (
                 <div style={{ padding: 40, textAlign: 'center', color: 'rgba(255,255,255,0.3)' }}>
                   {flameError || '该窗口暂无火焰图数据'}
