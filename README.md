@@ -2,6 +2,43 @@
 
 一站式性能分析平台：Agent 采集 → Server 调度 → Analyzer 分析 → Web 可视化火焰图/热点/AI 归因
 
+## 一键部署
+
+```bash
+# 1. 克隆仓库
+cd ~
+git clone https://github.com/Maijintao/mini-drop-test mini-drop-test
+cd mini-drop-test
+
+# 2. 写入镜像配置（国内加速源）
+printf '%s\n' \
+  'DROP_IMAGE=docker.1ms.run/maijintao/mini-drop-drop:latest' \
+  'APISERVER_IMAGE=docker.1ms.run/maijintao/mini-drop-apiserver:latest' \
+  'ANALYSIS_IMAGE=docker.1ms.run/maijintao/mini-drop-analysis:latest' \
+  'WEB_IMAGE=docker.1ms.run/maijintao/mini-drop-web:latest' \
+  'POSTGRES_IMAGE=docker.1ms.run/library/postgres:14' \
+  'MINIO_IMAGE=quay.io/minio/minio:latest' > .env
+
+# 3. 开启 perf 权限
+sudo sysctl kernel.perf_event_paranoid=1
+
+# 4. 拉取镜像并启动
+sudo docker compose -f docker-compose.release.yml pull
+sudo docker compose -f docker-compose.release.yml up -d
+sudo docker compose -f docker-compose.release.yml ps
+```
+
+启动后访问 `http://<服务器IP>`（端口 80 自动映射），首次使用在登录页注册账号即可。
+
+## 全功能验收脚本
+
+```bash
+chmod +x scripts/run_all_features.sh scripts/demo_full_matrix.sh
+./scripts/run_all_features.sh <服务器IP>
+```
+
+该脚本会自动验收全部 13 个测试点：8 种采集任务 + 3 个自然语言 Plan + 1 个自然语言任务 + 1 个 Continuous Profiling。全部通过输出 `ALL PASS`。
+
 ## 架构
 
 ```
